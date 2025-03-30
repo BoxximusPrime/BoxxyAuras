@@ -27,8 +27,17 @@ end
 
 -- Create the main addon frame
 local mainFrame = CreateFrame("Frame", "BoxxyAurasMainFrame", UIParent) -- No template needed now
-mainFrame:SetSize(300, 100) -- Initial size, can be adjusted
-mainFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 150) -- Positioned higher up
+local defaultMainFrameSettings = { -- Define defaults
+    x = 0,
+    y = 150,
+    anchor = "CENTER",
+    width = 300,
+    height = 100
+}
+
+-- Don't set size/position here initially, do it after loading settings
+-- mainFrame:SetSize(300, 100) 
+-- mainFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 150) 
 
 -- Remove old backdrop setup
 --[[ mainFrame:SetBackdrop(
@@ -270,19 +279,25 @@ mainFrame:SetScript("OnUpdate", function(self, elapsed)
         end
     else
         -- Button is up, stop dragging
+        print("DEBUG Save: OnUpdate Resize - Left mouse button released.") -- Added Debug
         local stoppedHandle = draggingHandle 
         draggingHandle = nil 
         if handles[stoppedHandle] then
             handles[stoppedHandle].bg:Hide() 
         end
         self:StopMovingOrSizing() 
-        -- TODO: Save new size/pos potentially here
-        -- local finalW, finalH = self:GetSize()
-        -- local finalX, finalY = self:GetLeft(), self:GetTop()
-        -- Save finalW, finalH, finalX, finalY in SavedVariables
-
-        -- Final layout update after drag finishes
-        LayoutAuras()
+        
+        -- Save new size/pos after resizing
+        local finalW, finalH = self:GetSize()
+        local finalX, finalY = self:GetLeft(), self:GetTop()
+            
+        if BoxxyAurasDB and BoxxyAurasDB.mainFrameSettings then
+             BoxxyAurasDB.mainFrameSettings.width = finalW
+             BoxxyAurasDB.mainFrameSettings.height = finalH
+             BoxxyAurasDB.mainFrameSettings.x = finalX
+             BoxxyAurasDB.mainFrameSettings.y = finalY
+             BoxxyAurasDB.mainFrameSettings.anchor = "TOPLEFT" -- Position is now saved relative to TOPLEFT
+        end
     end
 end)
 
@@ -372,10 +387,6 @@ local function InitializeAuras()
 
     -- 7. Layout the visible icons
     LayoutAuras()
-
-    C_Timer.After(0.05, function() 
-        UpdateAuras() -- Pass true to indicate it's from OnLeave
-    end)
 end
 
 -- Function to update displayed auras using cache comparison and stable order
@@ -566,6 +577,31 @@ eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     local unit = (...)
     if event == "PLAYER_LOGIN" then
+        -- Initialize Saved Variables
+        if BoxxyAurasDB == nil then BoxxyAurasDB = {} end
+        if BoxxyAurasDB.mainFrameSettings == nil then 
+            BoxxyAurasDB.mainFrameSettings = CopyTable(defaultMainFrameSettings)
+        end
+        -- Ensure all keys exist, applying defaults if needed (prevents errors after adding new settings)
+        for key, defaultValue in pairs(defaultMainFrameSettings) do
+            if BoxxyAurasDB.mainFrameSettings[key] == nil then
+                BoxxyAurasDB.mainFrameSettings[key] = defaultValue
+            end
+        end
+
+        -- Load and Apply Settings
+        local settings = BoxxyAurasDB.mainFrameSettings
+        mainFrame:SetSize(settings.width, settings.height)
+        mainFrame:ClearAllPoints()
+        if settings.anchor == "CENTER" then
+            mainFrame:SetPoint("CENTER", UIParent, "CENTER", settings.x, settings.y)
+        else -- Assume TOPLEFT if not CENTER
+             mainFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", settings.x, settings.y)
+        end
+        UpdateEdgeHandleDimensions(settings.width, settings.height) -- Update handles based on loaded size
+        LayoutAuras() -- Perform layout after setting size/pos
+        
+        -- Schedule Initial Aura Load
         C_Timer.After(0.2, InitializeAuras) 
     elseif event == "UNIT_AURA" and unit == "player" then
         -- Re-enabled: Always schedule update on UNIT_AURA
@@ -624,8 +660,6 @@ end
 
 -- Start the polling timer
 C_Timer.NewTicker(0.2, BoxxyAuras.PollMouseOverState) -- Check every 0.2 seconds
-
-print("BoxxyAuras loaded!") 
 
 -- Tooltip Scraping Function (Using GetUnitAura, finds index via auraInstanceID)
 function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter) 

@@ -3,6 +3,7 @@
 ## Author: Your Name
 ## Version: 1.0.0
 ## Notes: Displays player buffs and debuffs.
+## SavedVariables: BoxxyAurasDB
 
 UIUtils.lua
 AuraIcon.lua
