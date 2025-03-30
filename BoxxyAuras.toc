@@ -1,0 +1,9 @@
+## Interface: 100207
+## Title: BoxxyAuras
+## Author: Your Name
+## Version: 1.0.0
+## Notes: Displays player buffs and debuffs.
+
+UIUtils.lua
+AuraIcon.lua
+BoxxyAuras.lua 
