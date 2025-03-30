@@ -604,10 +604,6 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
     -- 9. Layout BOTH frames
     LayoutAuras(buffDisplayFrame, buffIcons)
     LayoutAuras(debuffDisplayFrame, debuffIcons)
-
-    C_Timer.After(0.05, function() 
-        BoxxyAuras.UpdateAuras() -- Pass true to indicate it's from OnLeave
-    end)
 end
 
 -- Event handling frame
@@ -728,21 +724,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
     end
 end)
 
--- New ticker function to update duration displays
-local function UpdateAllDurationDisplays()
-    local currentTime = GetTime()
-    for _, icon in ipairs(buffIcons) do
-        icon:UpdateDurationDisplay(currentTime)
-    end
-    for _, icon in ipairs(debuffIcons) do
-        icon:UpdateDurationDisplay(currentTime)
-    end
-end
-
--- Create a ticker to call the new duration update function
-C_Timer.NewTicker(0.25, UpdateAllDurationDisplays) -- Increased interval from 0.1
-
--- Re-enabled Generalized polling function for mouse hover state 
+-- Re-enabled Generalized polling function for mouse hover state
 BoxxyAuras.PollFrameHoverState = function(frame, frameDesc) -- Make it part of the addon table
     if not frame then return end -- Safety check
     

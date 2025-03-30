@@ -72,8 +72,9 @@ function AuraIcon.New(parentFrame, index, baseName)
 
     -- Set scripts on the frame, referencing methods via AuraIcon
     instance.frame:SetScript("OnLeave", function(frame_self) AuraIcon.OnLeave(instance) end)
-    -- Need OnEnter set later in Update method
-
+    -- OnEnter set later in Update method
+    -- OnUpdate set later in Update method based on duration
+    
     instance.frame:Hide()
 
     -- Set metatable on the instance table
@@ -94,6 +95,8 @@ end
 function AuraIcon.Update(self, auraData, auraIndex, auraType)
     if not auraData then
         self.frame:Hide()
+        -- Clear OnUpdate if hiding
+        self.frame:SetScript("OnUpdate", nil)
         return
     end
     -- Reset state for update
@@ -138,6 +141,19 @@ function AuraIcon.Update(self, auraData, auraIndex, auraType)
     -- Set OnEnter script referencing the instance
     self.frame:SetScript("OnEnter", function(frame_self) AuraIcon.OnEnter(self) end)
 
+    -- Set or clear OnUpdate based on duration
+    if self.duration and self.duration > 0 then
+        self.frame:SetScript("OnUpdate", function(frame_self, elapsed) 
+            -- Call UpdateDurationDisplay directly (it checks IsShown)
+            AuraIcon.UpdateDurationDisplay(self, GetTime())
+        end)
+    else
+        -- No duration, clear the script
+        self.frame:SetScript("OnUpdate", nil)
+        -- Ensure duration text is hidden for permanent auras
+        self.frame.durationText:Hide()
+    end
+
     self.frame:Show()
 end
 
@@ -175,8 +191,10 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
             if isHoveringParent then -- Keep showing 0s text if mouse is over
                 currentFormattedText = "0s" 
                 showText = true
-            else -- Hide text if mouse not over
+            else -- Hide text if mouse not over AND disable OnUpdate
                 showText = false
+                -- Stop running OnUpdate once expired and not hovered
+                self.frame:SetScript("OnUpdate", nil)
             end
         end
 
@@ -215,6 +233,10 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
         if self.lastIsExpiredState then
              if self.textureWidget then self.textureWidget:SetVertexColor(1, 1, 1) end
              self.lastIsExpiredState = false -- Reset state
+        end
+        -- Make sure OnUpdate is nil for permanent auras (already done in Update, but belt-and-suspenders)
+        if self.frame:GetScript("OnUpdate") then 
+            self.frame:SetScript("OnUpdate", nil) 
         end
     end
 end
