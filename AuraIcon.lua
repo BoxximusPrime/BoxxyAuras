@@ -149,7 +149,7 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
 
     -- Debug Check (Should pass now if self.frame exists)
     if type(self.frame) ~= "table" or not self.frame.GetObjectType or self.frame:GetObjectType() ~= "Frame" then
-        print(string.format("|cffff0000Warning: UpdateDurationDisplay found unexpected self.frame! Type: %s, GetObjectType: %s|r", 
+        print(string.format("|cffff0000Warning: UpdateDurationDisplay found unexpected self.frame! Type: %s, GetObjectType: %s|r",
             type(self.frame), 
             (type(self.frame) == "table" and self.frame.GetObjectType and self.frame:GetObjectType()) or "N/A"
         ))
@@ -184,11 +184,9 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
         -- Update Text ONLY if changed or visibility changed
         if currentFormattedText ~= self.lastFormattedDurationText or showText ~= self.frame.durationText:IsShown() then
             if showText then
-                -- print(string.format("DEBUG Duration: Update Text - %s (%s)", self.name, currentFormattedText)) -- Optional Debug
                 self.frame.durationText:SetText(currentFormattedText)
                 self.frame.durationText:Show()
             else
-                -- print(string.format("DEBUG Duration: Hide Text - %s", self.name)) -- Optional Debug
                 self.frame.durationText:Hide()
             end
             self.lastFormattedDurationText = currentFormattedText -- Store new text state
@@ -198,10 +196,8 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
         if currentIsExpired ~= self.lastIsExpiredState then
              if self.textureWidget then
                  if applyTint then -- Expired
-                     -- print(string.format("DEBUG Duration: Update Tint RED - %s", self.name)) -- Optional Debug
                      self.textureWidget:SetVertexColor(1, 0.5, 0.5)
                  else -- Active
-                     -- print(string.format("DEBUG Duration: Update Tint WHITE - %s", self.name)) -- Optional Debug
                      self.textureWidget:SetVertexColor(1, 1, 1) 
                  end
              end
@@ -254,7 +250,6 @@ function AuraIcon.OnEnter(self)
         end)
 
     elseif not isPermanent and remaining <= 0 then -- If expired but held
-        print(string.format("DEBUG OnEnter Expired: Checking cache with self.auraKey = %s", tostring(self.auraKey)))
         local auraInfo = self.auraKey and Addon.AllAuras[self.auraKey]
 
         local function ShowExpiredTooltip(finalCheckInfo)
@@ -267,18 +262,19 @@ function AuraIcon.OnEnter(self)
             -- Check if the INNER lines table exists and has lines
             if displayInfo and type(displayInfo.lines) == "table" and #displayInfo.lines > 0 then
                 -- Use cached lines from global cache (accessing displayInfo.lines)
-                print(string.format("DEBUG OnEnter Expired: Using global cache for key: %s (%d lines from displayInfo.lines)", tostring(self.auraKey), #displayInfo.lines))
                 GameTooltip:ClearLines() -- Clear potentially stale lines
                 -- Iterate over displayInfo.lines
-                for _, line in ipairs(displayInfo.lines) do 
-                    GameTooltip:AddLine(line, 1, 1, 1, true)
+                for idx, line in ipairs(displayInfo.lines) do 
+                    if idx == 1 then
+                        -- First line (Spell Name) - Color it yellow/gold
+                        GameTooltip:AddLine(line, 1, 0.82, 0, true) -- RGB for goldish yellow
+                    else
+                        -- Subsequent lines - Default color (white)
+                        GameTooltip:AddLine(line, 1, 1, 1, true)
+                    end
                 end
             else
                 -- Fallback if no lines found after check/delay
-                print(string.format("DEBUG OnEnter Expired: Fallback after check/delay for key: %s (Info found: %s, Valid Lines: %s)", 
-                    tostring(self.auraKey), 
-                    tostring(displayInfo ~= nil), 
-                    tostring(displayInfo and type(displayInfo.lines) == "table" and #displayInfo.lines > 0)))
                 GameTooltip:ClearLines()
                 -- Fallback uses self.name, or the stored name if available
                 local fallbackName = (displayInfo and displayInfo.name) or self.name or "Unknown Expired Aura"
@@ -292,11 +288,9 @@ function AuraIcon.OnEnter(self)
         -- Check if cache is ready immediately (checking displayInfo.lines)
         if auraInfo and type(auraInfo.lines) == "table" and #auraInfo.lines > 0 then
             -- Cache ready immediately
-            print("DEBUG OnEnter Expired: Cache ready immediately.")
             ShowExpiredTooltip() -- Call directly, passing current (good) auraInfo implicitly
         else
             -- Cache not ready (nil or not a table/empty) - wait briefly
-            print("DEBUG OnEnter Expired: Cache not ready, scheduling check.")
             -- Set a minimal tooltip initially to prevent flicker? 
             GameTooltip:ClearLines()
             GameTooltip:AddLine(self.name or "...", 1, 1, 1, true) -- Placeholder
