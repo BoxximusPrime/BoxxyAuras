@@ -31,6 +31,17 @@ local FrameTextures =
         file = "EdgedBorder",
         cornerSize = 12,
         cornerCoord = 0.25,
+    },
+    -- Add Keys for Buff/Debuff Display Frame Backdrops
+    BuffFrameHoverBG = { 
+        file = "SelectionBox", -- Reuse SelectionBox texture
+        cornerSize = 12,
+        cornerCoord = 0.25,
+    },
+    DebuffFrameHoverBG = { 
+        file = "SelectionBox", -- Reuse SelectionBox texture
+        cornerSize = 12,
+        cornerCoord = 0.25,
     }
     -- Add more keys from WhoGotLoots FrameTextures if needed
 }
@@ -66,11 +77,9 @@ function Addon.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
     -- Construct file path - assumes textures are in an 'Art' subfolder
     -- We might need to adjust this path later!
     local file = "Interface\\AddOns\\" .. ADDON_NAME .. "\\Art\\" .. data.file;
-    -- Handle standard blizzard textures
-    if textureKey == "TooltipBorder" then
-        file = "Interface\\Tooltips\\UI-Tooltip-Border"; -- Use blizzard path directly
-    end
-
+    -- print(string.format("DEBUG DrawSlicedBG: Addon='%s', Key='%s', Layer='%s', Trying path: %s", 
+    --     tostring(ADDON_NAME), tostring(textureKey), tostring(layer), file)) -- DEBUG PATH
+        
     local cornerSize = data.cornerSize;
     local coord = data.cornerCoord;
     local buildOrder = {1, 3, 7, 9, 2, 4, 6, 8, 5};

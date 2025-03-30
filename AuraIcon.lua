@@ -1,26 +1,24 @@
-local ADDON_NAME, Addon = ... -- Get addon name and private table
+local BOXXYAURAS, BoxxyAuras = ... -- Get addon name and private table
+BoxxyAuras = BoxxyAuras or {}
+BoxxyAuras.AllAuras = {} -- Global cache for aura info
 
 local AuraIcon = {}
 AuraIcon.__index = AuraIcon
-
--- Configuration Table
-Addon.Config = {
-    BackgroundColor = { r = 0.4, g = 0.4, b = 0.4, a = 0.9 }, -- Default: Dark grey
-    BorderColor = { r = 1, g = 1, b = 1, a = 0.3 },      -- Default: Slightly lighter grey
-}
-
-local iconTextureSize = 32
-local textHeight = 12 -- Estimated height needed for duration text
-local padding = 6
-local totalIconHeight = iconTextureSize + textHeight + (padding * 2)
-local totalIconWidth = iconTextureSize + (padding * 2)
 
 function AuraIcon.New(parentFrame, index, baseName)
     -- Create the actual frame object
     local frame = CreateFrame("Frame", baseName .. index, parentFrame, "BackdropTemplate")
     
+    -- Read config values INSIDE the function
+    local iconTextureSize = (BoxxyAuras.Config and BoxxyAuras.Config.IconSize) or 32
+    local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 12
+    local padding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
+    local totalIconHeight = iconTextureSize + textHeight + (padding * 2)
+    local totalIconWidth = iconTextureSize + (padding * 2)
+    
     local instance = {}
     instance.frame = frame
+    instance.parentDisplayFrame = parentFrame -- Store reference to parent (buff/debuff display frame)
 
     instance.frame:SetSize(totalIconWidth, totalIconHeight)
 
@@ -48,16 +46,16 @@ function AuraIcon.New(parentFrame, index, baseName)
     instance.frame.durationText = durationText
 
     -- Apply the backdrop using utility functions
-    Addon.UIUtils.DrawSlicedBG(instance.frame, "ItemEntryBG", "backdrop", 0) -- Use ItemEntryBG for backdrop
-    Addon.UIUtils.DrawSlicedBG(instance.frame, "ItemEntryBorder", "border", 0)   -- Use ItemEntryBorder for border
+    BoxxyAuras.UIUtils.DrawSlicedBG(instance.frame, "ItemEntryBG", "backdrop", 0) -- Use ItemEntryBG for backdrop
+    BoxxyAuras.UIUtils.DrawSlicedBG(instance.frame, "ItemEntryBorder", "border", 0)   -- Use ItemEntryBorder for border
 
     -- Access config directly here, with fallbacks
-    local cfgBG = (Addon.Config and Addon.Config.BackgroundColor) or { r = 0.05, g = 0.05, b = 0.05, a = 0.9 }
-    local cfgBorder = (Addon.Config and Addon.Config.BorderColor) or { r = 0.3, g = 0.3, b = 0.3, a = 0.8 }
+    local cfgBG = (BoxxyAuras.Config and BoxxyAuras.Config.BackgroundColor) or { r = 0.05, g = 0.05, b = 0.05, a = 0.9 }
+    local cfgBorder = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or { r = 0.3, g = 0.3, b = 0.3, a = 0.8 }
 
     -- Color the backdrop and border using utility functions
-    Addon.UIUtils.ColorBGSlicedFrame(instance.frame, "backdrop", cfgBG.r, cfgBG.g, cfgBG.b, cfgBG.a)
-    Addon.UIUtils.ColorBGSlicedFrame(instance.frame, "border", cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a)
+    BoxxyAuras.UIUtils.ColorBGSlicedFrame(instance.frame, "backdrop", cfgBG.r, cfgBG.g, cfgBG.b, cfgBG.a)
+    BoxxyAuras.UIUtils.ColorBGSlicedFrame(instance.frame, "border", cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a)
 
     -- Store data on the instance table now
     instance.duration = 0
@@ -66,7 +64,7 @@ function AuraIcon.New(parentFrame, index, baseName)
     instance.auraType = nil
     instance.spellID = nil
     instance.name = nil
-    instance.auraKey = nil -- ADDED: Key to use in Addon.AllAuras
+    instance.auraKey = nil -- ADDED: Key to use in BoxxyAuras.AllAuras
     instance.isExpired = false -- Initialize flag
     instance.auraInstanceID = nil -- Initialize
     instance.lastFormattedDurationText = nil -- Initialize state tracking
@@ -126,15 +124,15 @@ function AuraIcon.Update(self, auraData, auraIndex, auraType)
         local r, g, b = DebuffTypeColor[auraData.dispelType or "none"]
         if r then
             -- Color the border using utility function
-            Addon.UIUtils.ColorBGSlicedFrame(self.frame, "border", r, g, b, 0.9)
+            BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", r, g, b, 0.9)
         else
-            Addon.UIUtils.ColorBGSlicedFrame(self.frame, "border", 0.6, 0.1, 0.1, 0.8)
+            BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", 0.6, 0.1, 0.1, 0.8)
         end
     else -- Buffs
         -- Use configured border color for buffs, accessing config directly
-        local cfgBorder = (Addon.Config and Addon.Config.BorderColor) or { r = 0.3, g = 0.3, b = 0.3, a = 0.8 }
+        local cfgBorder = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or { r = 0.3, g = 0.3, b = 0.3, a = 0.8 }
         -- Color the border using utility function
-        Addon.UIUtils.ColorBGSlicedFrame(self.frame, "border", cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a)
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a)
     end
 
     -- Set OnEnter script referencing the instance
@@ -160,7 +158,8 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
 
     if self.duration and self.duration > 0 then
         local remaining = self.expirationTime - currentTime
-        local isHovering = Addon.IsMouseWithinFrame(mainFrame) -- Re-get hover state here
+        -- Check the flag on the icon's parent display frame
+        local isHoveringParent = self.parentDisplayFrame and self.parentDisplayFrame.isMouseOverActual
         
         local currentIsExpired = (remaining <= 0) -- Calculate current expired state
         local currentFormattedText = nil
@@ -173,7 +172,7 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
             applyTint = false -- Active tint (white)
         else -- Expired (remaining <= 0)
             applyTint = true -- Expired tint (red)
-            if isHovering then -- Keep showing 0s text if mouse is over
+            if isHoveringParent then -- Keep showing 0s text if mouse is over
                 currentFormattedText = "0s" 
                 showText = true
             else -- Hide text if mouse not over
@@ -250,7 +249,7 @@ function AuraIcon.OnEnter(self)
         end)
 
     elseif not isPermanent and remaining <= 0 then -- If expired but held
-        local auraInfo = self.auraKey and Addon.AllAuras[self.auraKey]
+        local auraInfo = self.auraKey and BoxxyAuras.AllAuras[self.auraKey]
 
         local function ShowExpiredTooltip(finalCheckInfo)
             -- This function runs either immediately or after a delay
@@ -300,7 +299,7 @@ function AuraIcon.OnEnter(self)
             
             C_Timer.After(0.2, function() 
                  if not self or not self.frame or not self.frame:IsShown() then return end -- Check instance validity
-                 local finalAuraInfo = self.auraKey and Addon.AllAuras[self.auraKey]
+                 local finalAuraInfo = self.auraKey and BoxxyAuras.AllAuras[self.auraKey]
                  ShowExpiredTooltip(finalAuraInfo) -- Call deferred, passing result of final check
             end)
         end
@@ -318,4 +317,4 @@ function AuraIcon.OnLeave(self)
 end
 
 -- Expose the AuraIcon class to the addon
-Addon.AuraIcon = AuraIcon 
+BoxxyAuras.AuraIcon = AuraIcon 

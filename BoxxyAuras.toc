@@ -5,6 +5,6 @@
 ## Notes: Displays player buffs and debuffs.
 ## SavedVariables: BoxxyAurasDB
 
-UIUtils.lua
-AuraIcon.lua
 BoxxyAuras.lua 
+UIUtils.lua
+AuraIcon.lua 
