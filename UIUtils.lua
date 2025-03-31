@@ -1,9 +1,11 @@
-local ADDON_NAME, Addon = ... -- Get addon name and private table
+local BOXXYAURAS, BoxxyAuras = ... -- Get addon name and private table
+BoxxyAuras = BoxxyAuras or {}
+BoxxyAuras.AllAuras = {} -- Global cache for aura info
 
-Addon.UIUtils = {}
+BoxxyAuras.UIUtils = {}
 
 -- Copied from WhoGotLoots/UIBuilder.lua
-local FrameTextures =
+BoxxyAuras.FrameTextures =
 {
     -- We might only need a few of these initially
     ItemEntryBG = {
@@ -42,12 +44,24 @@ local FrameTextures =
         file = "SelectionBox", -- Reuse SelectionBox texture
         cornerSize = 12,
         cornerCoord = 0.25,
+    },
+    -- >>> ADDED Options Window Background <<<
+    OptionsWindowBG = {
+        file = "OptionsWindowBG", -- Assuming this texture file exists in Art/
+        cornerSize = 12,        -- Adjust if needed
+        cornerCoord = 0.25,       -- Adjust if needed
     }
     -- Add more keys from WhoGotLoots FrameTextures if needed
 }
 
 -- Copied from WhoGotLoots/UIBuilder.lua (Adapted slightly)
-function Addon.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
+function BoxxyAuras.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
+    -- DEBUG START
+    if textureKey == "OptionsWindowBG" then
+        print(string.format("DrawSlicedBG DEBUG: Called for frame '%s', textureKey '%s', layer '%s'", frame:GetName() or "N/A", textureKey, layer))
+    end
+    -- DEBUG END
+    
     shrink = shrink or 0;
     local group, subLevel;
 
@@ -68,18 +82,20 @@ function Addon.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
         return
     end
 
-    local data = FrameTextures[textureKey];
+    local data = BoxxyAuras.FrameTextures[textureKey];
     if not data then
         print("|cffff0000DrawSlicedBG Error: Invalid textureKey specified: " .. tostring(textureKey) .. "|r")
         return
     end
 
-    -- Construct file path - assumes textures are in an 'Art' subfolder
-    -- We might need to adjust this path later!
-    local file = "Interface\\AddOns\\" .. ADDON_NAME .. "\\Art\\" .. data.file;
-    -- print(string.format("DEBUG DrawSlicedBG: Addon='%s', Key='%s', Layer='%s', Trying path: %s", 
-    --     tostring(ADDON_NAME), tostring(textureKey), tostring(layer), file)) -- DEBUG PATH
-        
+    -- DEBUG START
+    if textureKey == "OptionsWindowBG" then
+        print(string.format("DrawSlicedBG DEBUG: Found data for key '%s'. File: '%s', CornerSize: %s", textureKey, data.file, tostring(data.cornerSize)))
+    end
+    -- DEBUG END
+
+    -- Construct file path - ensures forward slashes and adds extension
+    local file = "Interface/AddOns/BoxxyAuras/Art/" .. data.file .. ".tga";
     local cornerSize = data.cornerSize;
     local coord = data.cornerCoord;
     local buildOrder = {1, 3, 7, 9, 2, 4, 6, 8, 5};
@@ -95,6 +111,13 @@ function Addon.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
         end
         tex = group[key];
         tex:SetTexture(file, nil, nil, "LINEAR");
+
+        -- DEBUG START
+        if textureKey == "OptionsWindowBG" and key == 1 then -- Print just once per call for this key
+            print(string.format("DrawSlicedBG DEBUG: Setting texture for key %d to path: %s", key, file))
+        end
+        -- DEBUG END
+
         if key == 2 or key == 8 then
             if key == 2 then
                 tex:SetPoint("TOPLEFT", group[1], "TOPRIGHT", 0, 0);
@@ -139,7 +162,7 @@ function Addon.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
 end
 
 -- Copied from WhoGotLoots/UIBuilder.lua (Adapted slightly)
-function Addon.UIUtils.ColorBGSlicedFrame(frame, layer, r, g, b, a)
+function BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, layer, r, g, b, a)
     local group = nil
     if layer == "backdrop" then
         group = frame.backdropTextures
@@ -148,10 +171,13 @@ function Addon.UIUtils.ColorBGSlicedFrame(frame, layer, r, g, b, a)
     end
 
     if group then
-        for _, tex in pairs(group) do
-            tex:SetVertexColor(r, g, b, a);
+        for key, tex in pairs(group) do
+            local success, err = pcall(tex.SetVertexColor, tex, r, g, b, a)
+            if not success then
+                print(string.format("|cffFF0000ERROR:|r ColorBGSlicedFrame: pcall failed for SetVertexColor on key %s. Error: %s", tostring(key), tostring(err)))
+            end
         end
     else
-        print("|cffff0000ColorBGSlicedFrame Error: Invalid layer or texture group not found: " .. tostring(layer) .. "|r")
-    end
+        print(string.format("|cffFF0000ColorBGSlicedFrame Error: Invalid layer or texture group not found for frame %s, layer: %s |r", frame:GetName(), tostring(layer)))
+    end 
 end 

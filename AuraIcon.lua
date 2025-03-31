@@ -2,6 +2,16 @@ local BOXXYAURAS, BoxxyAuras = ... -- Get addon name and private table
 BoxxyAuras = BoxxyAuras or {}
 BoxxyAuras.AllAuras = {} -- Global cache for aura info
 
+-- Add this near the top of AuraIcon.lua if it's missing
+local DebuffTypeColor = {
+    ["MAGIC"]   = { 0.2, 0.6, 1.0 }, -- Blue
+    ["CURSE"]   = { 0.6, 0.0, 1.0 }, -- Purple
+    ["DISEASE"] = { 0.6, 0.4, 0 }, -- Brown/Yellow
+    ["POISON"]  = { 0.0, 0.6, 0 }, -- Green
+    ["NONE"]    = { 0.8, 0.8, 0.8 }, -- Grey for non-dispellable (placeholder, we handle NONE explicitly now)
+    -- Add other potential types if needed, though these are the main player-dispellable ones
+}
+
 local AuraIcon = {}
 AuraIcon.__index = AuraIcon
 
@@ -29,21 +39,37 @@ function AuraIcon.New(parentFrame, index, baseName)
     instance.frame.auraTexture = texture -- Give it a key on the frame
     instance.textureWidget = texture -- Store directly on instance
 
-    local countText = instance.frame:CreateFontString(nil, "OVERLAY", nil)
-    countText:SetFontObject("GameFontNormalSmall")
-    countText:SetPoint("BOTTOMRIGHT", instance.textureWidget, "BOTTOMRIGHT", 1, -1) -- Anchor to textureWidget
+    -- Create FontString inheriting the virtual font object
+    local countText = instance.frame:CreateFontString(nil, "OVERLAY", "BoxxyAuras_StackTxt")
+    countText:SetPoint("BOTTOMRIGHT", instance.textureWidget, "BOTTOMRIGHT", 2, -2) -- Anchor to textureWidget
     countText:SetJustifyH("RIGHT")
-    countText:SetTextColor(1, 1, 1, 1)
     instance.frame.countText = countText
 
-    local durationText = instance.frame:CreateFontString(nil, "OVERLAY", nil)
-    durationText:SetFontObject("GameFontNormal")
+    -- Create background for count text
+    -- Use ARTWORK layer with subLevel 1 to draw above main icon (subLevel 0) but below text (OVERLAY)
+    local countTextBg = instance.frame:CreateTexture(nil, "ARTWORK", nil, 1) 
+    countTextBg:SetColorTexture(0, 0, 0, 0.85) -- Black, slightly transparent
+    -- Anchor background relative to the text with padding
+    local bgPadding = 2
+    countTextBg:SetPoint("TOPLEFT", countText, "TOPLEFT", -bgPadding, bgPadding)
+    countTextBg:SetPoint("BOTTOMRIGHT", countText, "BOTTOMRIGHT", bgPadding-4, -bgPadding)
+    instance.frame.countTextBg = countTextBg -- Store reference
+
+    -- Create FontString inheriting the virtual font object
+    local durationText = instance.frame:CreateFontString(nil, "OVERLAY", "BoxxyAuras_DurationTxt")
     durationText:SetPoint("TOPLEFT", instance.textureWidget, "BOTTOMLEFT", 0, -padding) -- Anchor to textureWidget
     durationText:SetPoint("TOPRIGHT", instance.textureWidget, "BOTTOMRIGHT", 0, -padding) -- Anchor to textureWidget
     durationText:SetPoint("BOTTOM", instance.frame, "BOTTOM", 0, padding)
     durationText:SetJustifyH("CENTER")
-    durationText:SetTextColor(1, 1, 1, 1)
     instance.frame.durationText = durationText
+
+    -- Create Wipe Overlay Texture
+    local wipeOverlay = instance.frame:CreateTexture(nil, "ARTWORK", nil, 2) -- ARTWORK layer, subLevel 2 (above icon & stack bg)
+    wipeOverlay:SetColorTexture(1, 1, 1, 1.0) -- Solid White (alpha controlled by animation)
+    wipeOverlay:SetSize(iconTextureSize, iconTextureSize)
+    wipeOverlay:SetPoint("TOPLEFT", instance.textureWidget, "TOPLEFT")
+    wipeOverlay:SetAlpha(0) -- Start hidden
+    instance.frame.wipeOverlay = wipeOverlay -- Store reference
 
     -- Apply the backdrop using utility functions
     BoxxyAuras.UIUtils.DrawSlicedBG(instance.frame, "ItemEntryBG", "backdrop", 0) -- Use ItemEntryBG for backdrop
@@ -69,16 +95,66 @@ function AuraIcon.New(parentFrame, index, baseName)
     instance.auraInstanceID = nil -- Initialize
     instance.lastFormattedDurationText = nil -- Initialize state tracking
     instance.lastIsExpiredState = nil -- Initialize state tracking
+    instance.isMouseOver = false -- Initialize mouse over flag
+    instance.tooltipUpdateTimer = 0 -- Initialize tooltip update timer
 
     -- Set scripts on the frame, referencing methods via AuraIcon
+    instance.frame:SetScript("OnEnter", function(frame_self) AuraIcon.OnEnter(instance) end)
     instance.frame:SetScript("OnLeave", function(frame_self) AuraIcon.OnLeave(instance) end)
-    -- OnEnter set later in Update method
     -- OnUpdate set later in Update method based on duration
     
     instance.frame:Hide()
 
     -- Set metatable on the instance table
     setmetatable(instance, AuraIcon)
+
+    -- Create Animation Group for New Aura Effect
+    local animGroup = instance.frame:CreateAnimationGroup()
+    instance.newAuraAnimGroup = animGroup -- Store it
+
+    -- Scale Animation (Pop effect)
+    local scaleAnim = animGroup:CreateAnimation("Scale")
+    scaleAnim:SetScale(1.2, 1.2) -- Scale up slightly
+    scaleAnim:SetDuration(0.15)
+    scaleAnim:SetOrder(1)
+    scaleAnim:SetSmoothing("OUT")
+
+    local scaleAnim2 = animGroup:CreateAnimation("Scale")
+    scaleAnim2:SetScale(1.0, 1.0) -- Scale back to normal
+    scaleAnim2:SetDuration(0.15)
+    scaleAnim2:SetOrder(2) 
+    scaleAnim2:SetSmoothing("IN")
+
+    -- Alpha Animation (Fade-in)
+    local alphaAnim = animGroup:CreateAnimation("Alpha")
+    alphaAnim:SetFromAlpha(0)
+    alphaAnim:SetToAlpha(1)
+    alphaAnim:SetDuration(0.2) -- Slightly longer fade-in
+    alphaAnim:SetOrder(1) -- Run concurrently with first scale part
+
+    -- Wipe Overlay Animations
+    local wipeAlpha = animGroup:CreateAnimation("Alpha", "WipeAlpha")
+    wipeAlpha:SetChildKey("wipeOverlay") -- Target the overlay texture
+    wipeAlpha:SetFromAlpha(0)
+    wipeAlpha:SetToAlpha(0.75) -- Fade in quickly
+    wipeAlpha:SetDuration(0.1)
+    wipeAlpha:SetOrder(1)
+    wipeAlpha:SetSmoothing("IN")
+    
+    local wipeAlpha2 = animGroup:CreateAnimation("Alpha", "WipeAlpha2")
+    wipeAlpha2:SetChildKey("wipeOverlay") 
+    wipeAlpha2:SetFromAlpha(0.75)
+    wipeAlpha2:SetToAlpha(0) -- Fade out over the slide duration
+    wipeAlpha2:SetDuration(0.25) -- Duration matches slide
+    wipeAlpha2:SetOrder(2)
+    wipeAlpha2:SetSmoothing("OUT")
+
+    local wipeSlide = animGroup:CreateAnimation("Translation", "WipeSlide")
+    wipeSlide:SetChildKey("wipeOverlay")
+    wipeSlide:SetOffset(0, -iconTextureSize) -- Move down by texture height
+    wipeSlide:SetDuration(0.25) -- Slightly slower slide
+    wipeSlide:SetOrder(2) -- Start after initial fade-in/pop
+    wipeSlide:SetSmoothing("OUT")
 
     return instance -- Return our instance table, not the frame
 end
@@ -99,16 +175,29 @@ function AuraIcon.Update(self, auraData, auraIndex, auraType)
         self.frame:SetScript("OnUpdate", nil)
         return
     end
-    -- Reset state for update
+    -- Reset state for update (initial assumption)
     self.isExpired = false 
+
+    -- Check for forced expired state right at the beginning
+    if auraData.forceExpired then
+        self.isExpired = true
+        self.lastIsExpiredState = true -- Sync state tracking
+        if self.textureWidget then self.textureWidget:SetVertexColor(1, 0.5, 0.5) end -- Red tint
+        self.frame.durationText:SetText("0s") -- Show 0s duration
+        self.frame.durationText:Show()
+        self.frame:SetScript("OnUpdate", nil) -- Ensure no countdown update
+    end
     
     self.textureWidget:SetTexture(auraData.icon)
 
-    if auraData.count and auraData.count > 1 then
-        self.frame.countText:SetText(auraData.count)
+    -- Use auraData.applications for stack count
+    if auraData.applications and auraData.applications > 1 then 
+        self.frame.countText:SetText(auraData.applications)
         self.frame.countText:Show()
+        self.frame.countTextBg:Show() -- Show background too
     else
         self.frame.countText:Hide()
+        self.frame.countTextBg:Hide() -- Hide background too
     end
 
     -- Store data on the instance
@@ -124,37 +213,65 @@ function AuraIcon.Update(self, auraData, auraIndex, auraType)
     self.auraKey = auraData.spellId -- No fallback to name
 
     if auraType == "HARMFUL" then
-        local r, g, b = DebuffTypeColor[auraData.dispelType or "none"]
-        if r then
-            -- Color the border using utility function
-            BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", r, g, b, 0.9)
+        -- Get dispel type using the correct key 'dispelName', default to "NONE", and convert to uppercase
+        local dispelType = string.upper(auraData.dispelName or "NONE") 
+        
+        if dispelType == "NONE" then
+            -- Explicitly handle "NONE" type with Red border / White text
+            BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", 1.0, 0.1, 0.1, 0.9) -- Red border
+            self.frame.durationText:SetTextColor(1, 1, 1, 1.0) -- White text
         else
-            BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", 0.6, 0.1, 0.1, 0.8)
+            -- Handle known dispel types (MAGIC, CURSE, etc.) - Use uppercase key
+            local colorTable = DebuffTypeColor[dispelType] 
+            if colorTable then
+                -- Use the specific color for this dispel type
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", colorTable[1], colorTable[2], colorTable[3], 0.9)
+                self.frame.durationText:SetTextColor(colorTable[1], colorTable[2], colorTable[3], 1.0)
+            else
+                -- Fallback for any *other* unknown dispelType (should be rare)
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", 1.0, 0.1, 0.1, 0.9) -- Red border
+                self.frame.durationText:SetTextColor(1, 1, 1, 1.0) -- White text
+            end
         end
     else -- Buffs
         -- Use configured border color for buffs, accessing config directly
         local cfgBorder = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or { r = 0.3, g = 0.3, b = 0.3, a = 0.8 }
-        -- Color the border using utility function
         BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a)
+        -- Reset text color for buffs
+        self.frame.durationText:SetTextColor(1, 1, 1, 1) -- White text
     end
 
-    -- Set OnEnter script referencing the instance
-    self.frame:SetScript("OnEnter", function(frame_self) AuraIcon.OnEnter(self) end)
+    -- Set or clear OnUpdate based on duration, ONLY if not forceExpired
+    if not auraData.forceExpired then
+        if self.duration and self.duration > 0 then
+            self.frame:SetScript("OnUpdate", function(frame_self, elapsed) 
+                AuraIcon.UpdateDurationDisplay(self, GetTime())
 
-    -- Set or clear OnUpdate based on duration
-    if self.duration and self.duration > 0 then
-        self.frame:SetScript("OnUpdate", function(frame_self, elapsed) 
-            -- Call UpdateDurationDisplay directly (it checks IsShown)
-            AuraIcon.UpdateDurationDisplay(self, GetTime())
-        end)
-    else
-        -- No duration, clear the script
-        self.frame:SetScript("OnUpdate", nil)
-        -- Ensure duration text is hidden for permanent auras
-        self.frame.durationText:Hide()
-    end
+                if self.isMouseOver then
+                    self.tooltipUpdateTimer = self.tooltipUpdateTimer - elapsed
+                    if self.tooltipUpdateTimer <= 0 then
+                        if GameTooltip:IsOwned(self.frame) then
+                            AuraIcon.RefreshTooltipContent(self) 
+                        end
+                        self.tooltipUpdateTimer = 0.5
+                    end
+                end
+            end)
+        else
+            self.frame:SetScript("OnUpdate", nil)
+            self.frame.durationText:Hide()
+        end
+    end -- End of check for not forceExpired
+
+    -- Check if the frame is about to be shown for the first time
+    local playAnim = not self.frame:IsShown()
 
     self.frame:Show()
+
+    -- Play animation if it was newly shown
+    if playAnim and self.newAuraAnimGroup then
+        self.newAuraAnimGroup:Play()
+    end
 end
 
 function AuraIcon.UpdateDurationDisplay(self, currentTime)
@@ -242,99 +359,104 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
 end
 
 function AuraIcon.OnEnter(self)
-    if not self.frame then return end
+    self.isMouseOver = true -- Set flag when mouse enters
+    GameTooltip:SetOwner(self.frame, "ANCHOR_RIGHT")
+    GameTooltip:ClearLines() -- Clear any previous tooltip content immediately
+    
+    AuraIcon.RefreshTooltipContent(self) -- Use the new refresh function
+    
+    GameTooltip:Show() -- Show the newly populated tooltip
+end
 
+-- New function to handle the logic of setting tooltip content
+function AuraIcon.RefreshTooltipContent(self)
+    if not self.frame then return end
+    
     local currentTime = GetTime()
     local remaining = (self.expirationTime or 0) - currentTime 
     local isPermanent = (self.duration or 0) == 0
-    -- local hasSpellID = (self.spellID ~= nil)
 
-    -- REMOVED: Debug print
-
-    GameTooltip:SetOwner(self.frame, "ANCHOR_RIGHT")
+    GameTooltip:ClearLines() -- Clear lines before repopulating
 
     if isPermanent or remaining > 0 then -- If permanent or still active
-        -- Just set the tooltip normally, no caching attempted here
-        if self.auraIndex and self.auraType then
-            GameTooltip:SetUnitAura("player", self.auraIndex, self.auraType)
-        elseif self.spellID then 
+        -- Prioritize SetSpellByID if we have a spellID
+        if self.spellID then 
              GameTooltip:SetSpellByID(self.spellID) 
-        else -- Fallback if index and spellID are missing
-            GameTooltip:SetText(self.name or "Unknown Aura")
-        end
-
-        -- Show tooltip after a tiny delay
-        C_Timer.After(0.01, function() 
-            if GameTooltip:IsOwned(self.frame) then -- Check if tooltip is still for this frame
-                GameTooltip:Show()
+        -- Fallback to SetUnitAura IF we can find the current index for the instance ID
+        elseif self.auraInstanceID and self.auraType then
+            local currentIndex = nil
+            -- Try to find the current index matching the instance ID
+            for i = 1, 40 do 
+                local currentAuraData = C_UnitAuras.GetAuraDataByIndex("player", i, self.auraType)
+                if currentAuraData and currentAuraData.auraInstanceID == self.auraInstanceID then
+                    currentIndex = i
+                    break
+                end
             end
-        end)
+            
+            if currentIndex then
+                -- Found current index, use it
+                GameTooltip:SetUnitAura("player", currentIndex, self.auraType)
+            else
+                -- Couldn't find current index (aura likely expired/shifted), show name only
+                GameTooltip:AddLine(self.name or "Unknown Aura (Index Changed)")
+            end
+        -- Final fallback to just the name if no SpellID or InstanceID
+        else 
+            GameTooltip:AddLine(self.name or "Unknown Aura")
+        end
+        -- No need to call GameTooltip:Show() here, it's already shown
 
     elseif not isPermanent and remaining <= 0 then -- If expired but held
-        local auraInfo = self.auraKey and BoxxyAuras.AllAuras[self.auraKey]
+        local tooltipSet = false
+        -- Try using game functions first for potential auto-update
+        if self.spellID then 
+             GameTooltip:SetSpellByID(self.spellID) 
+             tooltipSet = true
+        elseif self.auraInstanceID and self.auraType then
+            local currentIndex = nil
+            for i = 1, 40 do 
+                local currentAuraData = C_UnitAuras.GetAuraDataByIndex("player", i, self.auraType)
+                if currentAuraData and currentAuraData.auraInstanceID == self.auraInstanceID then
+                    currentIndex = i
+                    break
+                end
+            end
+            if currentIndex then
+                GameTooltip:SetUnitAura("player", currentIndex, self.auraType)
+                tooltipSet = true
+            end
+        end
 
-        local function ShowExpiredTooltip(finalCheckInfo)
-            -- This function runs either immediately or after a delay
-            -- finalCheckInfo is the result of the cache lookup inside the timer, if applicable
-            if not GameTooltip:IsOwned(self.frame) then return end -- Tooltip changed owner
-            
-            local displayInfo = finalCheckInfo or auraInfo -- Use info from final check if available ({ name=..., lines=... } table or nil)
-
-            -- Check if the INNER lines table exists and has lines
-            if displayInfo and type(displayInfo.lines) == "table" and #displayInfo.lines > 0 then
-                -- Use cached lines from global cache (accessing displayInfo.lines)
-                GameTooltip:ClearLines() -- Clear potentially stale lines
-                -- Iterate over displayInfo.lines
-                for idx, line in ipairs(displayInfo.lines) do 
+        -- If game functions failed, fallback to manual lines from cache or name
+        if not tooltipSet then
+            local auraInfo = self.auraKey and BoxxyAuras.AllAuras[self.auraKey]
+            if auraInfo and type(auraInfo.lines) == "table" and #auraInfo.lines > 0 then
+                for idx, line in ipairs(auraInfo.lines) do 
                     if idx == 1 then
-                        -- First line (Spell Name) - Color it yellow/gold
-                        GameTooltip:AddLine(line, 1, 0.82, 0, true) -- RGB for goldish yellow
+                        GameTooltip:AddLine(line, 1, 0.82, 0, true) -- Name in gold
                     else
-                        -- Subsequent lines - Default color (white)
-                        GameTooltip:AddLine(line, 1, 1, 1, true)
+                        GameTooltip:AddLine(line, 1, 1, 1, true) -- Description in white
                     end
                 end
             else
-                -- Fallback if no lines found after check/delay
-                GameTooltip:ClearLines()
-                -- Fallback uses self.name, or the stored name if available
-                local fallbackName = (displayInfo and displayInfo.name) or self.name or "Unknown Expired Aura"
-                GameTooltip:AddLine(fallbackName, 1, 1, 1, true)
+                GameTooltip:AddLine(self.name or "Unknown Expired Aura", 1, 1, 1, true)
             end
-            -- Add (Expired) tag after main content
-            GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5)
-            GameTooltip:Show()
         end
+        
+        -- Always add expired tag and show immediately for this case
+        GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5)
+        -- No need to call GameTooltip:Show() here
 
-        -- Check if cache is ready immediately (checking displayInfo.lines)
-        if auraInfo and type(auraInfo.lines) == "table" and #auraInfo.lines > 0 then
-            -- Cache ready immediately
-            ShowExpiredTooltip() -- Call directly, passing current (good) auraInfo implicitly
-        else
-            -- Cache not ready (nil or not a table/empty) - wait briefly
-            -- Set a minimal tooltip initially to prevent flicker? 
-            GameTooltip:ClearLines()
-            GameTooltip:AddLine(self.name or "...", 1, 1, 1, true) -- Placeholder
-            GameTooltip:AddLine("(Waiting for cache...)", 0.7, 0.7, 0.7)
-            GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5)
-            GameTooltip:Show()
-            
-            C_Timer.After(0.2, function() 
-                 if not self or not self.frame or not self.frame:IsShown() then return end -- Check instance validity
-                 local finalAuraInfo = self.auraKey and BoxxyAuras.AllAuras[self.auraKey]
-                 ShowExpiredTooltip(finalAuraInfo) -- Call deferred, passing result of final check
-            end)
-        end
-
-        -- REMOVED Add (Expired) tag here, moved into ShowExpiredTooltip
-        -- REMOVED Caster Info section as C_UnitInfo is nil
     else -- Should not happen
-        GameTooltip:SetText(self.name or "Unknown Aura State")
+        GameTooltip:AddLine(self.name or "Unknown Aura State")
+        -- No need to call GameTooltip:Show() here
     end
 end
 
 function AuraIcon.OnLeave(self)
      if not self.frame then return end
+     self.isMouseOver = false -- Clear flag when mouse leaves
     GameTooltip:Hide()
 end
 

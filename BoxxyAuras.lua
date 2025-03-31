@@ -1,5 +1,6 @@
 local BOXXYAURAS, BoxxyAuras = ... -- Get addon name and private table
 BoxxyAuras.AllAuras = {} -- Global cache for aura info
+BoxxyAuras.updateScheduled = false -- Flag to debounce UNIT_AURA updates
 
 -- Configuration Table
 BoxxyAuras.Config = {
@@ -7,8 +8,8 @@ BoxxyAuras.Config = {
     BorderColor = { r = 0.3, g = 0.3, b = 0.3, a = 0.8 },      -- Icon Border
     MainFrameBGColorNormal = { r = 0.7, g = 0.7, b = 0.7, a = 0.2 }, -- Main frame normal BG
     MainFrameBGColorHover = { r = 0.7, g = 0.7, b = 0.7, a = 0.6 }, -- Main frame hover BG
-    IconSize = 32,
-    TextHeight = 12,
+    IconSize = 24,
+    TextHeight = 8,
     Padding = 6,
     TotalIconHeight = 44,
     TotalIconWidth = 44,
@@ -50,6 +51,31 @@ local iconSpacing = 4
 -- New Cache Tables
 local trackedBuffs = {}
 local trackedDebuffs = {}
+
+-- New sorting function
+local function SortAurasForDisplay(a, b)
+    local aIsPermanent = (a.duration or 0) == 0 or a.duration == -1 -- Check 0 or -1 for permanent
+    local bIsPermanent = (b.duration or 0) == 0 or b.duration == -1
+
+    -- Rule 1: Permanent auras come before non-permanent ones
+    if aIsPermanent and not bIsPermanent then return true end
+    if not aIsPermanent and bIsPermanent then return false end
+
+    -- Rule 2: If both are permanent, sort alphabetically by name
+    if aIsPermanent and bIsPermanent then
+        local aName = a.name or ""
+        local bName = b.name or ""
+        return aName < bName
+    end
+
+    -- Rule 3: If both are non-permanent, use the original start time sort
+    local aStart = (a.expirationTime or 0) - (a.duration or 0)
+    local bStart = (b.expirationTime or 0) - (b.duration or 0)
+    if aStart == bStart then
+        return a.auraInstanceID < b.auraInstanceID -- Stable tiebreaker
+    end
+    return aStart < bStart
+end
 
 -- Resizing Handle Setup
 local handleSize = 8
@@ -203,6 +229,14 @@ LayoutAuras = function(targetFrame, iconList)
         end
     end
     
+    -- ADDED DEBUG
+    if targetFrame == debuffDisplayFrame then
+        print(string.format("LayoutAuras DEBUG (Debuffs): FrameW=%.1f, FrameH=%.1f, VisibleIcons=%d, FirstIcon=%s", 
+            targetFrame:GetWidth(), targetFrame:GetHeight(), visibleIconCount, 
+            (firstVisibleIconFrame and firstVisibleIconFrame:GetName()) or "None"))
+    end
+    -- END DEBUG
+
     if not firstVisibleIconFrame then
         print(string.format("DEBUG LayoutAuras: Could not find a visible icon frame in list for %s.", targetFrame:GetName() or "UnknownFrame"))
         return
@@ -371,18 +405,8 @@ local function InitializeAuras()
     end
 
     -- 3. Sort fetched auras (defines initial order)
-    local function sortByStartTime(a, b)
-        local aIsPermanent = (a.duration or 0) == 0
-        local bIsPermanent = (b.duration or 0) == 0
-        if aIsPermanent and not bIsPermanent then return true end 
-        if not aIsPermanent and bIsPermanent then return false end
-        if aIsPermanent and bIsPermanent then return a.auraInstanceID < b.auraInstanceID end 
-        local aStart = (a.expirationTime or 0) - (a.duration or 0)
-        local bStart = (b.expirationTime or 0) - (b.duration or 0)
-        return aStart < bStart
-    end
-    table.sort(currentBuffs, sortByStartTime)
-    table.sort(currentDebuffs, sortByStartTime)
+    table.sort(currentBuffs, SortAurasForDisplay)
+    table.sort(currentDebuffs, SortAurasForDisplay)
 
     -- 4. Populate tracked cache (copy sorted data)
     for _, auraData in ipairs(currentBuffs) do table.insert(trackedBuffs, auraData) end
@@ -513,11 +537,15 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
     local newTrackedBuffs = {}
     for _, trackedAura in ipairs(trackedBuffs) do
         if trackedAura.seen then
+            trackedAura.forceExpired = nil -- Ensure flag is nil for active auras
             table.insert(newTrackedBuffs, trackedAura)
         else -- Not seen: Expired or Removed
             -- Use buff frame hover state here
             if isHoveringBuffs then
                 table.insert(newTrackedBuffs, trackedAura) -- Keep if hovering BUFF frame
+                trackedAura.forceExpired = true -- Mark it as kept only due to hover
+                -- Also ensure volatile data is cleared or set to indicate expiry if needed
+                trackedAura.expirationTime = 0 -- Set expiration time to ensure it shows as expired
             else
                 -- Aura is gone AND we are not hovering, remove from cache if present
                 if trackedAura.spellId and BoxxyAuras.AllAuras[trackedAura.spellId] then
@@ -530,11 +558,14 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
     local newTrackedDebuffs = {}
     for _, trackedAura in ipairs(trackedDebuffs) do
         if trackedAura.seen then
+            trackedAura.forceExpired = nil -- Ensure flag is nil for active auras
             table.insert(newTrackedDebuffs, trackedAura)
         else -- Not seen: Expired or Removed
              -- Use debuff frame hover state here
             if isHoveringDebuffs then
                 table.insert(newTrackedDebuffs, trackedAura) -- Keep if hovering DEBUFF frame
+                trackedAura.forceExpired = true -- Mark it as kept only due to hover
+                trackedAura.expirationTime = 0 -- Set expiration time to ensure it shows as expired
             else
                  -- Aura is gone AND we are not hovering, remove from cache if present
                 if trackedAura.spellId and BoxxyAuras.AllAuras[trackedAura.spellId] then
@@ -545,33 +576,75 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
         end
     end
 
-    -- 5. Append New Auras & Trigger Scrape if needed
+    -- 5. Process New Auras: Replace matching expired-hovered auras or append
+    local buffsToAppend = {}
     for _, newAura in ipairs(newBuffsToAdd) do 
-        table.insert(newTrackedBuffs, newAura)
-        local key = newAura.spellId -- Use spellId as the key
-        -- Check if not already successfully scraped (key doesn't exist in AllAuras)
-        if key and not BoxxyAuras.AllAuras[key] then 
-            -- Schedule scrape using spellId, instanceId, and filter
-            C_Timer.After(0.01, function() 
-                BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "HELPFUL") 
-            end)
+        local replacedExpired = false
+        for i, existingAura in ipairs(newTrackedBuffs) do
+            -- Check if existing is expired (not seen) and matches spellId
+            if not existingAura.seen and existingAura.spellId == newAura.spellId then
+                newTrackedBuffs[i] = newAura -- Replace the expired data with the new aura data
+                replacedExpired = true
+                -- Trigger tooltip scrape check for the potentially updated aura info
+                local key = newAura.spellId
+                if key and not BoxxyAuras.AllAuras[key] then
+                    C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "HELPFUL") end)
+                end
+                break -- Stop searching for this newAura
+            end
+        end
+        if not replacedExpired then
+            table.insert(buffsToAppend, newAura) -- Not replacing, mark for appending
+            -- Trigger tooltip scrape for the genuinely new aura
+            local key = newAura.spellId
+            if key and not BoxxyAuras.AllAuras[key] then 
+                C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "HELPFUL") end)
+            end
         end
     end
+    -- Append any genuinely new buffs
+    for _, auraToAppend in ipairs(buffsToAppend) do
+        table.insert(newTrackedBuffs, auraToAppend)
+    end
+
+    -- Repeat for Debuffs
+    local debuffsToAppend = {}
     for _, newAura in ipairs(newDebuffsToAdd) do 
-        table.insert(newTrackedDebuffs, newAura) 
-        local key = newAura.spellId -- Use spellId as the key
-        -- Check if not already successfully scraped (key doesn't exist in AllAuras)
-        if key and not BoxxyAuras.AllAuras[key] then 
-            -- Schedule scrape using spellId, instanceId, and filter
-            C_Timer.After(0.01, function() 
-                BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "HARMFUL") 
-            end)
+        local replacedExpired = false
+        for i, existingAura in ipairs(newTrackedDebuffs) do
+            if not existingAura.seen and existingAura.spellId == newAura.spellId then
+                newTrackedDebuffs[i] = newAura -- Replace
+                replacedExpired = true
+                local key = newAura.spellId
+                if key and not BoxxyAuras.AllAuras[key] then
+                    C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "HARMFUL") end)
+                end
+                break
+            end
         end
+        if not replacedExpired then
+            table.insert(debuffsToAppend, newAura) -- Mark for appending
+            local key = newAura.spellId
+            if key and not BoxxyAuras.AllAuras[key] then 
+                C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "HARMFUL") end)
+            end
+        end
+    end
+    for _, auraToAppend in ipairs(debuffsToAppend) do
+        table.insert(newTrackedDebuffs, auraToAppend)
     end
 
     -- 6. Replace Cache
     trackedBuffs = newTrackedBuffs
     trackedDebuffs = newTrackedDebuffs
+
+    -- 6a. Conditionally re-sort if NOT hovering
+    if not isHoveringBuffs then
+        table.sort(trackedBuffs, SortAurasForDisplay)
+    end
+    if not isHoveringDebuffs then
+        table.sort(trackedDebuffs, SortAurasForDisplay)
+    end
 
     -- 7. Update Visual Icons based on final TRACKED cache
     for i, auraData in ipairs(trackedBuffs) do
@@ -583,14 +656,15 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
         auraIcon:Update(auraData, i, "HELPFUL")
         auraIcon.frame:Show() 
     end
-     for i, auraData in ipairs(trackedDebuffs) do
+
+    for i, auraData in ipairs(trackedDebuffs) do
         local auraIcon = debuffIcons[i]
         if not auraIcon then
             auraIcon = AuraIcon.New(debuffDisplayFrame, i, "BoxxyAurasDebuffIcon")
             debuffIcons[i] = auraIcon
         end
         auraIcon:Update(auraData, i, "HARMFUL")
-        auraIcon.frame:Show()
+        auraIcon.frame:Show() 
     end
 
     -- 8. Hide Leftover Visual Icons
@@ -710,17 +784,75 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         BoxxyAuras.SetupDisplayFrame(buffDisplayFrame, "BuffFrame")
         BoxxyAuras.SetupDisplayFrame(debuffDisplayFrame, "DebuffFrame")
         
+        -- >> ADDED BACK: Apply initial scale AND lock state to Buff/Debuff frames after setup <<
+        if BoxxyAurasDB then
+            local initialScale = BoxxyAurasDB.optionsScale or 1.0
+            local initialLock = BoxxyAurasDB.lockFrames or false
+            
+            -- Apply Scale directly to buff/debuff frames
+            if buffDisplayFrame then buffDisplayFrame:SetScale(initialScale) end
+            if debuffDisplayFrame then debuffDisplayFrame:SetScale(initialScale) end
+            
+            -- Apply Lock State directly within the timer for initial load
+            print(string.format("BoxxyAuras: C_Timer running for initial lock state: %s", tostring(initialLock))) -- DEBUG
+            if initialLock then
+                local function DirectApplyLock(frame, baseName)
+                    if not frame then return end
+                    print(string.format("BoxxyAuras: Directly locking %s", baseName)) -- DEBUG
+                    
+                    frame:SetMovable(false)
+                    frame.isLocked = true
+                    frame.wasLocked = true -- Sync state for polling
+                    
+                    -- Hide handles
+                    if frame.handles then
+                        for name, handle in pairs(frame.handles) do
+                            handle:EnableMouse(false)
+                            handle:Hide()
+                        end
+                    end
+                    -- Hide title
+                    local titleLabelName = baseName .. "TitleLabel"
+                    local titleLabel = _G[titleLabelName]
+                    if titleLabel then titleLabel:Hide() end
+                    
+                    -- Hide background/border (Set alpha to 0)
+                    if frame.backdropTextures and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
+                        local currentBgColor = frame.backdropTextures[5] and {frame.backdropTextures[5]:GetVertexColor()} or {0.1, 0.1, 0.1}
+                        BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "backdrop", currentBgColor[1], currentBgColor[2], currentBgColor[3], 0)
+                    end
+                    if frame.borderTextures and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
+                        local currentBorderColor = frame.borderTextures[5] and {frame.borderTextures[5]:GetVertexColor()} or {0.4, 0.4, 0.4}
+                        BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", currentBorderColor[1], currentBorderColor[2], currentBorderColor[3], 0)
+                    end
+                end
+                
+                DirectApplyLock(buffDisplayFrame, "BuffFrame")
+                DirectApplyLock(debuffDisplayFrame, "DebuffFrame")
+            else
+                    -- Optional: Add logic here if you need to ensure frames are explicitly UNLOCKED on load 
+                    -- (though ApplySettings and SetupDisplayFrame should handle default appearance)
+                    print("BoxxyAuras: Initial lock state is false, no direct locking needed.") -- DEBUG
+            end
+            -- REMOVED call to BoxxyAuras.Options.ApplyLockState from timer
+        end
+
         -- Start polling timers AFTER setup is complete
-        C_Timer.NewTicker(0.2, function() BoxxyAuras.PollFrameHoverState(buffDisplayFrame, "Buff Frame") end) 
+        C_Timer.NewTicker(0.2, function() BoxxyAuras.PollFrameHoverState(buffDisplayFrame, "Buff Frame") end)
         C_Timer.NewTicker(0.2, function() BoxxyAuras.PollFrameHoverState(debuffDisplayFrame, "Debuff Frame") end)
         print("BoxxyAuras: Polling timers started.") -- Debug confirmation
         
         -- Schedule Initial Aura Load
         C_Timer.After(0.2, InitializeAuras) 
     elseif event == "UNIT_AURA" and unit == "player" then
-        -- Re-enabled: Always schedule update on UNIT_AURA
-        -- Wrap the call in an anonymous function to ensure scope
-        C_Timer.After(0.1, function() BoxxyAuras.UpdateAuras() end) 
+        -- Debounce the update
+        if not BoxxyAuras.updateScheduled then
+            BoxxyAuras.updateScheduled = true
+            C_Timer.After(0.1, function() 
+                BoxxyAuras.updateScheduled = false -- Reset flag before running
+                BoxxyAuras.UpdateAuras()
+            end)
+        end
     end
 end)
 
@@ -728,38 +860,66 @@ end)
 BoxxyAuras.PollFrameHoverState = function(frame, frameDesc) -- Make it part of the addon table
     if not frame then return end -- Safety check
     
-    local mouseIsOverNow = BoxxyAuras.IsMouseWithinFrame(frame)
+    -- Determine current hover state unless locked (locked frames ignore mouse)
+    local mouseIsOverNow = not frame.isLocked and BoxxyAuras.IsMouseWithinFrame(frame)
     local wasOver = frame.isMouseOver -- Read/Write state from frame object
+    local wasLocked = frame.wasLocked -- Read previous lock state
+    local isLockedNow = frame.isLocked -- Read current lock state
     
-    if mouseIsOverNow ~= wasOver then
-        -- State changed
-        frame.isMouseOver = mouseIsOverNow -- Update the state ON THE FRAME
+    -- Determine if state needs updating (hover changed OR lock changed)
+    local needsUpdate = (mouseIsOverNow ~= wasOver) or (isLockedNow ~= wasLocked)
+    
+    if needsUpdate then
+        -- State changed: Update internal flags
+        frame.isMouseOver = mouseIsOverNow -- Update hover state
+        frame.wasLocked = isLockedNow      -- Update previous lock state for next poll
         
-        if not mouseIsOverNow and wasOver then
-            -- Changed from true (over) to false (not over)
-            -- print(string.format("DEBUG Poll: Mouse left %s, scheduling UpdateAuras for cleanup.", frameDesc))
-            -- Schedule the standard update; it will see the new hover state
-            C_Timer.After(0.05, BoxxyAuras.UpdateAuras) -- Call the public function
+        -- If mouse left AND frame is NOT locked, trigger aura cleanup
+        if not mouseIsOverNow and wasOver and not isLockedNow then 
+            C_Timer.After(0.05, BoxxyAuras.UpdateAuras) 
         end
         
-        -- Update visual hover effect for THIS frame
-        local cfgBGN = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorNormal) or { r = 0.1, g = 0.1, b = 0.1, a = 0.85 }
-        local cfgHover = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorHover) or { r = 0.2, g = 0.2, b = 0.2, a = 0.90 }
-        local backdropGroupName = "backdrop" -- Assuming this is the correct group name
+        -- Update visual background AND border effect for THIS frame
+        local backdropGroupName = "backdrop" 
+        local borderGroupName = "border"
         
-        -- DEBUG: Check if the texture group exists before coloring
-        if frame and frame.backdropTextures then
-            -- print(string.format("DEBUG Poll: Found backdropTextures for %s (Type: %s)", frameDesc, type(frame.backdropTextures)))
+        -- Check if texture groups exist before coloring
+        local hasBackdrop = frame and frame.backdropTextures
+        local hasBorder = frame and frame.borderTextures
+
+        if hasBackdrop or hasBorder then -- Proceed if at least one exists
+            local r_bg, g_bg, b_bg, a_bg = 0, 0, 0, 0 -- Background RGBA
+            local r_br, g_br, b_br, a_br = 0, 0, 0, 0 -- Border RGBA (initially transparent)
+
+            if isLockedNow then
+                -- If locked, set alpha to 0 for both regardless of hover
+                a_bg = 0
+                a_br = 0
+            else
+                -- If unlocked, use normal/hover colors for background
+                local cfgBGN = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorNormal) or { r = 0.1, g = 0.1, b = 0.1, a = 0.85 }
+                local cfgHover = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorHover) or { r = 0.2, g = 0.2, b = 0.2, a = 0.90 }
+                
+                if mouseIsOverNow and not frame.draggingHandle then 
+                    r_bg, g_bg, b_bg, a_bg = cfgHover.r, cfgHover.g, cfgHover.b, cfgHover.a
+                else 
+                    r_bg, g_bg, b_bg, a_bg = cfgBGN.r, cfgBGN.g, cfgBGN.b, cfgBGN.a
+                end
+                
+                -- Set border to be visible when unlocked (use configured color)
+                local cfgBorder = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or { r = 0.3, g = 0.3, b = 0.3, a = 0.8 }
+                r_br, g_br, b_br, a_br = cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a
+            end
+            
+            -- Apply the calculated colors/alphas
+            if hasBackdrop then
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, backdropGroupName, r_bg, g_bg, b_bg, a_bg)
+            end
+            if hasBorder then
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, borderGroupName, r_br, g_br, b_br, a_br)
+            end
         else
-             print(string.format("|cffFF0000DEBUG Poll Error:|r backdropTextures NOT FOUND for %s! Frame Type: %s", frameDesc, type(frame)))
-             -- Optionally skip coloring if group not found to avoid errors, though error indicates deeper issue
-             -- return 
-        end
-        
-        if mouseIsOverNow and not frame.draggingHandle then 
-             BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, backdropGroupName, cfgHover.r, cfgHover.g, cfgHover.b, cfgHover.a)
-        else 
-             BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, backdropGroupName, cfgBGN.r, cfgBGN.g, cfgBGN.b, cfgBGN.a)
+             print(string.format("|cffFF0000DEBUG Poll Error:|r backdropTextures OR borderTextures NOT FOUND for %s! Frame Type: %s", frameDesc or "UnknownFrame", type(frame)))
         end
     end
 end

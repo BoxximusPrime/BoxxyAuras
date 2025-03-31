@@ -5,6 +5,11 @@
 ## Notes: Displays player buffs and debuffs.
 ## SavedVariables: BoxxyAurasDB
 
-BoxxyAuras.lua 
+# Load XML files first (including fonts)
+Art/Fonts.xml
+Art/UIElements.xml
+
 UIUtils.lua
-AuraIcon.lua 
+AuraIcon.lua
+OptionsMenu.lua
+BoxxyAuras.lua 
