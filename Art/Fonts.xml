@@ -9,7 +9,7 @@
         <Color r="0.6" g="0.6" b="0.6"/>
     </font>
 
-    <font name="BoxxyAuras_DurationTxt" font="Interface\Addons\BoxxyAuras\Fonts\OpenSans-SemiBold.ttf" height="11" virtual="true">
+    <font name="BoxxyAuras_DurationTxt" font="Interface\Addons\BoxxyAuras\Fonts\OpenSans-SemiBold.ttf" height="8" virtual="true">
         <Color r="0.8" g="0.8" b="0.8"/>
     </font>
     <font name="BoxxyAuras_StackTxt" font="Interface\Addons\BoxxyAuras\Fonts\hk-grotesk.bold.ttf" height="12" outline="NORMAL" virtual="true">

@@ -840,12 +840,18 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             return BoxxyAurasDB[dbKey]
         end
         
+        -- Default hideBlizzardAuras if needed (ensure it exists in DB)
+        if BoxxyAurasDB.hideBlizzardAuras == nil then BoxxyAurasDB.hideBlizzardAuras = true end -- Default to TRUE
+
         local buffSettings = InitializeSettings("buffFrameSettings", defaultBuffFrameSettings)
         local debuffSettings = InitializeSettings("debuffFrameSettings", defaultDebuffFrameSettings)
 
         -- Apply Settings (sets width/pos/min_height) using the now global function
         BoxxyAuras.ApplySettings(buffDisplayFrame, buffSettings, "Buff Frame")
         BoxxyAuras.ApplySettings(debuffDisplayFrame, debuffSettings, "Debuff Frame")
+
+        -- Apply Blizzard frame visibility setting AFTER DB init
+        BoxxyAuras.ApplyBlizzardAuraVisibility(BoxxyAurasDB.hideBlizzardAuras)
 
         -- Initialize Handles (uses width set above, initial height might be small)
         CreateResizeHandlesForFrame(buffDisplayFrame, "BuffFrame") 
@@ -1134,43 +1140,45 @@ BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of add
         end
     end)
     frame:SetScript("OnDragStop", function(self)
-        -- Check if actually moving before processing stop logic
-        if self:IsMoving() then
-            self:StopMovingOrSizing()
-            -- Reset dragging handle state when frame drag stops
-            self.draggingHandle = nil 
-            
-            -- Save new position (width/height saved on handle release)
-            local finalX, finalY = self:GetLeft(), self:GetTop()
-            -- Determine the correct DB key based on the frame being dragged
-            local dbKey = nil
-            if self == buffDisplayFrame then -- Use global buffDisplayFrame
-                dbKey = "buffFrameSettings"
-            elseif self == debuffDisplayFrame then -- Use global debuffDisplayFrame
-                dbKey = "debuffFrameSettings"
-            end
-            
-            if dbKey and BoxxyAurasDB and BoxxyAurasDB[dbKey] then
-                BoxxyAurasDB[dbKey].x = finalX
-                BoxxyAurasDB[dbKey].y = finalY
-                BoxxyAurasDB[dbKey].anchor = "TOPLEFT" -- Assume TOPLEFT after drag
-                print(string.format("BoxxyAuras: Saved %s Drag Position (X:%.1f, Y:%.1f)", dbKey, finalX, finalY))
-            end
+        -- DEBUG: Check self at the start of OnDragStop
+        if not self then
+            print("self is nil in OnDragStop!")
+            return -- Can't do anything if self is nil
+        end
 
-            -- ADDED: Final layout update after frame drag finishes using GLOBAL lists/function
-            local iconList = nil
-            if self == buffDisplayFrame then -- Use global buffDisplayFrame/buffIcons
-                iconList = BoxxyAuras.buffIcons
-            elseif self == debuffDisplayFrame then -- Use global debuffDisplayFrame/debuffIcons
-                iconList = BoxxyAuras.debuffIcons
-            end
-            
-            -- Call the GLOBAL LayoutAuras function
-            if iconList then
-                BoxxyAuras.LayoutAuras(self, iconList) 
-            end
-        else -- If not moving (e.g., drag attempt on locked frame), just reset handle state
-             self.draggingHandle = nil 
+        -- Simplified logic: If OnDragStop fires, attempt to stop moving and save.
+        if type(self.StopMovingOrSizing) == "function" then
+            self:StopMovingOrSizing()
+        end
+
+        -- Reset dragging handle state regardless
+        self.draggingHandle = nil
+
+        -- Save new position
+        local finalX, finalY = self:GetLeft(), self:GetTop()
+        local dbKey = nil
+        if self == buffDisplayFrame then
+            dbKey = "buffFrameSettings"
+        elseif self == debuffDisplayFrame then
+            dbKey = "debuffFrameSettings"
+        end
+
+        if dbKey and BoxxyAurasDB and BoxxyAurasDB[dbKey] then
+            BoxxyAurasDB[dbKey].x = finalX
+            BoxxyAurasDB[dbKey].y = finalY
+            BoxxyAurasDB[dbKey].anchor = "TOPLEFT"
+        end
+
+        -- Final layout update
+        local iconList = nil
+        if self == buffDisplayFrame then
+            iconList = BoxxyAuras.buffIcons
+        elseif self == debuffDisplayFrame then
+            iconList = BoxxyAuras.debuffIcons
+        end
+
+        if iconList then
+            BoxxyAuras.LayoutAuras(self, iconList)
         end
     end)
     frame:SetClampedToScreen(true)
@@ -1259,5 +1267,32 @@ function BoxxyAuras.TriggerLayout(frameType)
         BoxxyAuras.LayoutAuras(targetFrame, iconList)
     else
         print(string.format("BoxxyAuras Warning: Could not trigger layout for %s. Frame or Icons missing?", frameType))
+    end
+end 
+
+-- >> ADDED: Function to show/hide default Blizzard frames <<
+function BoxxyAuras.ApplyBlizzardAuraVisibility(shouldHide)
+    -- Check if BuffFrame exists before trying to modify it
+    -- It might not be loaded immediately on PLAYER_LOGIN
+    if BuffFrame then
+        if shouldHide then
+            BuffFrame:Hide()
+            DebuffFrame:Hide()
+            print("BoxxyAuras: Hiding default Blizzard aura frames (BuffFrame and DebuffFrame).")
+        else
+            BuffFrame:Show()
+            DebuffFrame:Show()
+            print("BoxxyAuras: Showing default Blizzard aura frame (BuffFrame).")
+        end
+    else
+        -- If BuffFrame isn't ready, try again shortly after
+        C_Timer.After(0.5, function() 
+            if BuffFrame then
+                if shouldHide then BuffFrame:Hide() else BuffFrame:Show() end
+                print("BoxxyAuras: Applied Blizzard frame visibility (delayed).")
+            else
+                 print("BoxxyAuras Warning: BuffFrame still not found after delay.")
+            end
+        end)
     end
 end 

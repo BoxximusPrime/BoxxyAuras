@@ -69,8 +69,8 @@ function AuraIcon.New(parentFrame, index, baseName)
 
     -- Create FontString inheriting the virtual font object
     local durationText = instance.frame:CreateFontString(nil, "OVERLAY", "BoxxyAuras_DurationTxt")
-    durationText:SetPoint("TOPLEFT", instance.textureWidget, "BOTTOMLEFT", 0, -padding) -- Anchor to textureWidget
-    durationText:SetPoint("TOPRIGHT", instance.textureWidget, "BOTTOMRIGHT", 0, -padding) -- Anchor to textureWidget
+    durationText:SetPoint("TOPLEFT", instance.textureWidget, "BOTTOMLEFT", -padding, -padding) -- Anchor top below texture (adjust left for full width)
+    durationText:SetPoint("TOPRIGHT", instance.textureWidget, "BOTTOMRIGHT", padding, -padding) -- Anchor top below texture (adjust right for full width)
     durationText:SetPoint("BOTTOM", instance.frame, "BOTTOM", 0, padding)
     durationText:SetJustifyH("CENTER")
     instance.frame.durationText = durationText
@@ -279,8 +279,8 @@ end
 
 -- Helper to format duration (Kept internal)
 local function FormatDuration(seconds)
-    if seconds >= 3600 then return string.format("%.1fh", seconds / 3600)
-    elseif seconds >= 60 then return string.format("%.1fm", seconds / 60)
+    if seconds >= 3600 then return string.format("%.0fh", seconds / 3600) -- Format as whole number hours
+    elseif seconds >= 60 then return string.format("%.0fm", seconds / 60) -- Format as whole number minutes
     else return string.format("%.0fs", seconds)
     end
 end
@@ -288,11 +288,16 @@ end
 -- Methods now operate on 'self' (the instance table) and access frame via self.frame
 function AuraIcon.Update(self, auraData, auraIndex, auraType)
     if not auraData then
-        self.frame:Hide()
-        -- Clear OnUpdate if hiding
-        self.frame:SetScript("OnUpdate", nil)
+        if self.frame and self.frame:IsShown() then -- Only hide and clear OnUpdate if currently shown
+            self.frame:Hide()
+            self.frame:SetScript("OnUpdate", nil)
+        end
         return
     end
+    
+    -- Check if the frame was hidden before this update
+    local wasHidden = not self.frame:IsShown()
+    
     -- Reset state for update (initial assumption)
     self.isExpired = false 
 
@@ -378,9 +383,15 @@ function AuraIcon.Update(self, auraData, auraIndex, auraType)
             end)
         else
             self.frame:SetScript("OnUpdate", nil)
-            self.frame.durationText:Hide()
+            if self.frame.durationText then self.frame.durationText:Hide() end -- Add safety check
         end
     end -- End of check for not forceExpired
+
+    -- If the frame was hidden and is now being updated (implicitly shown by parent logic),
+    -- play the 'new aura' animation.
+    if wasHidden and self.newAuraAnimGroup then
+        self.newAuraAnimGroup:Play()
+    end
 end
 
 function AuraIcon.UpdateDurationDisplay(self, currentTime)
@@ -611,8 +622,8 @@ function AuraIcon:Resize(newIconSize)
     end
     if self.frame.durationText then
         self.frame.durationText:ClearAllPoints()
-        self.frame.durationText:SetPoint("TOPLEFT", self.textureWidget, "BOTTOMLEFT", 0, -padding)
-        self.frame.durationText:SetPoint("TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", 0, -padding)
+        self.frame.durationText:SetPoint("TOPLEFT", self.textureWidget, "BOTTOMLEFT", -padding, -padding)
+        self.frame.durationText:SetPoint("TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", padding, -padding)
         self.frame.durationText:SetPoint("BOTTOM", self.frame, "BOTTOM", 0, padding)
     end
     if self.frame.wipeOverlay then 

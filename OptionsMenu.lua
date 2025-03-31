@@ -66,13 +66,11 @@ local contentFrame = CreateFrame("Frame", "BoxxyAurasOptionsContentFrame", scrol
 contentFrame:SetSize(scrollFrame:GetWidth(), 400) -- Initial height, can grow
 scrollFrame:SetScrollChild(contentFrame)
 
-local currentY = -10 -- Starting Y offset for options
-
 --[[------------------------------------------------------------
 -- Option: Lock Frames Checkbox
 --------------------------------------------------------------]]
 local lockFramesCheck = CreateFrame("CheckButton", "BoxxyAurasLockFramesCheckButton", contentFrame, "BAURASCheckBoxTemplate") 
-lockFramesCheck:SetPoint("TOPLEFT", 10, currentY)
+lockFramesCheck:SetPoint("TOPLEFT", 10, -10) -- Initial Y offset
 lockFramesCheck:SetText("Lock Frames") -- Use the custom template's SetText method
 
 -- OnClick saves the setting
@@ -98,71 +96,43 @@ lockFramesCheck:SetScript("OnClick", function(self)
 end)
 
 BoxxyAuras.Options.LockFramesCheck = lockFramesCheck
-currentY = currentY - lockFramesCheck:GetHeight() - 15 -- Update Y offset for next option
+-- Space before next option
+local lastElement = lockFramesCheck 
+local verticalSpacing = -15
 
 --[[------------------------------------------------------------
--- Option: Scale Slider
+-- Option: Hide Blizzard Auras Checkbox
 --------------------------------------------------------------]]
--- Title for the slider
-local scaleSliderLabel = contentFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Header") -- Using standard font for now
-scaleSliderLabel:SetPoint("TOPLEFT", lockFramesCheck, "BOTTOMLEFT", 0, -15) -- Position below lock check
-scaleSliderLabel:SetText("Window Scale")
-BoxxyAuras.Options.ScaleSliderLabel = scaleSliderLabel
-currentY = currentY - scaleSliderLabel:GetHeight() - 5 -- Adjust Y
+local hideBlizzardCheck = CreateFrame("CheckButton", "BoxxyAurasHideBlizzardCheckButton", contentFrame, "BAURASCheckBoxTemplate") 
+hideBlizzardCheck:SetPoint("TOPLEFT", lastElement, "BOTTOMLEFT", 0, verticalSpacing) -- Position below previous
+hideBlizzardCheck:SetText("Hide Default Blizzard Auras")
 
--- Create the slider
-local scaleSlider = CreateFrame("Slider", "BoxxyAurasOptionsScaleSlider", contentFrame, "BAURASSlider")
-scaleSlider:SetPoint("TOPLEFT", scaleSliderLabel, "BOTTOMLEFT", 5, -10) -- Position below label
-scaleSlider:SetMinMaxValues(0.5, 2.0) -- Set scale range
-scaleSlider:SetValueStep(0.05)      -- Set step increment
-scaleSlider:SetObeyStepOnDrag(true)
-scaleSlider:SetWidth(160) -- Match WhoGotLoots slider width
--- Ensure labels are available if defined in template
-if scaleSlider.KeyLabel then scaleSlider.KeyLabel:Show() end
-if scaleSlider.KeyLabel2 then scaleSlider.KeyLabel2:Show() end
+hideBlizzardCheck:SetScript("OnClick", function(self)
+    if not BoxxyAurasDB then return end
 
--- OnValueChanged updates label dynamically (optional, OnMouseUp handles saving)
-scaleSlider:SetScript("OnValueChanged", function(self, value)
-    -- Update the main label (if it exists on the template)
-    if self.KeyLabel then 
-        self.KeyLabel:SetText(string.format("%.2f", value))
-    end
-    -- You might need to manually update thumb position if template doesn't
-    local min, max = self:GetMinMaxValues()
-    local range = max - min
-    if range > 0 and self.VirtualThumb then 
-        local thumbPos = (value - min) / range
-        self.VirtualThumb:SetPoint("CENTER", self, "LEFT", thumbPos * self:GetWidth(), 0)
-    end
+    local newState = not (BoxxyAurasDB.hideBlizzardAuras or false) 
+    BoxxyAurasDB.hideBlizzardAuras = newState
+
+    -- Call the function from the main addon table now
+    BoxxyAuras.ApplyBlizzardAuraVisibility(newState)
+
+    self:SetChecked(newState)
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end)
 
--- OnMouseUp saves the value and applies the scale
-scaleSlider:SetScript("OnMouseUp", function(self)
-    local value = self:GetValue()
-    -- Round to nearest step
-    local step = self:GetValueStep()
-    value = math.floor((value / step) + 0.5) * step
-    self:SetValue(value) -- Snap the visual slider
-    
-    if BoxxyAurasDB then
-        BoxxyAurasDB.optionsScale = value
-        BoxxyAuras.Options:ApplyScale(value)
-    end
-    PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON) -- Sound feedback
-end)
-
-BoxxyAuras.Options.ScaleSlider = scaleSlider
-currentY = currentY - scaleSlider:GetHeight() - 25 -- Update Y offset significantly for next option
+BoxxyAuras.Options.HideBlizzardCheck = hideBlizzardCheck
+-- Update last element for next anchor
+lastElement = hideBlizzardCheck
+verticalSpacing = -15 -- Reset/adjust spacing
 
 --[[------------------------------------------------------------
 -- Option: Buff Text Alignment
 --------------------------------------------------------------]]
 -- Title for the alignment options
 local buffAlignLabel = contentFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Header") 
-buffAlignLabel:SetPoint("TOPLEFT", scaleSlider, "BOTTOMLEFT", -5, -30) -- Position below scale slider
+buffAlignLabel:SetPoint("TOPLEFT", lastElement, "BOTTOMLEFT", 0, verticalSpacing - 10) -- Position below previous, adjust spacing
 buffAlignLabel:SetText("Buff Text Alignment")
 BoxxyAuras.Options.BuffAlignLabel = buffAlignLabel
-currentY = currentY - buffAlignLabel:GetHeight() - 10 -- Adjust Y
 
 -- Checkboxes (arranged horizontally)
 local checkSpacing = 50 -- DOUBLED spacing
@@ -213,18 +183,18 @@ buffAlignLeftCheck:SetScript("OnClick", function(self) HandleBuffAlignmentClick(
 buffAlignCenterCheck:SetScript("OnClick", function(self) HandleBuffAlignmentClick(self, "CENTER") end)
 buffAlignRightCheck:SetScript("OnClick", function(self) HandleBuffAlignmentClick(self, "RIGHT") end)
 
--- Update Y offset before Debuff section
-currentY = currentY - buffAlignLeftCheck:GetHeight() - 20 -- Add more vertical space
+-- Update last element for next anchor
+lastElement = buffAlignLeftCheck -- Anchor next section below the row of checkboxes
+verticalSpacing = -20 -- Add more vertical space
 
 --[[------------------------------------------------------------
 -- Option: Debuff Text Alignment
 --------------------------------------------------------------]]
 -- Title for the alignment options
 local debuffAlignLabel = contentFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Header") 
-debuffAlignLabel:SetPoint("TOPLEFT", buffAlignLeftCheck, "BOTTOMLEFT", 0, -15) -- Position below first row of checks
+debuffAlignLabel:SetPoint("TOPLEFT", lastElement, "BOTTOMLEFT", -5, verticalSpacing) -- Position below Buff Size Slider
 debuffAlignLabel:SetText("Debuff Text Alignment")
 BoxxyAuras.Options.DebuffAlignLabel = debuffAlignLabel
-currentY = currentY - debuffAlignLabel:GetHeight() - 10 -- Adjust Y
 
 -- Checkboxes (arranged horizontally)
 -- Note: Reuses the checkSpacing value defined above
@@ -274,17 +244,17 @@ debuffAlignLeftCheck:SetScript("OnClick", function(self) HandleDebuffAlignmentCl
 debuffAlignCenterCheck:SetScript("OnClick", function(self) HandleDebuffAlignmentClick(self, "CENTER") end)
 debuffAlignRightCheck:SetScript("OnClick", function(self) HandleDebuffAlignmentClick(self, "RIGHT") end)
 
--- Update Y offset for next section
-currentY = currentY - debuffAlignLeftCheck:GetHeight() - 25 -- Increase spacing
+-- Update last element for next anchor
+lastElement = debuffAlignLeftCheck -- Anchor next section below the row of checkboxes
+verticalSpacing = -20 -- Reset/adjust spacing
 
 --[[------------------------------------------------------------
 -- Option: Buff Icon Size Slider
 --------------------------------------------------------------]]
 local buffSizeLabel = contentFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Header") 
-buffSizeLabel:SetPoint("TOPLEFT", debuffAlignLeftCheck, "BOTTOMLEFT", 0, -20) -- Position below debuff checks
+buffSizeLabel:SetPoint("TOPLEFT", lastElement, "BOTTOMLEFT", 0, verticalSpacing) -- Position below buff align checks
 buffSizeLabel:SetText("Buff Icon Size")
 BoxxyAuras.Options.BuffSizeLabel = buffSizeLabel
-currentY = currentY - buffSizeLabel:GetHeight() - 5 
 
 local buffSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsBuffSizeSlider", contentFrame, "BAURASSlider")
 buffSizeSlider:SetPoint("TOPLEFT", buffSizeLabel, "BOTTOMLEFT", 5, -10) 
@@ -323,16 +293,17 @@ buffSizeSlider:SetScript("OnMouseUp", function(self)
 end)
 
 BoxxyAuras.Options.BuffSizeSlider = buffSizeSlider
-currentY = currentY - buffSizeSlider:GetHeight() - 25 -- Update Y offset
+-- Update last element for next anchor
+lastElement = buffSizeSlider
+verticalSpacing = -25 -- Update Y offset
 
 --[[------------------------------------------------------------
 -- Option: Debuff Icon Size Slider
 --------------------------------------------------------------]]
 local debuffSizeLabel = contentFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Header") 
-debuffSizeLabel:SetPoint("TOPLEFT", buffSizeSlider, "BOTTOMLEFT", -5, -20) -- Position below buff size slider
+debuffSizeLabel:SetPoint("TOPLEFT", lastElement, "BOTTOMLEFT", 0, verticalSpacing) -- Position below debuff align checks
 debuffSizeLabel:SetText("Debuff Icon Size")
 BoxxyAuras.Options.DebuffSizeLabel = debuffSizeLabel
-currentY = currentY - debuffSizeLabel:GetHeight() - 5 
 
 local debuffSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsDebuffSizeSlider", contentFrame, "BAURASSlider")
 debuffSizeSlider:SetPoint("TOPLEFT", debuffSizeLabel, "BOTTOMLEFT", 5, -10) 
@@ -370,7 +341,58 @@ debuffSizeSlider:SetScript("OnMouseUp", function(self)
 end)
 
 BoxxyAuras.Options.DebuffSizeSlider = debuffSizeSlider
-currentY = currentY - debuffSizeSlider:GetHeight() - 15 
+-- Update last element for next anchor
+lastElement = debuffSizeSlider
+verticalSpacing = -25
+
+--[[------------------------------------------------------------
+-- Option: Scale Slider
+--------------------------------------------------------------]]
+-- Title for the slider
+local scaleSliderLabel = contentFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
+scaleSliderLabel:SetPoint("TOPLEFT", lastElement, "BOTTOMLEFT", -5, verticalSpacing) -- Position below debuff size slider
+scaleSliderLabel:SetText("Window Scale")
+BoxxyAuras.Options.ScaleSliderLabel = scaleSliderLabel
+
+-- Create the slider
+local scaleSlider = CreateFrame("Slider", "BoxxyAurasOptionsScaleSlider", contentFrame, "BAURASSlider")
+scaleSlider:SetPoint("TOPLEFT", scaleSliderLabel, "BOTTOMLEFT", 5, -10) -- Position below label
+scaleSlider:SetMinMaxValues(0.5, 2.0) -- Set scale range
+scaleSlider:SetValueStep(0.05)      -- Set step increment
+scaleSlider:SetObeyStepOnDrag(true)
+scaleSlider:SetWidth(160)
+-- Ensure labels are available if defined in template
+if scaleSlider.KeyLabel then scaleSlider.KeyLabel:Show() end
+if scaleSlider.KeyLabel2 then scaleSlider.KeyLabel2:Show() end
+
+-- OnValueChanged updates label dynamically
+scaleSlider:SetScript("OnValueChanged", function(self, value)
+    if self.KeyLabel then 
+        self.KeyLabel:SetText(string.format("%.2f", value))
+    end
+    local min, max = self:GetMinMaxValues()
+    local range = max - min
+    if range > 0 and self.VirtualThumb then 
+        local thumbPos = (value - min) / range
+        self.VirtualThumb:SetPoint("CENTER", self, "LEFT", thumbPos * self:GetWidth(), 0)
+    end
+end)
+
+-- OnMouseUp saves the value and applies the scale
+scaleSlider:SetScript("OnMouseUp", function(self)
+    local value = self:GetValue()
+    local step = self:GetValueStep()
+    value = math.floor((value / step) + 0.5) * step
+    self:SetValue(value) -- Snap the visual slider
+    
+    if BoxxyAurasDB then
+        BoxxyAurasDB.optionsScale = value
+        BoxxyAuras.Options:ApplyScale(value)
+    end
+    PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+end)
+
+BoxxyAuras.Options.ScaleSlider = scaleSlider
 
 --[[------------------------------------------------------------
 -- Functions to Load/Save/Toggle
@@ -393,6 +415,9 @@ function BoxxyAuras.Options:Load()
     if BoxxyAurasDB.buffFrameSettings.iconSize == nil then BoxxyAurasDB.buffFrameSettings.iconSize = 24 end
     if BoxxyAurasDB.debuffFrameSettings.iconSize == nil then BoxxyAurasDB.debuffFrameSettings.iconSize = 24 end
     -- No need to default numIconsWide here, PLAYER_LOGIN handles that
+
+    -- Default hideBlizzardAuras if needed
+    if BoxxyAurasDB.hideBlizzardAuras == nil then BoxxyAurasDB.hideBlizzardAuras = true end -- Default to TRUE
 
     -- Set Lock checkbox state
     if self.LockFramesCheck then
@@ -460,10 +485,16 @@ function BoxxyAuras.Options:Load()
         end
     end
 
+    -- Load Hide Blizzard Auras checkbox state
+    if self.HideBlizzardCheck then
+        self.HideBlizzardCheck:SetChecked(BoxxyAurasDB.hideBlizzardAuras)
+    end
+
     -- Apply the loaded states
     self:ApplyLockState(BoxxyAurasDB.lockFrames)
     self:ApplyScale(BoxxyAurasDB.optionsScale)
-    self:ApplyTextAlign() 
+    self:ApplyTextAlign()
+    -- ApplyBlizzardAuraVisibility is now called on PLAYER_LOGIN
 end
 
 function BoxxyAuras.Options:Toggle()
@@ -561,6 +592,24 @@ function BoxxyAuras.Options:ApplyTextAlign()
     if BoxxyAuras.TriggerLayout then 
         BoxxyAuras.TriggerLayout("Buff")
         BoxxyAuras.TriggerLayout("Debuff")
+    end
+end
+
+-- >> MOVED & RENAMED: Function to show/hide default Blizzard frames <<
+function BoxxyAuras.ApplyBlizzardAuraVisibility(shouldHide)
+    -- Check if BuffFrame exists before trying to modify it
+    if BuffFrame then
+        if shouldHide then
+            BuffFrame:Hide()
+            -- TemporaryEnchantFrame might not exist or be relevant in modern UI
+            print("BoxxyAuras: Hiding default Blizzard aura frame (BuffFrame).")
+        else
+            BuffFrame:Show()
+            -- TemporaryEnchantFrame might not exist or be relevant in modern UI
+            print("BoxxyAuras: Showing default Blizzard aura frame (BuffFrame).")
+        end
+    else
+        print("BoxxyAuras Warning: BuffFrame not found when trying to apply visibility setting.")
     end
 end
 

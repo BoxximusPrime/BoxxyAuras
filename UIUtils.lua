@@ -15,8 +15,8 @@ BoxxyAuras.FrameTextures =
     },
     ItemEntryBorder = {
         file = "EdgedBorder_Sharp", -- Assuming this exists or we replace it
-        cornerSize = 4,
-        cornerCoord = 16/64,
+        cornerSize = 8,
+        cornerCoord = 24/64,
     },
     -- Adding a simple border option
     TooltipBorder = {
