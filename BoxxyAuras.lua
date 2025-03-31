@@ -200,8 +200,8 @@ UpdateEdgeHandleDimensions = function(frame, frameW, frameH)
     if not frame or not frame.handles then return end -- Safety check
     for pointName, handle in pairs(frame.handles) do
         -- Only Left and Right handles exist now
-        handle:SetSize(handleSize, frameH * 0.8) 
-    end
+            handle:SetSize(handleSize, frameH * 0.8)
+        end
 end
 
 -- *** Attach LayoutAuras function to the BoxxyAuras table ***
@@ -584,7 +584,7 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
     for _, trackedAura in ipairs(trackedBuffs) do trackedAura.seen = false end
     for _, trackedAura in ipairs(trackedDebuffs) do trackedAura.seen = false end
 
-    -- Get hover states for BOTH frames using polling function
+    -- Get hover states for BOTH frames using the direct check function again
     local isHoveringBuffs = BoxxyAuras.IsMouseWithinFrame(buffDisplayFrame)
     local isHoveringDebuffs = BoxxyAuras.IsMouseWithinFrame(debuffDisplayFrame)
     
@@ -682,7 +682,7 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
                 replacedExpired = true
                 -- Trigger tooltip scrape check for the potentially updated aura info
                 local key = newAura.spellId
-                if key and not BoxxyAuras.AllAuras[key] then
+        if key and not BoxxyAuras.AllAuras[key] then 
                     C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "HELPFUL") end)
                 end
                 break -- Stop searching for this newAura
@@ -711,7 +711,7 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
                 newTrackedDebuffs[i] = newAura -- Replace
                 replacedExpired = true
                 local key = newAura.spellId
-                if key and not BoxxyAuras.AllAuras[key] then
+        if key and not BoxxyAuras.AllAuras[key] then 
                     C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "HARMFUL") end)
                 end
                 break
@@ -752,14 +752,14 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
         auraIcon.frame:Show() 
     end
 
-    for i, auraData in ipairs(trackedDebuffs) do
+     for i, auraData in ipairs(trackedDebuffs) do
         local auraIcon = BoxxyAuras.debuffIcons[i]
         if not auraIcon then
             auraIcon = AuraIcon.New(debuffDisplayFrame, i, "BoxxyAurasDebuffIcon")
             BoxxyAuras.debuffIcons[i] = auraIcon
         end
         auraIcon:Update(auraData, i, "HARMFUL")
-        auraIcon.frame:Show() 
+        auraIcon.frame:Show()
     end
 
     -- 8. Hide Leftover Visual Icons
@@ -779,6 +779,7 @@ end
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("PLAYER_LOGIN") 
 eventFrame:RegisterEvent("UNIT_AURA")
+eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     local unit = (...)
     if event == "PLAYER_LOGIN" then
@@ -830,9 +831,9 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             if BoxxyAurasDB[dbKey] == nil then 
                 BoxxyAurasDB[dbKey] = CopyTable(defaults)
             else -- Ensure all keys exist even if DB entry exists
-                for key, defaultValue in pairs(defaults) do
-                    if BoxxyAurasDB[dbKey][key] == nil then
-                        BoxxyAurasDB[dbKey][key] = defaultValue
+            for key, defaultValue in pairs(defaults) do
+                if BoxxyAurasDB[dbKey][key] == nil then
+                    BoxxyAurasDB[dbKey][key] = defaultValue
                     end
                 end
             end
@@ -908,11 +909,11 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             end
             -- REMOVED call to BoxxyAuras.Options.ApplyLockState from timer
         end
-
-        -- Start polling timers AFTER setup is complete
-        C_Timer.NewTicker(0.2, function() BoxxyAuras.PollFrameHoverState(buffDisplayFrame, "Buff Frame") end)
-        C_Timer.NewTicker(0.2, function() BoxxyAuras.PollFrameHoverState(debuffDisplayFrame, "Debuff Frame") end)
         
+        -- Start polling timers AFTER setup is complete
+        C_Timer.NewTicker(0.2, function() BoxxyAuras.PollFrameHoverState(buffDisplayFrame, "Buff Frame") end) 
+        C_Timer.NewTicker(0.2, function() BoxxyAuras.PollFrameHoverState(debuffDisplayFrame, "Debuff Frame") end)
+
         -- Schedule Initial Aura Load
         C_Timer.After(0.2, InitializeAuras) 
     elseif event == "UNIT_AURA" and unit == "player" then
@@ -923,6 +924,39 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                 BoxxyAuras.updateScheduled = false -- Reset flag before running
                 BoxxyAuras.UpdateAuras()
             end)
+        end
+    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        local timestamp, subevent, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, spellId, spellName = CombatLogGetCurrentEventInfo()
+
+        -- Check if the event is spell damage taken by the player
+        if destName and destName == UnitName("player") and 
+           (subevent == "SPELL_DAMAGE" or subevent == "SPELL_PERIODIC_DAMAGE") then
+            -- Check if the damage source spellId matches any tracked debuff
+            if spellId and #trackedDebuffs > 0 then
+                for _, trackedDebuff in ipairs(trackedDebuffs) do
+                    -- Compare spell IDs
+                    -- Use correct camelCase: trackedDebuff.spellId
+                    -- Make sure trackedDebuff and its spellID exist before comparing
+                    if trackedDebuff and trackedDebuff.spellId and trackedDebuff.spellId == spellId then
+                        -- Found a match! Print a debug message.
+
+                        -- Find the corresponding AuraIcon instance and call Shake
+                        for _, auraIcon in ipairs(BoxxyAuras.debuffIcons) do
+                            -- Check if the icon exists and its instance ID matches
+                            if auraIcon and auraIcon.auraInstanceID and auraIcon.auraInstanceID == trackedDebuff.auraInstanceID then
+                                if auraIcon.Shake then -- Check if the Shake method exists
+                                    auraIcon:Shake()
+                                else
+                                     print("|cffFF0000BoxxyAuras ERROR:|r Shake method not found on AuraIcon instance!")
+                                end
+                                break -- Found the icon, no need to continue looping
+                            end
+                        end
+                        
+                        break -- Stop checking once found
+                    end
+                end
+            end
         end
     end
 end)
@@ -945,9 +979,9 @@ BoxxyAuras.PollFrameHoverState = function(frame, frameDesc) -- Make it part of t
         frame.isMouseOver = mouseIsOverNow -- Update hover state
         frame.wasLocked = isLockedNow      -- Update previous lock state for next poll
         
-        -- If mouse left AND frame is NOT locked, trigger aura cleanup
+        -- *** RE-ADD: Trigger UpdateAuras shortly after mouse leaves (if not locked) ***
         if not mouseIsOverNow and wasOver and not isLockedNow then 
-            C_Timer.After(0.05, BoxxyAuras.UpdateAuras) 
+           C_Timer.After(0.05, BoxxyAuras.UpdateAuras) 
         end
         
         -- Update visual background AND border effect for THIS frame
@@ -968,8 +1002,8 @@ BoxxyAuras.PollFrameHoverState = function(frame, frameDesc) -- Make it part of t
                 a_br = 0
             else
                 -- If unlocked, use normal/hover colors for background
-                local cfgBGN = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorNormal) or { r = 0.1, g = 0.1, b = 0.1, a = 0.85 }
-                local cfgHover = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorHover) or { r = 0.2, g = 0.2, b = 0.2, a = 0.90 }
+        local cfgBGN = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorNormal) or { r = 0.1, g = 0.1, b = 0.1, a = 0.85 }
+        local cfgHover = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorHover) or { r = 0.2, g = 0.2, b = 0.2, a = 0.90 }
                 
                 if mouseIsOverNow and not frame.draggingHandle then 
                     r_bg, g_bg, b_bg, a_bg = cfgHover.r, cfgHover.g, cfgHover.b, cfgHover.a
@@ -1056,15 +1090,6 @@ function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter)
             end
         end
     end
-
-    -- Store tooltip lines if found using spellId as key
-    if spellId and #tooltipLines > 0 then
-        -- Store name and lines in a sub-table
-        BoxxyAuras.AllAuras[spellId] = { 
-            name = spellNameFromTip or ("SpellID: " .. spellId), -- Fallback if name wasn't extracted
-            lines = tooltipLines 
-        }
-    end
 end 
 
 -- Common Frame Setup Function
@@ -1084,7 +1109,7 @@ BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of add
     -- Create and Anchor Title Label
     local labelText = (frameName == "BuffFrame") and "Buffs" or "Debuffs" -- Should correctly set text to "Buffs" for the buff frame
     local titleLabel = frame:CreateFontString(frameName .. "TitleLabel", "OVERLAY", "GameFontNormalLarge")
-
+        
     if titleLabel then
         -- Anchor the label's bottom-left to the frame's top-left, placing it above the frame
         titleLabel:ClearAllPoints() -- Clear previous points just in case
@@ -1102,40 +1127,50 @@ BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of add
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    frame:SetScript("OnDragStart", function(self) 
+        -- Only start moving if the frame is not locked
+        if not self.isLocked then
+            self:StartMoving() 
+        end
+    end)
     frame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        -- Reset dragging handle state when frame drag stops
-        self.draggingHandle = nil 
-        
-        -- Save new position (width/height saved on handle release)
-        local finalX, finalY = self:GetLeft(), self:GetTop()
-        -- Determine the correct DB key based on the frame being dragged
-        local dbKey = nil
-        if self == buffDisplayFrame then -- Use global buffDisplayFrame
-            dbKey = "buffFrameSettings"
-        elseif self == debuffDisplayFrame then -- Use global debuffDisplayFrame
-            dbKey = "debuffFrameSettings"
-        end
-        
-        if dbKey and BoxxyAurasDB and BoxxyAurasDB[dbKey] then
-            BoxxyAurasDB[dbKey].x = finalX
-            BoxxyAurasDB[dbKey].y = finalY
-            BoxxyAurasDB[dbKey].anchor = "TOPLEFT" -- Assume TOPLEFT after drag
-            print(string.format("BoxxyAuras: Saved %s Drag Position (X:%.1f, Y:%.1f)", dbKey, finalX, finalY))
-        end
+        -- Check if actually moving before processing stop logic
+        if self:IsMoving() then
+            self:StopMovingOrSizing()
+            -- Reset dragging handle state when frame drag stops
+            self.draggingHandle = nil 
+            
+            -- Save new position (width/height saved on handle release)
+            local finalX, finalY = self:GetLeft(), self:GetTop()
+            -- Determine the correct DB key based on the frame being dragged
+            local dbKey = nil
+            if self == buffDisplayFrame then -- Use global buffDisplayFrame
+                dbKey = "buffFrameSettings"
+            elseif self == debuffDisplayFrame then -- Use global debuffDisplayFrame
+                dbKey = "debuffFrameSettings"
+            end
+            
+            if dbKey and BoxxyAurasDB and BoxxyAurasDB[dbKey] then
+                BoxxyAurasDB[dbKey].x = finalX
+                BoxxyAurasDB[dbKey].y = finalY
+                BoxxyAurasDB[dbKey].anchor = "TOPLEFT" -- Assume TOPLEFT after drag
+                print(string.format("BoxxyAuras: Saved %s Drag Position (X:%.1f, Y:%.1f)", dbKey, finalX, finalY))
+            end
 
-        -- ADDED: Final layout update after frame drag finishes using GLOBAL lists/function
-        local iconList = nil
-        if self == buffDisplayFrame then -- Use global buffDisplayFrame/buffIcons
-            iconList = BoxxyAuras.buffIcons
-        elseif self == debuffDisplayFrame then -- Use global debuffDisplayFrame/debuffIcons
-            iconList = BoxxyAuras.debuffIcons
-        end
-        
-        -- Call the GLOBAL LayoutAuras function
-        if iconList then
-            BoxxyAuras.LayoutAuras(self, iconList) 
+            -- ADDED: Final layout update after frame drag finishes using GLOBAL lists/function
+            local iconList = nil
+            if self == buffDisplayFrame then -- Use global buffDisplayFrame/buffIcons
+                iconList = BoxxyAuras.buffIcons
+            elseif self == debuffDisplayFrame then -- Use global debuffDisplayFrame/debuffIcons
+                iconList = BoxxyAuras.debuffIcons
+            end
+            
+            -- Call the GLOBAL LayoutAuras function
+            if iconList then
+                BoxxyAuras.LayoutAuras(self, iconList) 
+            end
+        else -- If not moving (e.g., drag attempt on locked frame), just reset handle state
+             self.draggingHandle = nil 
         end
     end)
     frame:SetClampedToScreen(true)
@@ -1170,7 +1205,7 @@ BoxxyAuras.ApplySettings = function(frame, settings, frameDesc)
     
     -- Set Width, MINIMUM Height, and Position
     frame:SetSize(calculatedWidth, calculatedMinHeight) 
-    frame:ClearAllPoints()
+            frame:ClearAllPoints()
     -- Handle different anchors
     if settings.anchor == "CENTER" then
         frame:SetPoint("CENTER", UIParent, "CENTER", settings.x, settings.y)

@@ -83,6 +83,14 @@ function AuraIcon.New(parentFrame, index, baseName)
     wipeOverlay:SetAlpha(0) -- Start hidden
     instance.frame.wipeOverlay = wipeOverlay -- Store reference
 
+    -- Create Shake Overlay Texture (Initially hidden)
+    local shakeOverlay = instance.frame:CreateTexture(nil, "OVERLAY", nil, 1) -- OVERLAY layer, subLevel 1 (above icon, below text)
+    shakeOverlay:SetColorTexture(1, 0, 0, 0.75) -- Red, initially 0 alpha
+    shakeOverlay:SetSize(iconTextureSize, iconTextureSize)
+    shakeOverlay:SetPoint("TOPLEFT", instance.textureWidget, "TOPLEFT")
+    shakeOverlay:SetAlpha(0) -- Start hidden
+    instance.frame.shakeOverlay = shakeOverlay -- Store reference
+
     -- Apply the backdrop using utility functions
     BoxxyAuras.UIUtils.DrawSlicedBG(instance.frame, "ItemEntryBG", "backdrop", 0) -- Use ItemEntryBG for backdrop
     BoxxyAuras.UIUtils.DrawSlicedBG(instance.frame, "ItemEntryBorder", "border", 0)   -- Use ItemEntryBorder for border
@@ -208,6 +216,64 @@ function AuraIcon.New(parentFrame, index, baseName)
     wipeSlide:SetOrder(2) -- Start after initial fade-in/pop
     wipeSlide:SetSmoothing("OUT")
 
+    -- Create Animation Group for Shake Effect
+    local shakeGroup = instance.frame:CreateAnimationGroup("ShakeGroup")
+    instance.shakeAnimGroup = shakeGroup -- Store it
+
+    local shakeOffset = 2 -- Pixels to offset
+    local shakeDur = 0.05 -- Duration of each shake segment
+
+    -- Shake Right
+    local shake1 = shakeGroup:CreateAnimation("Translation")
+    shake1:SetOffset(shakeOffset, 0)
+    shake1:SetDuration(shakeDur)
+    shake1:SetOrder(1)
+
+    -- Shake Left (past center)
+    local shake2 = shakeGroup:CreateAnimation("Translation")
+    shake2:SetOffset(-shakeOffset * 2, 0) 
+    shake2:SetDuration(shakeDur * 2)
+    shake2:SetOrder(2)
+
+    -- Return to Center
+    local shake3 = shakeGroup:CreateAnimation("Translation")
+    shake3:SetOffset(shakeOffset, 0) 
+    shake3:SetDuration(shakeDur)
+    shake3:SetOrder(3)
+
+    -- Add Alpha animations for the Red Overlay to the Shake Group
+    local shakeOverlayFadeIn = shakeGroup:CreateAnimation("Alpha", "ShakeOverlayFadeIn")
+    shakeOverlayFadeIn:SetChildKey("shakeOverlay") -- Target the new overlay
+    shakeOverlayFadeIn:SetFromAlpha(0)
+    shakeOverlayFadeIn:SetToAlpha(0.6) -- Fade in to 60% opacity
+    shakeOverlayFadeIn:SetDuration(shakeDur) -- Fade in quickly with the first shake segment
+    shakeOverlayFadeIn:SetOrder(1)
+
+    local shakeOverlayFadeOut = shakeGroup:CreateAnimation("Alpha", "ShakeOverlayFadeOut")
+    shakeOverlayFadeOut:SetChildKey("shakeOverlay")
+    shakeOverlayFadeOut:SetFromAlpha(0.6)
+    shakeOverlayFadeOut:SetToAlpha(0) -- Fade back out completely
+    shakeOverlayFadeOut:SetDuration(shakeDur * 3) -- Fade out over the remaining shake duration (segments 2 & 3)
+    shakeOverlayFadeOut:SetOrder(2) -- Start after the fade in
+
+    -- Optional: Add a slight vertical shake? (Uncomment if desired)
+    --[[ 
+    local shakeV1 = shakeGroup:CreateAnimation("Translation")
+    shakeV1:SetOffset(0, shakeOffset / 2)
+    shakeV1:SetDuration(shakeDur)
+    shakeV1:SetOrder(1) -- Run concurrently with horizontal shake
+
+    local shakeV2 = shakeGroup:CreateAnimation("Translation")
+    shakeV2:SetOffset(0, -shakeOffset)
+    shakeV2:SetDuration(shakeDur * 2)
+    shakeV2:SetOrder(2)
+
+    local shakeV3 = shakeGroup:CreateAnimation("Translation")
+    shakeV3:SetOffset(0, shakeOffset / 2)
+    shakeV3:SetDuration(shakeDur)
+    shakeV3:SetOrder(3)
+    ]]
+
     return instance -- Return our instance table, not the frame
 end
 
@@ -315,16 +381,6 @@ function AuraIcon.Update(self, auraData, auraIndex, auraType)
             self.frame.durationText:Hide()
         end
     end -- End of check for not forceExpired
-
-    -- Check if the frame is about to be shown for the first time
-    local playAnim = not self.frame:IsShown()
-
-    self.frame:Show()
-
-    -- Play animation if it was newly shown
-    if playAnim and self.newAuraAnimGroup then
-        self.newAuraAnimGroup:Play()
-    end
 end
 
 function AuraIcon.UpdateDurationDisplay(self, currentTime)
@@ -511,6 +567,15 @@ function AuraIcon.OnLeave(self)
      if not self.frame then return end
      self.isMouseOver = false -- Clear flag when mouse leaves
     GameTooltip:Hide()
+end
+
+-- *** ADDED Shake Method ***
+function AuraIcon:Shake()
+    if not self.frame then return end -- Safety check
+    -- Play the shake animation if it exists and isn't already playing
+    if self.shakeAnimGroup and not self.shakeAnimGroup:IsPlaying() then
+        self.shakeAnimGroup:Play()
+    end
 end
 
 -- *** ADDED Resize Method ***
