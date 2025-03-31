@@ -56,12 +56,6 @@ BoxxyAuras.FrameTextures =
 
 -- Copied from WhoGotLoots/UIBuilder.lua (Adapted slightly)
 function BoxxyAuras.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
-    -- DEBUG START
-    if textureKey == "OptionsWindowBG" then
-        print(string.format("DrawSlicedBG DEBUG: Called for frame '%s', textureKey '%s', layer '%s'", frame:GetName() or "N/A", textureKey, layer))
-    end
-    -- DEBUG END
-    
     shrink = shrink or 0;
     local group, subLevel;
 
@@ -78,21 +72,13 @@ function BoxxyAuras.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
         group = frame.borderTextures;
         subLevel = -7; -- Ensure border is above backdrop but behind content
     else
-        print("|cffff0000DrawSlicedBG Error: Invalid layer specified: " .. tostring(layer) .. "|r")
         return
     end
 
     local data = BoxxyAuras.FrameTextures[textureKey];
     if not data then
-        print("|cffff0000DrawSlicedBG Error: Invalid textureKey specified: " .. tostring(textureKey) .. "|r")
         return
     end
-
-    -- DEBUG START
-    if textureKey == "OptionsWindowBG" then
-        print(string.format("DrawSlicedBG DEBUG: Found data for key '%s'. File: '%s', CornerSize: %s", textureKey, data.file, tostring(data.cornerSize)))
-    end
-    -- DEBUG END
 
     -- Construct file path - ensures forward slashes and adds extension
     local file = "Interface/AddOns/BoxxyAuras/Art/" .. data.file .. ".tga";
@@ -111,12 +97,6 @@ function BoxxyAuras.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
         end
         tex = group[key];
         tex:SetTexture(file, nil, nil, "LINEAR");
-
-        -- DEBUG START
-        if textureKey == "OptionsWindowBG" and key == 1 then -- Print just once per call for this key
-            print(string.format("DrawSlicedBG DEBUG: Setting texture for key %d to path: %s", key, file))
-        end
-        -- DEBUG END
 
         if key == 2 or key == 8 then
             if key == 2 then

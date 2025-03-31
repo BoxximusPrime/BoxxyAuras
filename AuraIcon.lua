@@ -19,16 +19,28 @@ function AuraIcon.New(parentFrame, index, baseName)
     -- Create the actual frame object
     local frame = CreateFrame("Frame", baseName .. index, parentFrame, "BackdropTemplate")
     
-    -- Read config values INSIDE the function
-    local iconTextureSize = (BoxxyAuras.Config and BoxxyAuras.Config.IconSize) or 32
-    local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 12
+    -- Determine frame type to read correct iconSize
+    local settingsKey = nil
+    if parentFrame == _G["BoxxyBuffDisplayFrame"] then
+        settingsKey = "buffFrameSettings"
+    elseif parentFrame == _G["BoxxyDebuffDisplayFrame"] then
+        settingsKey = "debuffFrameSettings"
+    end
+    
+    -- Read config/saved values INSIDE the function
+    local iconTextureSize = 24 -- Default size
+    if settingsKey and BoxxyAurasDB and BoxxyAurasDB[settingsKey] and BoxxyAurasDB[settingsKey].iconSize then
+        iconTextureSize = BoxxyAurasDB[settingsKey].iconSize
+    end
+    
+    local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 8
     local padding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
     local totalIconHeight = iconTextureSize + textHeight + (padding * 2)
     local totalIconWidth = iconTextureSize + (padding * 2)
     
     local instance = {}
     instance.frame = frame
-    instance.parentDisplayFrame = parentFrame -- Store reference to parent (buff/debuff display frame)
+    instance.parentDisplayFrame = parentFrame
 
     instance.frame:SetSize(totalIconWidth, totalIconHeight)
 
@@ -97,11 +109,51 @@ function AuraIcon.New(parentFrame, index, baseName)
     instance.lastIsExpiredState = nil -- Initialize state tracking
     instance.isMouseOver = false -- Initialize mouse over flag
     instance.tooltipUpdateTimer = 0 -- Initialize tooltip update timer
+    instance.slot = nil -- Initialize slot
 
     -- Set scripts on the frame, referencing methods via AuraIcon
     instance.frame:SetScript("OnEnter", function(frame_self) AuraIcon.OnEnter(instance) end)
     instance.frame:SetScript("OnLeave", function(frame_self) AuraIcon.OnLeave(instance) end)
     -- OnUpdate set later in Update method based on duration
+    -- *** ADDED OnMouseUp for Right-Click Cancel ***
+    instance.frame:SetScript("OnMouseUp", function(frame_self, button)
+        -- Check if right-click and it's a helpful buff
+        if button == "RightButton" and instance.auraType == "HELPFUL" then
+            -- Check if IN COMBAT first
+            if InCombatLockdown() then
+                print("|cffFFCC00BoxxyAuras:|r Cannot cancel auras while in combat.")
+                return -- Do nothing further if in combat
+            end
+
+            -- Proceed with cancellation logic only if NOT in combat
+            if instance.auraInstanceID then
+                local buffIndex = nil
+                -- Find the current index of this specific aura instance using C_UnitAuras
+                for i = 1, 40 do -- Check standard buff limit
+                    local auraData = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex and C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
+                    if auraData then
+                        if auraData.auraInstanceID and auraData.auraInstanceID == instance.auraInstanceID then
+                            buffIndex = i
+                            break
+                        end
+                    else
+                        break
+                    end
+                end
+                
+                if buffIndex then
+                    CancelUnitBuff("player", buffIndex)
+                    print(string.format("Attempted to cancel buff index: %d (Name: %s, InstanceID: %s)", 
+                        buffIndex, instance.name or 'Unknown', instance.auraInstanceID))
+                else
+                    print(string.format("Could not find current buff index for InstanceID: %s (Name: %s)", 
+                        instance.auraInstanceID, instance.name or 'Unknown'))
+                end
+            else
+                 print(string.format("Missing auraInstanceID on icon %s, cannot cancel.", frame_self:GetName() or '?'))
+            end
+        end
+    end)
     
     instance.frame:Hide()
 
@@ -208,6 +260,7 @@ function AuraIcon.Update(self, auraData, auraIndex, auraType)
     self.spellID = auraData.spellID
     self.name = auraData.name
     self.auraInstanceID = auraData.auraInstanceID 
+    self.slot = auraData.slot -- Store the slot index
 
     -- Determine key for global cache - Use spellId ONLY
     self.auraKey = auraData.spellId -- No fallback to name
@@ -460,5 +513,49 @@ function AuraIcon.OnLeave(self)
     GameTooltip:Hide()
 end
 
+-- *** ADDED Resize Method ***
+function AuraIcon:Resize(newIconSize)
+    if not self.frame or not self.textureWidget then return end -- Safety check
+    
+    -- Read current config values needed for calculation
+    local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 8
+    local padding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6 -- Internal padding
+    
+    -- Calculate new total dimensions
+    local newTotalIconHeight = newIconSize + textHeight + (padding * 2)
+    local newTotalIconWidth = newIconSize + (padding * 2)
+    
+    -- Resize the main frame
+    self.frame:SetSize(newTotalIconWidth, newTotalIconHeight)
+    
+    -- Resize the icon texture widget
+    self.textureWidget:SetSize(newIconSize, newIconSize)
+    
+    -- Optional: Re-anchor elements if needed. Let's re-anchor text elements 
+    -- relative to texture widget or frame to be safe.
+    if self.frame.countText then
+        self.frame.countText:ClearAllPoints()
+        self.frame.countText:SetPoint("BOTTOMRIGHT", self.textureWidget, "BOTTOMRIGHT", 2, -2)
+    end
+    if self.frame.countTextBg then
+        -- Assuming it uses the same padding logic
+        local bgPadding = 2
+        self.frame.countTextBg:ClearAllPoints()
+        self.frame.countTextBg:SetPoint("TOPLEFT", self.frame.countText, "TOPLEFT", -bgPadding, bgPadding)
+        self.frame.countTextBg:SetPoint("BOTTOMRIGHT", self.frame.countText, "BOTTOMRIGHT", bgPadding - 4, -bgPadding)
+    end
+    if self.frame.durationText then
+        self.frame.durationText:ClearAllPoints()
+        self.frame.durationText:SetPoint("TOPLEFT", self.textureWidget, "BOTTOMLEFT", 0, -padding)
+        self.frame.durationText:SetPoint("TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", 0, -padding)
+        self.frame.durationText:SetPoint("BOTTOM", self.frame, "BOTTOM", 0, padding)
+    end
+    if self.frame.wipeOverlay then 
+        self.frame.wipeOverlay:ClearAllPoints()
+        self.frame.wipeOverlay:SetSize(newIconSize, newIconSize) -- Also resize wipe overlay
+        self.frame.wipeOverlay:SetPoint("TOPLEFT", self.textureWidget, "TOPLEFT")
+    end
+end
+
 -- Expose the AuraIcon class to the addon
-BoxxyAuras.AuraIcon = AuraIcon 
+BoxxyAuras.AuraIcon = AuraIcon

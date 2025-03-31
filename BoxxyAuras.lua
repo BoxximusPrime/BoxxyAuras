@@ -8,11 +8,10 @@ BoxxyAuras.Config = {
     BorderColor = { r = 0.3, g = 0.3, b = 0.3, a = 0.8 },      -- Icon Border
     MainFrameBGColorNormal = { r = 0.7, g = 0.7, b = 0.7, a = 0.2 }, -- Main frame normal BG
     MainFrameBGColorHover = { r = 0.7, g = 0.7, b = 0.7, a = 0.6 }, -- Main frame hover BG
-    IconSize = 24,
     TextHeight = 8,
-    Padding = 6,
-    TotalIconHeight = 44,
-    TotalIconWidth = 44,
+    Padding = 6,           -- Internal padding within AuraIcon frame
+    FramePadding = 12,      -- Padding between frame edge and icons
+    IconSpacing = 0,       -- Spacing between icons
 }
 
 -- Function to check if mouse cursor is within a frame's bounds
@@ -44,9 +43,11 @@ local defaultMainFrameSettings = { -- Define defaults
 local buffDisplayFrame = CreateFrame("Frame", "BoxxyBuffDisplayFrame", UIParent) -- Parent to UIParent, unique name
 local debuffDisplayFrame = CreateFrame("Frame", "BoxxyDebuffDisplayFrame", UIParent) -- Parent to UIParent, unique name
 
-local buffIcons = {}
-local debuffIcons = {}
-local iconSpacing = 4
+-- Attach icon lists to the main addon table
+BoxxyAuras.buffIcons = {}
+BoxxyAuras.debuffIcons = {}
+
+local iconSpacing = 4 -- Keep local if only used here?
 
 -- New Cache Tables
 local trackedBuffs = {}
@@ -96,23 +97,24 @@ local handlePoints = {
     -- BottomRight = {"BOTTOMRIGHT", 0, 0},
 }
 
--- Define Constants for Layout
-local AURA_ICON_WIDTH = 44 -- From AuraIcon.lua: 32 texture + 6*2 padding
-local AURA_ICON_HEIGHT = 56 -- From AuraIcon.lua: 32 texture + 12 text + 6*2 padding
-local TITLE_CLEARANCE = 15 -- Space above icons for title
-local DEFAULT_FRAME_PADDING = 0 -- Default padding inside frame edges
+-- Define Constants for Layout (Mostly defaults now, read from Config where needed)
+-- local AURA_ICON_WIDTH = 44 -- Deprecated
+-- local AURA_ICON_HEIGHT = 56 -- Deprecated
+local TITLE_CLEARANCE = 15 -- Space above icons for title (Used for min height calc? Check usage)
+-- local DEFAULT_FRAME_PADDING = 0 -- Deprecated
 local DEFAULT_ICONS_WIDE = 6 -- Default number of icons horizontally
 
--- Calculate minimum height (for title + 1 row)
+-- Calculate minimum height (for title + 1 row) - Check if still needed/used correctly
+--[[ Deprecated Height Calc - Now dynamic in LayoutAuras
 local function CalculateMinHeight(iconH, padding, titleClearance)
     return titleClearance + padding + iconH + padding
 end
 local minRequiredHeight = CalculateMinHeight(AURA_ICON_HEIGHT, DEFAULT_FRAME_PADDING, TITLE_CLEARANCE)
+]]
 
 -- Forward declaration needed if functions call each other in a loop, not strictly necessary here but good practice
 local CreateResizeHandlesForFrame
 local UpdateEdgeHandleDimensions
-local LayoutAuras
 
 -- Generalized function to create handles for a frame
 CreateResizeHandlesForFrame = function(frame, frameName)
@@ -158,31 +160,30 @@ CreateResizeHandlesForFrame = function(frame, frameName)
         -- ADD OnMouseUp script to finalize resize, save, and layout
         handle:SetScript("OnMouseUp", function(self, button)
             if button == "LeftButton" and frame.draggingHandle == self.pointName then
-                -- Get final snapped width
-                local finalW, finalH = frame:GetSize()
-                
-                -- Save the new width
+                -- No need to get finalW or save width here anymore. 
+                -- numIconsWide was saved during the drag in OnUpdate.
+                -- The frame size is already set correctly by OnUpdate.
+
+                -- Determine settings key (needed for print message, could remove print)
                 local dbKey = nil
                 if frame == buffDisplayFrame then
                     dbKey = "buffFrameSettings"
                 elseif frame == debuffDisplayFrame then
                     dbKey = "debuffFrameSettings"
                 end
-                
                 if dbKey and BoxxyAurasDB and BoxxyAurasDB[dbKey] then
-                    BoxxyAurasDB[dbKey].width = finalW
-                    print(string.format("BoxxyAuras: Saved %s Resized Width (W: %.1f)", dbKey, finalW))
+                     -- Width is implicitly saved via numIconsWide
                 end
 
                 -- Trigger final layout for the affected frame
                 local iconList = nil
                 if frame == buffDisplayFrame then
-                    iconList = buffIcons
+                    iconList = BoxxyAuras.buffIcons
                 elseif frame == debuffDisplayFrame then
-                    iconList = debuffIcons
+                    iconList = BoxxyAuras.debuffIcons
                 end
                 if iconList then
-                    LayoutAuras(frame, iconList) -- Assumes LayoutAuras is defined/forward-declared
+                    BoxxyAuras.LayoutAuras(frame, iconList)
                 end
 
                 -- Reset dragging state and hide handle background
@@ -203,12 +204,40 @@ UpdateEdgeHandleDimensions = function(frame, frameW, frameH)
     end
 end
 
--- Generalized Layout Function
-LayoutAuras = function(targetFrame, iconList)
+-- *** Attach LayoutAuras function to the BoxxyAuras table ***
+BoxxyAuras.LayoutAuras = function(targetFrame, iconList)
     if not iconList or #iconList == 0 then return end -- Simplified check
     
-    -- Get padding from config, default to 4 if not set
-    local framePadding = (BoxxyAuras.Config and BoxxyAuras.Config.FramePadding) or 4
+    -- Determine Frame Type, Alignment Setting, AND Icons Wide Setting
+    local frameType = nil
+    local alignment = "LEFT" -- Default alignment
+    local numIconsWide = DEFAULT_ICONS_WIDE -- Default columns
+    local settingsKey = nil
+    
+    if targetFrame == buffDisplayFrame then
+        frameType = "Buff"
+        settingsKey = "buffFrameSettings"
+        -- Read alignment, ensure BoxxyAurasDB and the key exist
+        if BoxxyAurasDB and BoxxyAurasDB[settingsKey] then
+            alignment = BoxxyAurasDB[settingsKey].buffTextAlign or "LEFT"
+            numIconsWide = BoxxyAurasDB[settingsKey].numIconsWide or DEFAULT_ICONS_WIDE
+        end
+    elseif targetFrame == debuffDisplayFrame then
+        frameType = "Debuff"
+        settingsKey = "debuffFrameSettings"
+        if BoxxyAurasDB and BoxxyAurasDB[settingsKey] then
+            alignment = BoxxyAurasDB[settingsKey].debuffTextAlign or "LEFT"
+            numIconsWide = BoxxyAurasDB[settingsKey].numIconsWide or DEFAULT_ICONS_WIDE
+        end
+    else
+        print("|cffFF0000LayoutAuras Error:|r Unknown target frame.")
+        return
+    end
+    
+    -- Get padding values from config
+    local framePadding = (BoxxyAuras.Config and BoxxyAuras.Config.FramePadding) or 6 
+    local iconSpacing = (BoxxyAuras.Config and BoxxyAuras.Config.IconSpacing) or 6
+    -- Note: internal icon Padding is used within AuraIcon.New to get iconW/iconH
 
     -- Count visible icons first
     local visibleIconCount = 0
@@ -218,70 +247,92 @@ LayoutAuras = function(targetFrame, iconList)
         end
     end
     
-    if visibleIconCount == 0 then return end -- Nothing to layout
+    -- Calculate minimum height FIRST, even if no icons
+    -- We need an icon size even if none are visible
+    local iconW, iconH = nil, nil
+    local currentIconSize = 24 -- Default if DB not ready
+    if settingsKey and BoxxyAurasDB and BoxxyAurasDB[settingsKey] and BoxxyAurasDB[settingsKey].iconSize then
+        currentIconSize = BoxxyAurasDB[settingsKey].iconSize
+    end
+    
+    local internalPadding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
+    local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 8
+    iconW = currentIconSize + (internalPadding * 2)
+    iconH = currentIconSize + textHeight + (internalPadding * 2)
+    
+    local iconsPerRow = math.max(1, numIconsWide)
+    local numRows = math.max(1, math.ceil(visibleIconCount / iconsPerRow))
+    local requiredIconBlockHeight = numRows * iconH + math.max(0, numRows - 1) * iconSpacing 
+    local requiredFrameHeight = framePadding + requiredIconBlockHeight + framePadding 
+    
+    local minPossibleHeight = framePadding + (1 * iconH) + framePadding 
+    local targetHeight = math.max(minPossibleHeight, requiredFrameHeight)
 
-    -- Ensure the first icon and its frame actually exist before getting size
-    local firstVisibleIconFrame = nil
-    for _, auraIcon in ipairs(iconList) do
-        if auraIcon.frame and auraIcon.frame:IsShown() then
-            firstVisibleIconFrame = auraIcon.frame
-            break
+    -- Set height BEFORE checking visibleIconCount
+    local frameH = targetFrame:GetHeight()
+    if frameH ~= targetHeight then
+        targetFrame:SetHeight(targetHeight)
+        local currentWidthForHandleUpdate = targetFrame:GetWidth() 
+        UpdateEdgeHandleDimensions(targetFrame, currentWidthForHandleUpdate, targetHeight)
+        frameH = targetHeight 
+    end
+
+    -- NOW check if there are icons to position
+    if visibleIconCount == 0 then 
+        return
+    end 
+    
+    -- Get frame width for centering
+    local frameW = targetFrame:GetWidth()
+
+    -- Pre-calculate number of icons on each row for center alignment
+    local iconsPerRowNum = {}
+    if alignment == "CENTER" then
+        local remainingIcons = visibleIconCount
+        for r = 1, numRows do
+            local iconsThisRow = math.min(remainingIcons, iconsPerRow)
+            iconsPerRowNum[r] = iconsThisRow
+            remainingIcons = remainingIcons - iconsThisRow
         end
     end
-    
-    -- ADDED DEBUG
-    if targetFrame == debuffDisplayFrame then
-        print(string.format("LayoutAuras DEBUG (Debuffs): FrameW=%.1f, FrameH=%.1f, VisibleIcons=%d, FirstIcon=%s", 
-            targetFrame:GetWidth(), targetFrame:GetHeight(), visibleIconCount, 
-            (firstVisibleIconFrame and firstVisibleIconFrame:GetName()) or "None"))
-    end
-    -- END DEBUG
 
-    if not firstVisibleIconFrame then
-        print(string.format("DEBUG LayoutAuras: Could not find a visible icon frame in list for %s.", targetFrame:GetName() or "UnknownFrame"))
-        return
-    end
-
-    local iconW, iconH = firstVisibleIconFrame:GetSize()
-    local frameW, frameH = targetFrame:GetSize()
-    local containerW = frameW - (framePadding * 2)
-    local iconsPerRow = math.max(1, math.floor(containerW / (iconW + framePadding)))
-
-    -- Calculate required height based on number of rows
-    local numRows = math.max(1, math.ceil(visibleIconCount / iconsPerRow))
-    local requiredIconBlockHeight = numRows * iconH + math.max(0, numRows - 1) * framePadding
-    local requiredFrameHeight = TITLE_CLEARANCE + framePadding + requiredIconBlockHeight + framePadding
-    
-    -- Adjust frame height if needed
-    if frameH ~= requiredFrameHeight then
-        targetFrame:SetHeight(requiredFrameHeight)
-        UpdateEdgeHandleDimensions(targetFrame, frameW, requiredFrameHeight) -- Update handles to match new height
-        -- Re-get frameH as it changed (Important! Though not used further down in current logic)
-        frameH = requiredFrameHeight 
-    end
-
-    -- Get the top-left backdrop texture to use as a visual anchor
-    local anchorTexture = targetFrame.backdropTextures and targetFrame.backdropTextures[1]
-    if not anchorTexture then
-        print("|cffFF0000LayoutAuras Error:|r Cannot find anchor texture (backdropTextures[1]) for " .. (targetFrame:GetName() or "UnknownFrame"))
-        return
+    local frameAnchorPoint = (alignment == "RIGHT") and "TOPRIGHT" or "TOPLEFT"
+    local iconAnchorPoint = frameAnchorPoint 
+    -- For Center, we always anchor TopLeft to TopLeft
+    if alignment == "CENTER" then
+        frameAnchorPoint = "TOPLEFT"
+        iconAnchorPoint = "TOPLEFT"
     end
 
     local currentVisibleIndex = 0
     for i, auraIcon in ipairs(iconList) do
         if auraIcon.frame and auraIcon.frame:IsShown() then
             currentVisibleIndex = currentVisibleIndex + 1
-            local row = math.floor((currentVisibleIndex - 1) / iconsPerRow)
-            local col = (currentVisibleIndex - 1) % iconsPerRow
+            local row = math.floor((currentVisibleIndex - 1) / iconsPerRow) 
+            local col_from_left = (currentVisibleIndex - 1) % iconsPerRow
             auraIcon.frame:ClearAllPoints()
             
-            -- Calculate center X relative to anchor texture's TOPLEFT
-            local centerX = framePadding + col * (iconW + framePadding) + (iconW / 2) + BoxxyAuras.Config.Padding
-            -- Calculate center Y relative to anchor texture's TOPLEFT
-            local centerY = -(framePadding + (iconH / 2) + row * (iconH + framePadding)) - BoxxyAuras.Config.Padding
+            local yOffset = -framePadding - (row * (iconH + iconSpacing))
+            local xOffset = 0
+
+            if alignment == "CENTER" then
+                -- Get pre-calculated icons on this row (use row+1 for 1-based table index)
+                local iconsOnThisRow = iconsPerRowNum[row + 1] or 1 
+                -- Calculate the total width of icons + spacing for THIS row
+                local rowWidth = iconsOnThisRow * iconW + math.max(0, iconsOnThisRow - 1) * iconSpacing
+                -- Calculate starting X offset to center this row's block
+                local startXForRow = (frameW - rowWidth) / 2
+                -- Calculate final X offset for this specific icon
+                xOffset = startXForRow + col_from_left * (iconW + iconSpacing)
             
-            -- Anchor icon's CENTER to the anchor texture's TOPLEFT with calculated offsets
-            auraIcon.frame:SetPoint("CENTER", anchorTexture, "TOPLEFT", centerX, centerY)
+            elseif alignment == "RIGHT" then
+                -- Revert RIGHT ALIGNMENT calculation to use col_from_left
+                xOffset = -(framePadding + col_from_left * (iconW + iconSpacing)) 
+            else -- Default to LEFT
+                xOffset = framePadding + col_from_left * (iconW + iconSpacing)
+            end
+            
+            auraIcon.frame:SetPoint(iconAnchorPoint, targetFrame, frameAnchorPoint, xOffset, yOffset)
         end
     end
 end
@@ -291,69 +342,116 @@ for pointName, _ in pairs(handlePoints) do
 end
 UpdateEdgeHandleDimensions(mainFrame, mainFrame:GetSize()) -- Call once after creation with initial size
 
--- Generalized OnUpdate function for resizing
+-- Generalized OnUpdate function for resizing (NEW LOGIC)
 local function OnDisplayFrameResizeUpdate(frame, elapsed)
-    -- Only run logic if we are actively dragging this frame's handle
     if not frame.draggingHandle then return end
+    if not IsMouseButtonDown("LeftButton") then return end
 
-    -- Only run resize calculations if the Left Mouse Button is still held down
-    if not IsMouseButtonDown("LeftButton") then 
-        -- Button was released - OnMouseUp script on handle will finalize
-        return 
+    -- Determine settings key
+    local settingsKey = nil
+    if frame == buffDisplayFrame then settingsKey = "buffFrameSettings"
+    elseif frame == debuffDisplayFrame then settingsKey = "debuffFrameSettings"
+    else return end -- Should not happen
+
+    if not BoxxyAurasDB or not BoxxyAurasDB[settingsKey] then return end -- Need DB
+
+    local fixedFrameH = frame:GetHeight() 
+
+    -- Get dynamic values including frame-specific iconSize
+    local framePadding = (BoxxyAuras.Config and BoxxyAuras.Config.FramePadding) or 6
+    local iconSpacing = (BoxxyAuras.Config and BoxxyAuras.Config.IconSpacing) or 6  
+    local internalPadding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
+    -- Get iconSize for THIS frame type
+    local iconTextureSize = 24 -- Default
+    if settingsKey and BoxxyAurasDB and BoxxyAurasDB[settingsKey] and BoxxyAurasDB[settingsKey].iconSize then
+         iconTextureSize = BoxxyAurasDB[settingsKey].iconSize
     end
     
-    local minFrameW = 100 -- Min width remains
-    local fixedFrameH = frame:GetHeight() -- Use the current fixed height
+    -- Calculate iconW based on THIS frame's size
+    local iconW = iconTextureSize + (internalPadding * 2)
     
-    -- Get padding from config
-    local framePadding = (BoxxyAuras.Config and BoxxyAuras.Config.FramePadding) or DEFAULT_FRAME_PADDING
+    -- Calculate stepWidth using iconW and IconSpacing
+    local stepWidth = iconW + iconSpacing
+    local minNumIconsWide = 1 
+    -- Calculate minFrameW based on 1 icon + FramePadding on sides
+    local minFrameW = (framePadding * 2) + iconW
+
+    -- Calculate potential width from mouse drag
+    local mouseX, _ = GetCursorPosition()
+    local deltaX = mouseX - (frame.dragStartX or 0) -- Change in screen pixels
+    local scale = frame:GetEffectiveScale() -- Get current frame scale
+    local deltaW_local = deltaX / scale -- Convert pixel change to frame's local dimension change
     
-    -- Use constants for icon size
-    local stepWidth = AURA_ICON_WIDTH + framePadding -- Width per icon + space
-    local minFrameW = stepWidth + (framePadding * 2) -- Min width for 1 icon
-
-    local mouseX, mouseY = GetCursorPosition()
-    local deltaX = mouseX - (frame.dragStartX or 0)
-    -- No deltaY needed
-
     local potentialW = 0
-    local finalX = frame.frameStartX -- Position only changes when dragging Left handle
+    local finalX = frame.frameStartX -- Frame position is in screen coordinates, so use unscaled deltaX here
     local draggingHandle = frame.draggingHandle
 
-    -- Calculate potential new width based on the handle being dragged
     if draggingHandle == "Right" then
-        potentialW = frame.frameStartW + deltaX
+        potentialW = frame.frameStartW + deltaW_local -- Apply local dimension change
     elseif draggingHandle == "Left" then
-        potentialW = frame.frameStartW - deltaX
-        finalX = frame.frameStartX + deltaX
+        potentialW = frame.frameStartW - deltaW_local -- Apply local dimension change
+        finalX = frame.frameStartX + deltaX -- Frame X position adjustment uses screen pixels
     else
-        return -- Should not happen with only Left/Right handles
+        return
+    end
+    
+    -- Ensure potential width is at least minimum required for 1 icon
+    potentialW = math.max(minFrameW, potentialW)
+
+    -- Calculate how many icons *COULD* fit in the potential width (Iterative approach)
+    local numIconsCheck = minNumIconsWide 
+    while true do
+        -- Calculate width required for ONE MORE icon using FramePadding and IconSpacing
+        local widthForNextCheck = (framePadding * 2) + ((numIconsCheck + 1) * iconW) + math.max(0, numIconsCheck) * iconSpacing
+        
+        if potentialW >= widthForNextCheck then
+            numIconsCheck = numIconsCheck + 1
+        else
+            break 
+        end
+        if numIconsCheck > 100 then break end 
+    end
+    local potentialNumIconsFit = numIconsCheck
+
+    -- Get the CURRENTLY saved number of icons wide
+    local currentNumIconsWide = BoxxyAurasDB[settingsKey].numIconsWide or DEFAULT_ICONS_WIDE
+
+    local newNumIconsWide = currentNumIconsWide -- Assume no change initially
+    local needsDBUpdate = false
+
+    -- Check if the potential number of icons differs from the saved value
+    if potentialNumIconsFit ~= currentNumIconsWide then
+        newNumIconsWide = potentialNumIconsFit
+        BoxxyAurasDB[settingsKey].numIconsWide = newNumIconsWide -- Update the saved setting
+        needsDBUpdate = true
     end
 
-    -- Snap width calculation
-    -- Calculate how many icons should fit based on potential width
-    local numIconsFit = math.max(1, math.floor((potentialW - framePadding) / stepWidth)) 
-    -- Calculate the exact width needed for that many icons + padding
-    local snappedW = framePadding + numIconsFit * stepWidth + BoxxyAuras.Config.IconSize / 2 + numIconsFit * BoxxyAuras.Config.Padding
-    -- Ensure minimum width
-    snappedW = math.max(minFrameW, snappedW)
+    -- Calculate the snapped width BASED ON the (potentially new) numIconsWide using the helper function
+    local snappedW = BoxxyAuras.CalculateFrameWidth(newNumIconsWide, iconTextureSize)
+    -- snappedW = math.max(minFrameW, snappedW) -- min check is now inside helper
 
-    -- Adjust X position if dragging left handle and width changed due to snap
+    -- Adjust X position if dragging left handle and width changed
     if draggingHandle == "Left" then
         finalX = frame.frameStartX + frame.frameStartW - snappedW
     end
 
-    local currentW, currentH = frame:GetSize()
-    local currentX, currentY = frame:GetLeft(), frame:GetTop()
+    local currentW, _ = frame:GetSize()
+    local currentX, _ = frame:GetLeft(), frame:GetTop()
     
-    -- Only apply changes if dimensions or position actually changed
-    local needsUpdate = (snappedW ~= currentW or finalX ~= currentX)
-    if needsUpdate then
-        frame:SetSize(snappedW, fixedFrameH) -- Apply snapped width and fixed height
+    -- Only apply changes if width or position actually changed
+    local needsFrameUpdate = (snappedW ~= currentW or finalX ~= currentX)
+    if needsFrameUpdate then
+        frame:SetSize(snappedW, fixedFrameH) -- Apply width based on numIconsWide, keep fixed height
         frame:ClearAllPoints()
         frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", finalX, frame.frameStartY) -- Keep original Y
-        UpdateEdgeHandleDimensions(frame, snappedW, fixedFrameH) -- Update handles for THIS frame
+        UpdateEdgeHandleDimensions(frame, snappedW, fixedFrameH)
     end
+    
+    -- If the DB was updated, we might want to re-layout immediately
+    -- if needsDBUpdate then
+    --    LayoutAuras(frame, (frame == buffDisplayFrame and BoxxyAuras.buffIcons or BoxxyAuras.debuffIcons))
+    -- end 
+    -- Commented out: Immediate relayout might feel jerky during drag. OnMouseUp handles final layout.
 end
 
 -- Attach the generalized OnUpdate to both frames
@@ -378,8 +476,8 @@ local function InitializeAuras()
     wipe(trackedBuffs)
     wipe(trackedDebuffs)
     -- We might need a more robust way to handle existing icon frames later, but wipe is ok for init
-    for _, icon in ipairs(buffIcons) do icon.frame:Hide() end
-    for _, icon in ipairs(debuffIcons) do icon.frame:Hide() end
+    for _, icon in ipairs(BoxxyAuras.buffIcons) do icon.frame:Hide() end
+    for _, icon in ipairs(BoxxyAuras.debuffIcons) do icon.frame:Hide() end
 
     -- 2. Fetch current auras
     local currentBuffs = {}
@@ -414,34 +512,31 @@ local function InitializeAuras()
 
     -- 5. Create/Update Icon Objects based on tracked cache
     for i, auraData in ipairs(trackedBuffs) do
-        local auraIcon = buffIcons[i]
+        local auraIcon = BoxxyAuras.buffIcons[i]
         if not auraIcon then
             auraIcon = AuraIcon.New(buffDisplayFrame, i, "BoxxyAurasBuffIcon")
-            buffIcons[i] = auraIcon
+            BoxxyAuras.buffIcons[i] = auraIcon
         end
         auraIcon:Update(auraData, i, "HELPFUL")
         auraIcon.frame:Show() 
     end
      for i, auraData in ipairs(trackedDebuffs) do
-        local auraIcon = debuffIcons[i]
+        local auraIcon = BoxxyAuras.debuffIcons[i]
         if not auraIcon then
             auraIcon = AuraIcon.New(debuffDisplayFrame, i, "BoxxyAurasDebuffIcon")
-            debuffIcons[i] = auraIcon
+            BoxxyAuras.debuffIcons[i] = auraIcon
         end
         auraIcon:Update(auraData, i, "HARMFUL")
         auraIcon.frame:Show()
     end
 
     -- 6. Hide any potentially leftover icons 
-    for i = #trackedBuffs + 1, #buffIcons do buffIcons[i].frame:Hide() end
-    for i = #trackedDebuffs + 1, #debuffIcons do debuffIcons[i].frame:Hide() end
+    for i = #trackedBuffs + 1, #BoxxyAuras.buffIcons do BoxxyAuras.buffIcons[i].frame:Hide() end
+    for i = #trackedDebuffs + 1, #BoxxyAuras.debuffIcons do BoxxyAuras.debuffIcons[i].frame:Hide() end
 
     -- 7. Layout the visible icons for BOTH frames
-    LayoutAuras(buffDisplayFrame, buffIcons) 
-    LayoutAuras(debuffDisplayFrame, debuffIcons)
-
-    -- 8. Layout -- REMOVED Redundant Call
-    -- LayoutAuras(buffFrame, buffIcons)
+    BoxxyAuras.LayoutAuras(buffDisplayFrame, BoxxyAuras.buffIcons) 
+    BoxxyAuras.LayoutAuras(debuffDisplayFrame, BoxxyAuras.debuffIcons)
 
     C_Timer.After(0.05, function() 
         BoxxyAuras.UpdateAuras() -- Pass true to indicate it's from OnLeave
@@ -648,36 +743,36 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
 
     -- 7. Update Visual Icons based on final TRACKED cache
     for i, auraData in ipairs(trackedBuffs) do
-        local auraIcon = buffIcons[i]
+        local auraIcon = BoxxyAuras.buffIcons[i]
         if not auraIcon then
             auraIcon = AuraIcon.New(buffDisplayFrame, i, "BoxxyAurasBuffIcon")
-            buffIcons[i] = auraIcon
+            BoxxyAuras.buffIcons[i] = auraIcon
         end
         auraIcon:Update(auraData, i, "HELPFUL")
         auraIcon.frame:Show() 
     end
 
     for i, auraData in ipairs(trackedDebuffs) do
-        local auraIcon = debuffIcons[i]
+        local auraIcon = BoxxyAuras.debuffIcons[i]
         if not auraIcon then
             auraIcon = AuraIcon.New(debuffDisplayFrame, i, "BoxxyAurasDebuffIcon")
-            debuffIcons[i] = auraIcon
+            BoxxyAuras.debuffIcons[i] = auraIcon
         end
         auraIcon:Update(auraData, i, "HARMFUL")
         auraIcon.frame:Show() 
     end
 
     -- 8. Hide Leftover Visual Icons
-    for i = #trackedBuffs + 1, #buffIcons do 
-        if buffIcons[i] and buffIcons[i].frame then buffIcons[i].frame:Hide() end
+    for i = #trackedBuffs + 1, #BoxxyAuras.buffIcons do 
+        if BoxxyAuras.buffIcons[i] and BoxxyAuras.buffIcons[i].frame then BoxxyAuras.buffIcons[i].frame:Hide() end
     end
-    for i = #trackedDebuffs + 1, #debuffIcons do 
-        if debuffIcons[i] and debuffIcons[i].frame then debuffIcons[i].frame:Hide() end
+    for i = #trackedDebuffs + 1, #BoxxyAuras.debuffIcons do 
+        if BoxxyAuras.debuffIcons[i] and BoxxyAuras.debuffIcons[i].frame then BoxxyAuras.debuffIcons[i].frame:Hide() end
     end
 
     -- 9. Layout BOTH frames
-    LayoutAuras(buffDisplayFrame, buffIcons)
-    LayoutAuras(debuffDisplayFrame, debuffIcons)
+    BoxxyAuras.LayoutAuras(buffDisplayFrame, BoxxyAuras.buffIcons)
+    BoxxyAuras.LayoutAuras(debuffDisplayFrame, BoxxyAuras.debuffIcons)
 end
 
 -- Event handling frame
@@ -701,19 +796,27 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         if BoxxyAurasDB == nil then BoxxyAurasDB = {} end
         
         -- Define defaults INSIDE the handler, right before use
+        -- Calculate default minimum height based on config and DEFAULT icon size
+        local defaultPadding = BoxxyAuras.Config.Padding or 6
+        local defaultIconSize_ForCalc = 24 -- Define default size for height calculation
+        local defaultTextHeight = BoxxyAuras.Config.TextHeight or 8
+        local defaultIconH = defaultIconSize_ForCalc + defaultTextHeight + (defaultPadding * 2) 
+        local defaultFramePadding = BoxxyAuras.Config.FramePadding or 6
+        local defaultMinHeight = defaultFramePadding + defaultIconH + defaultFramePadding 
+        
         local defaultBuffFrameSettings = {
-            x = -150,
-            y = 150,
-            anchor = "CENTER",
-            width = defaultWidth, -- Use calculated default width
-            height = minRequiredHeight -- Use calculated MINIMUM height
+            x = 0, y = -150, anchor = "TOP",
+            width = 300, height = defaultMinHeight,
+            numIconsWide = DEFAULT_ICONS_WIDE, 
+            buffTextAlign = "CENTER",
+            iconSize = 24 -- <<< ADDED Default Buff Icon Size
         }
         local defaultDebuffFrameSettings = {
-            x = 150,
-            y = 150,
-            anchor = "CENTER",
-            width = defaultWidth, -- Use calculated default width
-            height = minRequiredHeight -- Use calculated MINIMUM height
+            x = 0, y = -150 - defaultMinHeight - 30, anchor = "TOP",
+            width = 300, height = defaultMinHeight, 
+            numIconsWide = DEFAULT_ICONS_WIDE, 
+            debuffTextAlign = "CENTER",
+            iconSize = 24 -- <<< ADDED Default Debuff Icon Size
         }
         
         local function InitializeSettings(dbKey, defaults)
@@ -726,11 +829,11 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             
             if BoxxyAurasDB[dbKey] == nil then 
                 BoxxyAurasDB[dbKey] = CopyTable(defaults)
-            end
-            -- Ensure all keys exist
-            for key, defaultValue in pairs(defaults) do
-                if BoxxyAurasDB[dbKey][key] == nil then
-                    BoxxyAurasDB[dbKey][key] = defaultValue
+            else -- Ensure all keys exist even if DB entry exists
+                for key, defaultValue in pairs(defaults) do
+                    if BoxxyAurasDB[dbKey][key] == nil then
+                        BoxxyAurasDB[dbKey][key] = defaultValue
+                    end
                 end
             end
             return BoxxyAurasDB[dbKey]
@@ -739,46 +842,17 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         local buffSettings = InitializeSettings("buffFrameSettings", defaultBuffFrameSettings)
         local debuffSettings = InitializeSettings("debuffFrameSettings", defaultDebuffFrameSettings)
 
-        -- Load and Apply Settings Function
-        local function ApplySettings(frame, settings, frameDesc)
-            -- Get padding from config or use default
-            local framePadding = (BoxxyAuras.Config and BoxxyAuras.Config.FramePadding) or DEFAULT_FRAME_PADDING
-            
-            -- Snap saved width to nearest icon multiple
-            local savedWidth = settings.width
-            local stepWidth = AURA_ICON_WIDTH + framePadding
-            local minFrameW = stepWidth + (framePadding * 2) -- Ensure at least one icon fits
-            
-            local usableWidth = savedWidth - (framePadding * 2)
-            local numIconsFit = math.max(1, math.floor((usableWidth + framePadding) / stepWidth))
-            local snappedUsableW = numIconsFit * stepWidth - framePadding
-            local snappedWidth = math.max(minFrameW, snappedUsableW + (framePadding * 2))
-            
-            -- Use saved height (or default min height) initially
-            local initialHeight = settings.height 
-            
-            print(string.format("BoxxyAuras: Loading %s Settings (Anchor: %s, X: %.1f, Y: %.1f, SavedW: %.1f -> SnappedW: %.1f, InitialH: %.1f)", 
-                frameDesc, settings.anchor, settings.x, settings.y, savedWidth, snappedWidth, initialHeight))
-            
-            frame:SetSize(snappedWidth, initialHeight) -- Apply snapped width and initial height
-            frame:ClearAllPoints()
-            if settings.anchor == "CENTER" then
-                frame:SetPoint("CENTER", UIParent, "CENTER", settings.x, settings.y)
-            else -- Assume TOPLEFT 
-                 frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", settings.x, settings.y)
-            end
-            -- UpdateEdgeHandleDimensions(frame, settings.width, settings.height) -- Call later when handles exist
-            -- LayoutAuras(frame, ...) -- Call later when icons exist
-        end
-        
-        ApplySettings(buffDisplayFrame, buffSettings, "Buff Frame")
-        ApplySettings(debuffDisplayFrame, debuffSettings, "Debuff Frame")
+        -- Apply Settings (sets width/pos/min_height) using the now global function
+        BoxxyAuras.ApplySettings(buffDisplayFrame, buffSettings, "Buff Frame")
+        BoxxyAuras.ApplySettings(debuffDisplayFrame, debuffSettings, "Debuff Frame")
 
-        -- Initialize Handles (after setting size/pos)
+        -- Initialize Handles (uses width set above, initial height might be small)
         CreateResizeHandlesForFrame(buffDisplayFrame, "BuffFrame") 
         CreateResizeHandlesForFrame(debuffDisplayFrame, "DebuffFrame") 
-        UpdateEdgeHandleDimensions(buffDisplayFrame, buffSettings.width, buffSettings.height)
-        UpdateEdgeHandleDimensions(debuffDisplayFrame, debuffSettings.width, debuffSettings.height)
+        local buffW, buffH = buffDisplayFrame:GetSize()
+        local debuffW, debuffH = debuffDisplayFrame:GetSize()
+        UpdateEdgeHandleDimensions(buffDisplayFrame, buffW, buffH) -- Handles will resize when LayoutAuras sets final height
+        UpdateEdgeHandleDimensions(debuffDisplayFrame, debuffW, debuffH)
         
         -- Setup Display Frames visuals AFTER settings applied
         BoxxyAuras.SetupDisplayFrame(buffDisplayFrame, "BuffFrame")
@@ -794,11 +868,9 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             if debuffDisplayFrame then debuffDisplayFrame:SetScale(initialScale) end
             
             -- Apply Lock State directly within the timer for initial load
-            print(string.format("BoxxyAuras: C_Timer running for initial lock state: %s", tostring(initialLock))) -- DEBUG
             if initialLock then
                 local function DirectApplyLock(frame, baseName)
                     if not frame then return end
-                    print(string.format("BoxxyAuras: Directly locking %s", baseName)) -- DEBUG
                     
                     frame:SetMovable(false)
                     frame.isLocked = true
@@ -840,7 +912,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         -- Start polling timers AFTER setup is complete
         C_Timer.NewTicker(0.2, function() BoxxyAuras.PollFrameHoverState(buffDisplayFrame, "Buff Frame") end)
         C_Timer.NewTicker(0.2, function() BoxxyAuras.PollFrameHoverState(debuffDisplayFrame, "Debuff Frame") end)
-        print("BoxxyAuras: Polling timers started.") -- Debug confirmation
         
         -- Schedule Initial Aura Load
         C_Timer.After(0.2, InitializeAuras) 
@@ -981,9 +1052,6 @@ function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter)
                 -- Check if the line contains "remaining" (case-insensitive)
                 if not string.find(lineText, "remaining", 1, true) then
                     table.insert(tooltipLines, lineText)
-                -- else
-                    -- Optional: Log skipped line
-                    -- print(string.format("DEBUG Scrape: Skipping line containing 'remaining': %s", lineText))
                 end
             end
         end
@@ -1017,10 +1085,6 @@ BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of add
     local labelText = (frameName == "BuffFrame") and "Buffs" or "Debuffs" -- Should correctly set text to "Buffs" for the buff frame
     local titleLabel = frame:CreateFontString(frameName .. "TitleLabel", "OVERLAY", "GameFontNormalLarge")
 
-    -- DEBUG: Check label creation and frameName
-    print(string.format("DEBUG SetupDisplayFrame: Frame='%s', Name='%s', LabelText='%s', TitleLabelObj=%s",
-        frame:GetName() or "N/A", tostring(frameName), tostring(labelText), tostring(titleLabel)))
-
     if titleLabel then
         -- Anchor the label's bottom-left to the frame's top-left, placing it above the frame
         titleLabel:ClearAllPoints() -- Clear previous points just in case
@@ -1029,10 +1093,6 @@ BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of add
         titleLabel:SetTextColor(1, 1, 1, 0.9) -- White, slightly transparent
         titleLabel:SetText(labelText)
         frame.titleLabel = titleLabel -- Store reference if needed
-
-        -- DEBUG: Check visibility and alpha after setting text
-        print(string.format("DEBUG SetupDisplayFrame: Label '%s' IsShown=%s, Alpha=%.2f",
-            titleLabel:GetName(), tostring(titleLabel:IsShown()), titleLabel:GetAlpha()))
     else
         -- This error would print if CreateFontString failed
         print(string.format("|cffFF0000DEBUG SetupDisplayFrame Error:|r Failed to create TitleLabel for Frame='%s', Name='%s'",
@@ -1068,15 +1128,101 @@ BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of add
         -- ADDED: Final layout update after frame drag finishes using GLOBAL lists/function
         local iconList = nil
         if self == buffDisplayFrame then -- Use global buffDisplayFrame/buffIcons
-            iconList = buffIcons
+            iconList = BoxxyAuras.buffIcons
         elseif self == debuffDisplayFrame then -- Use global debuffDisplayFrame/debuffIcons
-            iconList = debuffIcons
+            iconList = BoxxyAuras.debuffIcons
         end
         
         -- Call the GLOBAL LayoutAuras function
         if iconList then
-            LayoutAuras(self, iconList) 
+            BoxxyAuras.LayoutAuras(self, iconList) 
         end
     end)
     frame:SetClampedToScreen(true)
+end 
+
+-- *** MOVE ApplySettings Function OUTSIDE of PLAYER_LOGIN and attach to BoxxyAuras ***
+BoxxyAuras.ApplySettings = function(frame, settings, frameDesc)
+    -- Get dynamic values needed for width/height calculation
+    local framePadding = (BoxxyAuras.Config and BoxxyAuras.Config.FramePadding) or 6 
+    local iconSpacing = (BoxxyAuras.Config and BoxxyAuras.Config.IconSpacing) or 6   
+    local internalPadding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6 
+    -- Get iconSize for THIS frame type
+    local iconTextureSize = 24 -- Default
+    if settings and settings.iconSize then
+         iconTextureSize = settings.iconSize
+    end
+    local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 8
+    
+    -- Calculate base icon dimensions for THIS frame type
+    local iconW = iconTextureSize + (internalPadding * 2)
+    local iconH = iconTextureSize + textHeight + (internalPadding * 2)
+    
+    -- Determine width based on numIconsWide using the helper function
+    local numIconsWide = settings.numIconsWide or DEFAULT_ICONS_WIDE -- Need default?
+    local local_DEFAULT_ICONS_WIDE = 6 
+    numIconsWide = settings.numIconsWide or local_DEFAULT_ICONS_WIDE
+    numIconsWide = math.max(1, numIconsWide) 
+    local calculatedWidth = BoxxyAuras.CalculateFrameWidth(numIconsWide, iconTextureSize)
+    
+    -- Calculate minimum height (for 1 row) using THIS frame's iconH
+    local calculatedMinHeight = framePadding + iconH + framePadding 
+    
+    -- Set Width, MINIMUM Height, and Position
+    frame:SetSize(calculatedWidth, calculatedMinHeight) 
+    frame:ClearAllPoints()
+    -- Handle different anchors
+    if settings.anchor == "CENTER" then
+        frame:SetPoint("CENTER", UIParent, "CENTER", settings.x, settings.y)
+    elseif settings.anchor == "TOP" then
+        frame:SetPoint("TOP", UIParent, "TOP", settings.x, settings.y)
+    else -- Default to TOPLEFT 
+            frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", settings.x, settings.y)
+    end
+end 
+
+-- *** ADD Helper function to calculate required frame width ***
+function BoxxyAuras.CalculateFrameWidth(numIcons, iconSize)
+    -- Get padding/spacing values from config
+    local framePadding = (BoxxyAuras.Config and BoxxyAuras.Config.FramePadding) or 6
+    local iconSpacing = (BoxxyAuras.Config and BoxxyAuras.Config.IconSpacing) or 6
+    local internalPadding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
+    
+    -- Ensure valid inputs (defaults)
+    numIcons = numIcons or 1
+    iconSize = iconSize or 24
+    
+    -- Calculate base icon width based on texture size and internal padding
+    local iconW = iconSize + (internalPadding * 2)
+    
+    -- Calculate total width
+    local calculatedWidth = (framePadding * 2) + (numIcons * iconW) + math.max(0, numIcons - 1) * iconSpacing
+    
+    -- Calculate minimum width (for 1 icon) just in case numIcons was 0 somehow
+    local minFrameW = (framePadding * 2) + (1 * iconW) 
+    
+    return math.max(minFrameW, calculatedWidth)
+end
+
+-- *** ADD Helper function to trigger layout for a specific frame type ***
+function BoxxyAuras.TriggerLayout(frameType)
+    local targetFrame = nil
+    local iconList = nil
+
+    if frameType == "Buff" then
+        targetFrame = _G["BoxxyBuffDisplayFrame"]
+        iconList = BoxxyAuras.buffIcons
+    elseif frameType == "Debuff" then
+        targetFrame = _G["BoxxyDebuffDisplayFrame"]
+        iconList = BoxxyAuras.debuffIcons
+    else
+        print(string.format("BoxxyAuras Error: Invalid frameType '%s' passed to TriggerLayout.", tostring(frameType)))
+        return
+    end
+
+    if targetFrame and iconList and BoxxyAuras.LayoutAuras then
+        BoxxyAuras.LayoutAuras(targetFrame, iconList)
+    else
+        print(string.format("BoxxyAuras Warning: Could not trigger layout for %s. Frame or Icons missing?", frameType))
+    end
 end 

@@ -94,7 +94,6 @@ lockFramesCheck:SetScript("OnClick", function(self)
     -- 5. Manually set the checkbox's visual state to match the NEW state
     self:SetChecked(newState)
     
-    print("Lock Frames Clicked. New state saved:", newState) -- Debug print
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end)
 
@@ -149,7 +148,6 @@ scaleSlider:SetScript("OnMouseUp", function(self)
         BoxxyAurasDB.optionsScale = value
         BoxxyAuras.Options:ApplyScale(value)
     end
-    print("Scale Slider Value Changed:", value) -- Debug print
     PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON) -- Sound feedback
 end)
 
@@ -190,6 +188,8 @@ BoxxyAuras.Options.BuffAlignRightCheck = buffAlignRightCheck
 -- Function to handle mutual exclusivity and saving for BUFFS
 local function HandleBuffAlignmentClick(clickedButton, alignmentValue)
     if not BoxxyAurasDB then return end
+    -- Ensure the settings table exists
+    if not BoxxyAurasDB.buffFrameSettings then BoxxyAurasDB.buffFrameSettings = {} end 
 
     -- 1. Force the clicked button to be checked
     clickedButton:SetChecked(true)
@@ -199,12 +199,11 @@ local function HandleBuffAlignmentClick(clickedButton, alignmentValue)
     if clickedButton ~= buffAlignCenterCheck then buffAlignCenterCheck:SetChecked(false) end
     if clickedButton ~= buffAlignRightCheck then buffAlignRightCheck:SetChecked(false) end
     
-    -- 3. Save the new value
-    BoxxyAurasDB.buffTextAlign = alignmentValue -- Save to specific buff key
-    print("Buff Alignment set to:", alignmentValue) -- Debug
+    -- 3. Save the new value INSIDE buffFrameSettings
+    BoxxyAurasDB.buffFrameSettings.buffTextAlign = alignmentValue 
     
-    -- TODO: Apply alignment change immediately
-    -- BoxxyAuras.Options:ApplyTextAlign(alignmentValue, "Buff")
+    -- Call function to apply alignment change immediately
+    BoxxyAuras.Options:ApplyTextAlign()
     
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end
@@ -250,6 +249,8 @@ BoxxyAuras.Options.DebuffAlignRightCheck = debuffAlignRightCheck
 -- Function to handle mutual exclusivity and saving for DEBUFFS
 local function HandleDebuffAlignmentClick(clickedButton, alignmentValue)
     if not BoxxyAurasDB then return end
+    -- Ensure the settings table exists
+    if not BoxxyAurasDB.debuffFrameSettings then BoxxyAurasDB.debuffFrameSettings = {} end
 
     -- 1. Force the clicked button to be checked
     clickedButton:SetChecked(true)
@@ -259,12 +260,11 @@ local function HandleDebuffAlignmentClick(clickedButton, alignmentValue)
     if clickedButton ~= debuffAlignCenterCheck then debuffAlignCenterCheck:SetChecked(false) end
     if clickedButton ~= debuffAlignRightCheck then debuffAlignRightCheck:SetChecked(false) end
 
-    -- 3. Save the new value
-    BoxxyAurasDB.debuffTextAlign = alignmentValue -- Save to specific debuff key
-    print("Debuff Alignment set to:", alignmentValue) -- Debug
-
-    -- TODO: Apply alignment change immediately
-    -- BoxxyAuras.Options:ApplyTextAlign(alignmentValue, "Debuff")
+    -- 3. Save the new value INSIDE debuffFrameSettings
+    BoxxyAurasDB.debuffFrameSettings.debuffTextAlign = alignmentValue 
+    
+    -- Call function to apply alignment change immediately
+    BoxxyAuras.Options:ApplyTextAlign()
 
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end
@@ -275,9 +275,102 @@ debuffAlignCenterCheck:SetScript("OnClick", function(self) HandleDebuffAlignment
 debuffAlignRightCheck:SetScript("OnClick", function(self) HandleDebuffAlignmentClick(self, "RIGHT") end)
 
 -- Update Y offset for next section
-currentY = currentY - debuffAlignLeftCheck:GetHeight() - 15
+currentY = currentY - debuffAlignLeftCheck:GetHeight() - 25 -- Increase spacing
 
--- Add more options here using currentY offset...
+--[[------------------------------------------------------------
+-- Option: Buff Icon Size Slider
+--------------------------------------------------------------]]
+local buffSizeLabel = contentFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Header") 
+buffSizeLabel:SetPoint("TOPLEFT", debuffAlignLeftCheck, "BOTTOMLEFT", 0, -20) -- Position below debuff checks
+buffSizeLabel:SetText("Buff Icon Size")
+BoxxyAuras.Options.BuffSizeLabel = buffSizeLabel
+currentY = currentY - buffSizeLabel:GetHeight() - 5 
+
+local buffSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsBuffSizeSlider", contentFrame, "BAURASSlider")
+buffSizeSlider:SetPoint("TOPLEFT", buffSizeLabel, "BOTTOMLEFT", 5, -10) 
+buffSizeSlider:SetMinMaxValues(12, 64) -- Sensible range
+buffSizeSlider:SetValueStep(1)        -- Integer steps
+buffSizeSlider:SetObeyStepOnDrag(true)
+buffSizeSlider:SetWidth(160)
+if buffSizeSlider.KeyLabel then buffSizeSlider.KeyLabel:Show() end
+if buffSizeSlider.KeyLabel2 then buffSizeSlider.KeyLabel2:Show() end
+
+-- OnValueChanged updates label dynamically
+buffSizeSlider:SetScript("OnValueChanged", function(self, value)
+    if self.KeyLabel then 
+        self.KeyLabel:SetText(string.format("%dpx", math.floor(value + 0.5))) -- Show integer value
+    end
+    -- Update thumb position
+    local min, max = self:GetMinMaxValues()
+    local range = max - min
+    if range > 0 and self.VirtualThumb then 
+        local thumbPos = (value - min) / range
+        self.VirtualThumb:SetPoint("CENTER", self, "LEFT", thumbPos * self:GetWidth(), 0)
+    end
+end)
+
+-- OnMouseUp saves the value and triggers update
+buffSizeSlider:SetScript("OnMouseUp", function(self)
+    local value = math.floor(self:GetValue() + 0.5) -- Get integer value
+    self:SetValue(value) -- Snap the visual slider
+    
+    if BoxxyAurasDB and BoxxyAurasDB.buffFrameSettings then
+        BoxxyAurasDB.buffFrameSettings.iconSize = value
+        -- Trigger icon recreation and layout for BUFFS only
+        BoxxyAuras.Options:ApplyIconSizeChange("Buff") 
+    end
+    PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+end)
+
+BoxxyAuras.Options.BuffSizeSlider = buffSizeSlider
+currentY = currentY - buffSizeSlider:GetHeight() - 25 -- Update Y offset
+
+--[[------------------------------------------------------------
+-- Option: Debuff Icon Size Slider
+--------------------------------------------------------------]]
+local debuffSizeLabel = contentFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Header") 
+debuffSizeLabel:SetPoint("TOPLEFT", buffSizeSlider, "BOTTOMLEFT", -5, -20) -- Position below buff size slider
+debuffSizeLabel:SetText("Debuff Icon Size")
+BoxxyAuras.Options.DebuffSizeLabel = debuffSizeLabel
+currentY = currentY - debuffSizeLabel:GetHeight() - 5 
+
+local debuffSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsDebuffSizeSlider", contentFrame, "BAURASSlider")
+debuffSizeSlider:SetPoint("TOPLEFT", debuffSizeLabel, "BOTTOMLEFT", 5, -10) 
+debuffSizeSlider:SetMinMaxValues(12, 64) 
+debuffSizeSlider:SetValueStep(1)
+debuffSizeSlider:SetObeyStepOnDrag(true)
+debuffSizeSlider:SetWidth(160)
+if debuffSizeSlider.KeyLabel then debuffSizeSlider.KeyLabel:Show() end
+if debuffSizeSlider.KeyLabel2 then debuffSizeSlider.KeyLabel2:Show() end
+
+-- OnValueChanged updates label dynamically
+debuffSizeSlider:SetScript("OnValueChanged", function(self, value)
+    if self.KeyLabel then 
+        self.KeyLabel:SetText(string.format("%dpx", math.floor(value + 0.5)))
+    end
+    local min, max = self:GetMinMaxValues()
+    local range = max - min
+    if range > 0 and self.VirtualThumb then 
+        local thumbPos = (value - min) / range
+        self.VirtualThumb:SetPoint("CENTER", self, "LEFT", thumbPos * self:GetWidth(), 0)
+    end
+end)
+
+-- OnMouseUp saves the value and triggers update
+debuffSizeSlider:SetScript("OnMouseUp", function(self)
+    local value = math.floor(self:GetValue() + 0.5)
+    self:SetValue(value)
+    
+    if BoxxyAurasDB and BoxxyAurasDB.debuffFrameSettings then
+        BoxxyAurasDB.debuffFrameSettings.iconSize = value
+        -- Trigger icon recreation and layout for DEBUFFS only
+        BoxxyAuras.Options:ApplyIconSizeChange("Debuff") 
+    end
+    PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+end)
+
+BoxxyAuras.Options.DebuffSizeSlider = debuffSizeSlider
+currentY = currentY - debuffSizeSlider:GetHeight() - 15 
 
 --[[------------------------------------------------------------
 -- Functions to Load/Save/Toggle
@@ -288,21 +381,24 @@ function BoxxyAuras.Options:Load()
         print("BoxxyAuras Error: BoxxyAurasDB not found during Options Load.")
         return 
     end 
+    -- Ensure nested tables exist for safety before reading
+    if not BoxxyAurasDB.buffFrameSettings then BoxxyAurasDB.buffFrameSettings = {} end
+    if not BoxxyAurasDB.debuffFrameSettings then BoxxyAurasDB.debuffFrameSettings = {} end
 
-    -- Initialize default if necessary
-    if BoxxyAurasDB.lockFrames == nil then
-        BoxxyAurasDB.lockFrames = false
-    end
-    -- >> ADDED: Initialize scale default <<
-    if BoxxyAurasDB.optionsScale == nil then
-        BoxxyAurasDB.optionsScale = 1.0
-    end
+    -- Initialize defaults if necessary (should be handled by PLAYER_LOGIN, but belt-and-suspenders)
+    if BoxxyAurasDB.lockFrames == nil then BoxxyAurasDB.lockFrames = false end
+    if BoxxyAurasDB.optionsScale == nil then BoxxyAurasDB.optionsScale = 1.0 end
+    if BoxxyAurasDB.buffFrameSettings.buffTextAlign == nil then BoxxyAurasDB.buffFrameSettings.buffTextAlign = "CENTER" end
+    if BoxxyAurasDB.debuffFrameSettings.debuffTextAlign == nil then BoxxyAurasDB.debuffFrameSettings.debuffTextAlign = "CENTER" end
+    if BoxxyAurasDB.buffFrameSettings.iconSize == nil then BoxxyAurasDB.buffFrameSettings.iconSize = 24 end
+    if BoxxyAurasDB.debuffFrameSettings.iconSize == nil then BoxxyAurasDB.debuffFrameSettings.iconSize = 24 end
+    -- No need to default numIconsWide here, PLAYER_LOGIN handles that
 
-    -- Set checkbox state
+    -- Set Lock checkbox state
     if self.LockFramesCheck then
         self.LockFramesCheck:SetChecked(BoxxyAurasDB.lockFrames)
     end
-    -- >> ADDED: Set slider value and apply scale <<
+    -- Set Scale slider value
     if self.ScaleSlider then
         self.ScaleSlider:SetValue(BoxxyAurasDB.optionsScale)
         -- Update label based on loaded value (using OnValueChanged logic)
@@ -318,29 +414,56 @@ function BoxxyAuras.Options:Load()
         end
     end
     
-    -- >> UPDATED: Load BUFF text alignment setting <<
-    if BoxxyAurasDB.buffTextAlign == nil then
-        BoxxyAurasDB.buffTextAlign = "CENTER" -- Default to Center
-    end
-    if self.BuffAlignLeftCheck then self.BuffAlignLeftCheck:SetChecked(BoxxyAurasDB.buffTextAlign == "LEFT") end
-    if self.BuffAlignCenterCheck then self.BuffAlignCenterCheck:SetChecked(BoxxyAurasDB.buffTextAlign == "CENTER") end
-    if self.BuffAlignRightCheck then self.BuffAlignRightCheck:SetChecked(BoxxyAurasDB.buffTextAlign == "RIGHT") end
-    -- TODO: Call apply function here too when implemented
-    -- self:ApplyTextAlign(BoxxyAurasDB.buffTextAlign, "Buff")
+    -- Load BUFF text alignment setting FROM NESTED location
+    local buffAlign = BoxxyAurasDB.buffFrameSettings.buffTextAlign
+    if self.BuffAlignLeftCheck then self.BuffAlignLeftCheck:SetChecked(buffAlign == "LEFT") end
+    if self.BuffAlignCenterCheck then self.BuffAlignCenterCheck:SetChecked(buffAlign == "CENTER") end
+    if self.BuffAlignRightCheck then self.BuffAlignRightCheck:SetChecked(buffAlign == "RIGHT") end
 
-    -- >> ADDED: Load DEBUFF text alignment setting <<
-    if BoxxyAurasDB.debuffTextAlign == nil then
-        BoxxyAurasDB.debuffTextAlign = "CENTER" -- Default to Center
+    -- Load DEBUFF text alignment setting FROM NESTED location
+    local debuffAlign = BoxxyAurasDB.debuffFrameSettings.debuffTextAlign
+    if self.DebuffAlignLeftCheck then self.DebuffAlignLeftCheck:SetChecked(debuffAlign == "LEFT") end
+    if self.DebuffAlignCenterCheck then self.DebuffAlignCenterCheck:SetChecked(debuffAlign == "CENTER") end
+    if self.DebuffAlignRightCheck then self.DebuffAlignRightCheck:SetChecked(debuffAlign == "RIGHT") end
+
+    -- Load Buff Icon Size Slider
+    if self.BuffSizeSlider then
+        local buffSize = BoxxyAurasDB.buffFrameSettings.iconSize
+        self.BuffSizeSlider:SetValue(buffSize)
+        -- Update label
+        if self.BuffSizeSlider.KeyLabel then 
+            self.BuffSizeSlider.KeyLabel:SetText(string.format("%dpx", buffSize))
+        end
+        -- Update thumb
+        local min, max = self.BuffSizeSlider:GetMinMaxValues()
+        local range = max - min
+        if range > 0 and self.BuffSizeSlider.VirtualThumb then 
+            local thumbPos = (buffSize - min) / range
+            self.BuffSizeSlider.VirtualThumb:SetPoint("CENTER", self.BuffSizeSlider, "LEFT", thumbPos * self.BuffSizeSlider:GetWidth(), 0)
+        end
     end
-    if self.DebuffAlignLeftCheck then self.DebuffAlignLeftCheck:SetChecked(BoxxyAurasDB.debuffTextAlign == "LEFT") end
-    if self.DebuffAlignCenterCheck then self.DebuffAlignCenterCheck:SetChecked(BoxxyAurasDB.debuffTextAlign == "CENTER") end
-    if self.DebuffAlignRightCheck then self.DebuffAlignRightCheck:SetChecked(BoxxyAurasDB.debuffTextAlign == "RIGHT") end
-    -- TODO: Call apply function here too when implemented
-    -- self:ApplyTextAlign(BoxxyAurasDB.debuffTextAlign, "Debuff")
+    
+    -- Load Debuff Icon Size Slider
+    if self.DebuffSizeSlider then
+        local debuffSize = BoxxyAurasDB.debuffFrameSettings.iconSize
+        self.DebuffSizeSlider:SetValue(debuffSize)
+        -- Update label
+        if self.DebuffSizeSlider.KeyLabel then 
+            self.DebuffSizeSlider.KeyLabel:SetText(string.format("%dpx", debuffSize))
+        end
+        -- Update thumb
+        local min, max = self.DebuffSizeSlider:GetMinMaxValues()
+        local range = max - min
+        if range > 0 and self.DebuffSizeSlider.VirtualThumb then 
+            local thumbPos = (debuffSize - min) / range
+            self.DebuffSizeSlider.VirtualThumb:SetPoint("CENTER", self.DebuffSizeSlider, "LEFT", thumbPos * self.DebuffSizeSlider:GetWidth(), 0)
+        end
+    end
 
     -- Apply the loaded states
     self:ApplyLockState(BoxxyAurasDB.lockFrames)
     self:ApplyScale(BoxxyAurasDB.optionsScale)
+    self:ApplyTextAlign() 
 end
 
 function BoxxyAuras.Options:Toggle()
@@ -369,35 +492,25 @@ function BoxxyAuras.Options:ApplyLockState(lockState)
 
         -- Hide/Show resize handles based on lock state
         if frame.handles then
-            print(string.format("ApplyLockState Debug (%s): Found handles table.", baseName)) -- DEBUG
             for name, handle in pairs(frame.handles) do
                 handle:EnableMouse(not lockState) -- Prevent mouse interaction on handles when locked
                 if lockState then 
                     handle:Hide() 
-                    print(string.format("ApplyLockState Debug (%s): Hiding handle %s.", baseName, name)) -- DEBUG
                 else 
                     handle:Show() 
-                    print(string.format("ApplyLockState Debug (%s): Showing handle %s.", baseName, name)) -- DEBUG
                 end
             end
-        else
-            print(string.format("ApplyLockState Debug (%s): Handles table NOT found.", baseName)) -- DEBUG
         end
 
         -- Hide/Show Title Label
         local titleLabelName = baseName .. "TitleLabel" -- Use baseName
         local titleLabel = _G[titleLabelName]
         if titleLabel then
-            print(string.format("ApplyLockState Debug (%s): Found title label %s.", baseName, titleLabelName)) -- DEBUG
             if lockState then 
                 titleLabel:Hide() 
-                print(string.format("ApplyLockState Debug (%s): Hiding title label.", baseName)) -- DEBUG
             else 
                 titleLabel:Show() 
-                print(string.format("ApplyLockState Debug (%s): Showing title label.", baseName)) -- DEBUG
             end
-        else
-            print(string.format("ApplyLockState Debug (%s): Title label %s NOT found.", baseName, titleLabelName)) -- DEBUG
         end
 
         -- Set background/border alpha DIRECTLY here as well as relying on polling
@@ -407,12 +520,10 @@ function BoxxyAuras.Options:ApplyLockState(lockState)
             -- Use existing colors, just change alpha
             local currentBgColor = frame.backdropTextures[5] and {frame.backdropTextures[5]:GetVertexColor()} or {0.1, 0.1, 0.1} -- Get center texture color or default
             BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "backdrop", currentBgColor[1], currentBgColor[2], currentBgColor[3], bgAlpha)
-            print(string.format("ApplyLockState Debug (%s): Directly setting backdrop alpha to %.2f.", baseName, bgAlpha)) -- DEBUG
         end
          if frame.borderTextures and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
             local currentBorderColor = frame.borderTextures[5] and {frame.borderTextures[5]:GetVertexColor()} or {0.4, 0.4, 0.4} -- Get center texture color or default
             BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", currentBorderColor[1], currentBorderColor[2], currentBorderColor[3], borderAlpha)
-            print(string.format("ApplyLockState Debug (%s): Directly setting border alpha to %.2f.", baseName, borderAlpha)) -- DEBUG
         end
 
         -- Trigger an immediate update via polling (still useful for hover state changes)
@@ -429,8 +540,6 @@ function BoxxyAuras.Options:ApplyLockState(lockState)
 
     ApplyToFrame(buffFrame, "BuffFrame") -- Pass baseName
     ApplyToFrame(debuffFrame, "DebuffFrame") -- Pass baseName
-    
-    -- print("BoxxyAuras: Lock state applied - ", tostring(lockState)) -- Optional debug
 end
 
 -- >> ADDED: Function to apply scale <<
@@ -444,12 +553,87 @@ function BoxxyAuras.Options:ApplyScale(scaleValue)
     if buffFrame then buffFrame:SetScale(scaleValue) end
     if debuffFrame then debuffFrame:SetScale(scaleValue) end
     if optionsFrm then optionsFrm:SetScale(scaleValue) end
+end
+
+-- >> ADDED: Function to apply text alignment <<
+function BoxxyAuras.Options:ApplyTextAlign()
+    -- Re-layout both frames whenever alignment changes
+    if BoxxyAuras.TriggerLayout then 
+        BoxxyAuras.TriggerLayout("Buff")
+        BoxxyAuras.TriggerLayout("Debuff")
+    end
+end
+
+-- Add new function to handle icon size changes
+function BoxxyAuras.Options:ApplyIconSizeChange(frameType)
+    print(string.format("Applying Icon Size change for %s", frameType))
     
-    -- We might need to re-layout auras after scaling, especially if size changes? (Consider later if needed)
-    -- if BoxxyAuras.LayoutAuras then
-    --    if buffFrame and BoxxyAuras.buffIcons then BoxxyAuras.LayoutAuras(buffFrame, BoxxyAuras.buffIcons) end
-    --    if debuffFrame and BoxxyAuras.debuffIcons then BoxxyAuras.LayoutAuras(debuffFrame, BoxxyAuras.debuffIcons) end
-    -- end
+    local iconList = nil
+    local settingsKey = nil
+    local newSize = 24 -- Default
+    local targetFrame = nil
+
+    if frameType == "Buff" then
+        iconList = BoxxyAuras.buffIcons
+        settingsKey = "buffFrameSettings"
+        targetFrame = _G["BoxxyBuffDisplayFrame"]
+    elseif frameType == "Debuff" then
+        iconList = BoxxyAuras.debuffIcons
+        settingsKey = "debuffFrameSettings"
+        targetFrame = _G["BoxxyDebuffDisplayFrame"]
+    else
+        print("ApplyIconSizeChange Error: Invalid frameType")
+        return
+    end
+    
+    if not targetFrame then
+        print("ApplyIconSizeChange Error: Target frame not found.")
+        return
+    end
+
+    -- Get the new size and current numIconsWide from DB
+    local currentNumIconsWide = 6 -- Default
+    if BoxxyAurasDB and BoxxyAurasDB[settingsKey] then
+        newSize = BoxxyAurasDB[settingsKey].iconSize or 24
+        currentNumIconsWide = BoxxyAurasDB[settingsKey].numIconsWide or 6
+    end
+
+    -- *** Recalculate and Set Frame Width ***
+    if BoxxyAuras.CalculateFrameWidth then
+        local newWidth = BoxxyAuras.CalculateFrameWidth(currentNumIconsWide, newSize)
+        print(string.format("ApplyIconSizeChange: Setting %s width to %.1f (NumIcons: %d, IconSize: %d)", 
+            frameType, newWidth, currentNumIconsWide, newSize))
+        targetFrame:SetWidth(newWidth)
+    else
+        print("ApplyIconSizeChange Warning: CalculateFrameWidth function not found.")
+    end
+
+    -- *** RE-INSERT ICON RESIZE AND LAYOUT TRIGGER ***
+    -- Check if icon list and resize method exist
+    if iconList and iconList[1] and iconList[1].Resize then
+        -- Loop through existing icons and resize them
+        for _, auraIcon in ipairs(iconList) do
+            if auraIcon.frame then -- Check if icon is valid
+                auraIcon:Resize(newSize)
+            end
+        end
+        
+        -- After resizing icons, trigger layout for the affected frame
+        if BoxxyAuras.TriggerLayout then
+            BoxxyAuras.TriggerLayout(frameType)
+        else
+             print("BoxxyAuras Error: TriggerLayout not found after resizing icons.")
+        end
+    else
+         print(string.format("BoxxyAuras Warning: Could not resize icons for %s. List or Resize method missing?", frameType))
+         -- Fallback: Try full Init as before if Resize isn't available? 
+         if BoxxyAuras.InitializeAuras then
+             print("Fallback: Calling InitializeAuras")
+             BoxxyAuras.InitializeAuras()
+         else
+             print("BoxxyAuras Error: InitializeAuras not found as fallback.")
+         end
+    end
 end
 
 --[[------------------------------------------------------------
@@ -458,7 +642,69 @@ end
 SLASH_BOXXYAURASOPTIONS1 = "/boxxyauras"
 SLASH_BOXXYAURASOPTIONS2 = "/ba"
 SlashCmdList["BOXXYAURASOPTIONS"] = function(msg)
-    BoxxyAuras.Options:Toggle()
-end
+    local command = msg and string.lower(string.trim(msg)) or ""
+    
+    if command == "reset" then
+        -- Reset Saved Variables to Defaults
+        print("BoxxyAuras: Resetting frame settings to default.")
+        
+        -- Define defaults (Redefine here for clarity - using TOP anchors)
+        local defaultPadding = BoxxyAuras.Config.Padding or 6
+        local defaultIconSize = BoxxyAuras.Config.IconSize or 32
+        local defaultTextHeight = BoxxyAuras.Config.TextHeight or 8
+        local defaultIconH = defaultIconSize + defaultTextHeight + (defaultPadding * 2) 
+        local defaultFramePadding = BoxxyAuras.Config.FramePadding or 6
+        local defaultMinHeight = defaultFramePadding + defaultIconH + defaultFramePadding 
+        local defaultIconsWide_Reset = 6 -- Use a literal default here
 
-print("BoxxyAuras Options Menu Loaded")
+        local defaultBuffFrameSettings_Reset = {
+            x = 0, y = -150, anchor = "TOP",
+            height = defaultMinHeight, numIconsWide = defaultIconsWide_Reset, buffTextAlign = "CENTER" 
+        }
+        local defaultDebuffFrameSettings_Reset = {
+            x = 0, y = -150 - defaultMinHeight - 30, anchor = "TOP",
+            height = defaultMinHeight, numIconsWide = defaultIconsWide_Reset, debuffTextAlign = "CENTER" 
+        }
+        
+        -- Overwrite saved settings with defaults
+        BoxxyAurasDB.buffFrameSettings = CopyTable(defaultBuffFrameSettings_Reset)
+        BoxxyAurasDB.debuffFrameSettings = CopyTable(defaultDebuffFrameSettings_Reset)
+        
+        -- Re-apply settings to the frames
+        local buffFrame = _G["BoxxyBuffDisplayFrame"]
+        local debuffFrame = _G["BoxxyDebuffDisplayFrame"]
+        
+        -- We need the ApplySettings function. Check if it exists on the main addon table.
+        local applyFunc = BoxxyAuras.ApplySettings -- Check if it was attached to the main table
+        if not applyFunc then 
+            -- Try finding it attached to Options if it wasn't on main (less likely)
+            if BoxxyAuras.Options and BoxxyAuras.Options.ApplySettings then 
+                applyFunc = BoxxyAuras.Options.ApplySettings
+            else
+                 print("BoxxyAuras Error: ApplySettings function not found for reset.")
+            end
+        end
+
+        if applyFunc then 
+            if buffFrame then 
+                applyFunc(buffFrame, BoxxyAurasDB.buffFrameSettings, "Buff Frame") 
+            end
+            if debuffFrame then 
+                applyFunc(debuffFrame, BoxxyAurasDB.debuffFrameSettings, "Debuff Frame") 
+            end
+        end
+
+        -- Trigger a layout update
+        if BoxxyAuras.InitializeAuras then 
+            BoxxyAuras.InitializeAuras() -- Re-running init should relayout both
+        elseif BoxxyAuras.UpdateAuras then
+             BoxxyAuras.UpdateAuras() -- Fallback to update if init isn't available
+        end
+
+        -- PlaySound(SOUNDKIT.UI_SCROLL_DOWN)
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) -- Use a known working sound
+        
+    else -- Default action: Toggle options menu
+        BoxxyAuras.Options:Toggle()
+    end
+end
