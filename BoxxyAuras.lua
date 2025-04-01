@@ -1,6 +1,7 @@
 local BOXXYAURAS, BoxxyAuras = ... -- Get addon name and private table
 BoxxyAuras.AllAuras = {} -- Global cache for aura info
 BoxxyAuras.updateScheduled = false -- Flag to debounce UNIT_AURA updates
+BoxxyAuras.recentAuraEvents = {} -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
 
 -- Configuration Table
 BoxxyAuras.Config = {
@@ -12,6 +13,11 @@ BoxxyAuras.Config = {
     Padding = 6,           -- Internal padding within AuraIcon frame
     FramePadding = 12,      -- Padding between frame edge and icons
     IconSpacing = 0,       -- Spacing between icons
+    -- Dynamic Shake Configuration
+    MinShakeScale = 2,        -- Minimum visual scale of the shake effect
+    MaxShakeScale = 6,        -- Maximum visual scale of the shake effect
+    MinDamagePercentForShake = 0.01, -- Damage as % of max health to trigger MinShakeScale (e.g., 0.01 = 1%)
+    MaxDamagePercentForShake = 0.10, -- Damage as % of max health to trigger MaxShakeScale (e.g., 0.10 = 10%)
 }
 
 -- Function to check if mouse cursor is within a frame's bounds
@@ -446,12 +452,6 @@ local function OnDisplayFrameResizeUpdate(frame, elapsed)
         frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", finalX, frame.frameStartY) -- Keep original Y
         UpdateEdgeHandleDimensions(frame, snappedW, fixedFrameH)
     end
-    
-    -- If the DB was updated, we might want to re-layout immediately
-    -- if needsDBUpdate then
-    --    LayoutAuras(frame, (frame == buffDisplayFrame and BoxxyAuras.buffIcons or BoxxyAuras.debuffIcons))
-    -- end 
-    -- Commented out: Immediate relayout might feel jerky during drag. OnMouseUp handles final layout.
 end
 
 -- Attach the generalized OnUpdate to both frames
@@ -463,13 +463,13 @@ local function InitializeAuras()
     -- API Check
     if not C_UnitAuras or not C_UnitAuras.GetAuraSlots or not C_UnitAuras.GetAuraDataBySlot then
         print("|cffff0000BoxxyAuras Error: C_UnitAuras Slot API not ready during Initialize!|r")
-        return 
+        return
     end
 
     local AuraIcon = BoxxyAuras.AuraIcon
     if not AuraIcon then 
         print("|cffff0000BoxxyAuras Error: AuraIcon class not found during Initialize!|r")
-        return 
+        return
     end
 
     -- 1. Clear existing cache and icons
@@ -488,7 +488,7 @@ local function InitializeAuras()
     for i = 2, #buffSlots do
         local slot = buffSlots[i]
         local auraData = C_UnitAuras.GetAuraDataBySlot("player", slot)
-        if auraData then 
+        if auraData then             
             auraData.slot = slot -- Store the slot/index on the data table
             table.insert(currentBuffs, auraData) 
         end
@@ -496,7 +496,7 @@ local function InitializeAuras()
     for i = 2, #debuffSlots do
         local slot = debuffSlots[i]
         local auraData = C_UnitAuras.GetAuraDataBySlot("player", slot)
-        if auraData then 
+        if auraData then
             auraData.slot = slot -- Store the slot/index on the data table
             table.insert(currentDebuffs, auraData) 
         end
@@ -545,9 +545,27 @@ end
 
 -- Function to update displayed auras using cache comparison and stable order
 BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
+
+    -- 1a. Clean recentAuraEvents queue (remove entries older than ~0.5 seconds)
+    local cleanupTime = GetTime() - 0.5
+    local n = #BoxxyAuras.recentAuraEvents
+    local validIndex = 1
+    for i = 1, n do
+        if BoxxyAuras.recentAuraEvents[i].timestamp >= cleanupTime then
+            if i ~= validIndex then
+                BoxxyAuras.recentAuraEvents[validIndex] = BoxxyAuras.recentAuraEvents[i]
+            end
+            validIndex = validIndex + 1
+        end
+    end
+    -- Trim the end of the table
+    for i = n, validIndex, -1 do
+        table.remove(BoxxyAuras.recentAuraEvents)
+    end
+
     -- API Check
     if not C_UnitAuras or not C_UnitAuras.GetAuraSlots or not C_UnitAuras.GetAuraDataBySlot then
-        return 
+        return
     end
     local AuraIcon = BoxxyAuras.AuraIcon
     if not AuraIcon then return end
@@ -569,11 +587,12 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
     for i = 2, #debuffSlots do
         local slot = debuffSlots[i]
         local auraData = C_UnitAuras.GetAuraDataBySlot("player", slot)
-        if auraData then 
+        if auraData then
             auraData.slot = slot -- Store the slot/index on the data table
             table.insert(currentDebuffs, auraData) 
         end
     end
+
 
     -- 2. Build Current Lookup Map & Mark Tracked Auras
     local currentBuffMap = {}
@@ -609,7 +628,7 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
             table.insert(newBuffsToAdd, currentAura) -- Add the whole auraData (includes .slot)
         end
     end
-    -- Process Current Debuffs (Mark Seen / Identify New)
+    -- Process Current Debuffs (Mark Seen / Identify New & Try to Match sourceGUID)
     for _, currentAura in ipairs(currentDebuffs) do
         local foundInTracked = false
         for _, trackedAura in ipairs(trackedDebuffs) do
@@ -624,7 +643,21 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
             end
         end
         if not foundInTracked then
-            table.insert(newDebuffsToAdd, currentAura) -- Add the whole auraData (includes .slot)
+            -- This is a new debuff according to C_UnitAuras
+            -- Try to find a matching recent combat log event to get sourceGUID
+            local foundEventMatch = false
+            for i = #BoxxyAuras.recentAuraEvents, 1, -1 do -- Iterate backwards for potentially better timing match
+                local event = BoxxyAuras.recentAuraEvents[i]
+                if event.spellId == currentAura.spellId then
+                    -- Match found! Assign GUID and remove event from queue
+                    currentAura.sourceGUID = event.sourceGUID
+                    table.remove(BoxxyAuras.recentAuraEvents, i)
+                    foundEventMatch = true
+                    break -- Stop searching events for this aura
+                end
+            end
+
+            table.insert(newDebuffsToAdd, currentAura) -- Add aura data (potentially with sourceGUID now)
         end
     end
 
@@ -778,7 +811,7 @@ end
 -- Event handling frame
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("PLAYER_LOGIN") 
-eventFrame:RegisterEvent("UNIT_AURA")
+-- eventFrame:RegisterEvent("UNIT_AURA") -- <<< COMMENTED OUT
 eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     local unit = (...)
@@ -911,7 +944,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             else
                     -- Optional: Add logic here if you need to ensure frames are explicitly UNLOCKED on load 
                     -- (though ApplySettings and SetupDisplayFrame should handle default appearance)
-                    print("BoxxyAuras: Initial lock state is false, no direct locking needed.") -- DEBUG
             end
             -- REMOVED call to BoxxyAuras.Options.ApplyLockState from timer
         end
@@ -922,47 +954,86 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
 
         -- Schedule Initial Aura Load
         C_Timer.After(0.2, InitializeAuras) 
-    elseif event == "UNIT_AURA" and unit == "player" then
-        -- Debounce the update
-        if not BoxxyAuras.updateScheduled then
-            BoxxyAuras.updateScheduled = true
-            C_Timer.After(0.1, function() 
-                BoxxyAuras.updateScheduled = false -- Reset flag before running
-                BoxxyAuras.UpdateAuras()
-            end)
-        end
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
-        local timestamp, subevent, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, spellId, spellName = CombatLogGetCurrentEventInfo()
+        local timestamp, subevent, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, spellId, spellName, spellSchool, amount = CombatLogGetCurrentEventInfo()
 
-        -- Check if the event is spell damage taken by the player
-        if destName and destName == UnitName("player") and 
-           (subevent == "SPELL_DAMAGE" or subevent == "SPELL_PERIODIC_DAMAGE") then
-            -- Check if the damage source spellId matches any tracked debuff
-            if spellId and #trackedDebuffs > 0 then
+        -- Check if damage tick to player
+        if destName and destName == UnitName("player") and (subevent == "SPELL_DAMAGE" or subevent == "SPELL_PERIODIC_DAMAGE") then
+            -- Use spellId AND sourceGUID to find the specific debuff instance
+            if spellId and sourceGUID and amount and amount > 0 and #trackedDebuffs > 0 then
+                local targetAuraInstanceID = nil
+                -- Find the tracked debuff matching BOTH spellId and sourceGUID
                 for _, trackedDebuff in ipairs(trackedDebuffs) do
-                    -- Compare spell IDs
-                    -- Use correct camelCase: trackedDebuff.spellId
-                    -- Make sure trackedDebuff and its spellID exist before comparing
-                    if trackedDebuff and trackedDebuff.spellId and trackedDebuff.spellId == spellId then
-                        -- Find the corresponding AuraIcon instance and call Shake
-                        for _, auraIcon in ipairs(BoxxyAuras.debuffIcons) do
-                            -- Check if the icon exists and its instance ID matches
-                            if auraIcon and auraIcon.auraInstanceID and auraIcon.auraInstanceID == trackedDebuff.auraInstanceID then
-                                if auraIcon.Shake then -- Check if the Shake method exists
-                                    auraIcon:Shake()
-                                else
-                                     print("|cffFF0000BoxxyAuras ERROR:|r Shake method not found on AuraIcon instance!")
-                                end
-                                break -- Found the icon, no need to continue looping
-                            end
-                        end
-                        
-                        break -- Stop checking once found
+                    if trackedDebuff and trackedDebuff.spellId == spellId and trackedDebuff.sourceGUID == sourceGUID then
+                        targetAuraInstanceID = trackedDebuff.auraInstanceID
+                        break -- Found the specific debuff instance
                     end
                 end
+
+                -- If we found the specific instance, find its icon and shake it
+                if targetAuraInstanceID then
+                    for _, auraIcon in ipairs(BoxxyAuras.debuffIcons) do
+                        if auraIcon and auraIcon.auraInstanceID == targetAuraInstanceID then
+                            if auraIcon.Shake then
+                                -- Calculate Shake Scale
+                                local shakeScale = 1.0 -- Default scale
+                                local maxHealth = UnitHealthMax("player")
+                                if maxHealth and maxHealth > 0 then
+                                    local damagePercent = amount / maxHealth
+
+                                    -- Get config values with defaults
+                                    local minScale = BoxxyAuras.Config.MinShakeScale or 0.5
+                                    local maxScale = BoxxyAuras.Config.MaxShakeScale or 2.0
+                                    local minPercent = BoxxyAuras.Config.MinDamagePercentForShake or 0.01
+                                    local maxPercent = BoxxyAuras.Config.MaxDamagePercentForShake or 0.10
+
+                                    if minPercent >= maxPercent then maxPercent = minPercent + 0.01 end -- Ensure range is valid
+
+                                    if damagePercent <= minPercent then
+                                        shakeScale = minScale
+                                    elseif damagePercent >= maxPercent then
+                                        shakeScale = maxScale
+                                    else
+                                        -- Linear interpolation between min and max scale
+                                        local percentInRange = (damagePercent - minPercent) / (maxPercent - minPercent)
+                                        shakeScale = minScale + (maxScale - minScale) * percentInRange
+                                    end
+                                end
+
+                                -- Add print before calling Shake
+                                auraIcon:Shake(shakeScale) -- Pass the calculated scale
+                            else
+                                print("|cffFF0000BoxxyAuras ERROR:|r Shake method not found on AuraIcon instance!")
+                            end
+                            break -- Found the specific icon
+                        end
+                    end
+                end
+            end -- End 'if spellId and sourceGUID and amount...'
+
+        -- Check if aura change on player
+        elseif destGUID == UnitGUID("player") and 
+               (subevent == "SPELL_AURA_APPLIED" or 
+                subevent == "SPELL_AURA_REFRESH" or 
+                subevent == "SPELL_AURA_REMOVED" or 
+                subevent == "SPELL_AURA_APPLIED_DOSE" or
+                subevent == "SPELL_AURA_REMOVED_DOSE") then
+
+            if spellId and sourceGUID and (subevent == "SPELL_AURA_APPLIED" or subevent == "SPELL_AURA_REFRESH" or subevent == "SPELL_AURA_APPLIED_DOSE") then
+                local eventData = { spellId = spellId, sourceGUID = sourceGUID, timestamp = timestamp } -- Use event timestamp
+                table.insert(BoxxyAuras.recentAuraEvents, eventData)
             end
-        end
-    end
+
+            -- Debounce the update
+            if not BoxxyAuras.updateScheduled then
+                BoxxyAuras.updateScheduled = true
+                C_Timer.After(0.1, function() 
+                    BoxxyAuras.updateScheduled = false
+                    BoxxyAuras.UpdateAuras()
+                end) -- Close C_Timer anonymous function
+            end -- Close 'if not BoxxyAuras.updateScheduled'
+        end -- Close 'if destName... elseif destGUID...'
+    end -- Close 'elseif event == "COMBAT_LOG_..."'
 end)
 
 -- Re-enabled Generalized polling function for mouse hover state

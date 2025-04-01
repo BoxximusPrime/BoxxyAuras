@@ -224,22 +224,27 @@ function AuraIcon.New(parentFrame, index, baseName)
     local shakeDur = 0.05 -- Duration of each shake segment
 
     -- Shake Right
-    local shake1 = shakeGroup:CreateAnimation("Translation")
+    local shake1 = shakeGroup:CreateAnimation("Translation", "shake1")
     shake1:SetOffset(shakeOffset, 0)
     shake1:SetDuration(shakeDur)
     shake1:SetOrder(1)
 
     -- Shake Left (past center)
-    local shake2 = shakeGroup:CreateAnimation("Translation")
+    local shake2 = shakeGroup:CreateAnimation("Translation", "shake2")
     shake2:SetOffset(-shakeOffset * 2, 0) 
     shake2:SetDuration(shakeDur * 2)
     shake2:SetOrder(2)
 
     -- Return to Center
-    local shake3 = shakeGroup:CreateAnimation("Translation")
+    local shake3 = shakeGroup:CreateAnimation("Translation", "shake3")
     shake3:SetOffset(shakeOffset, 0) 
     shake3:SetDuration(shakeDur)
     shake3:SetOrder(3)
+
+    -- Store references to the individual shake animations
+    instance.shakeAnim1 = shake1
+    instance.shakeAnim2 = shake2
+    instance.shakeAnim3 = shake3
 
     -- Add Alpha animations for the Red Overlay to the Shake Group
     local shakeOverlayFadeIn = shakeGroup:CreateAnimation("Alpha", "ShakeOverlayFadeIn")
@@ -583,15 +588,50 @@ end
 function AuraIcon.OnLeave(self)
      if not self.frame then return end
      self.isMouseOver = false -- Clear flag when mouse leaves
-    GameTooltip:Hide()
+     GameTooltip:Hide()
 end
 
 -- *** ADDED Shake Method ***
-function AuraIcon:Shake()
+-- Accepts an optional scale argument (defaults to 1.0)
+function AuraIcon:Shake(scale)
     if not self.frame then return end -- Safety check
-    -- Play the shake animation if it exists and isn't already playing
+
+    local currentScale = scale or 1.0 -- Use provided scale or default to 1
+
+    -- Get the base shake offset (might want to make this a constant or config)
+    local baseShakeOffset = 4 
+
+    -- Calculate scaled offset, but maybe clamp it to prevent extreme values?
+    local scaledOffset = math.min(baseShakeOffset * currentScale, baseShakeOffset * 3) -- Example: Max 3x offset
+    scaledOffset = math.max(scaledOffset, 1) -- Ensure at least 1 pixel offset
+
+    -- Access stored animation objects directly
+    local shake1 = self.shakeAnim1
+    local shake2 = self.shakeAnim2
+    local shake3 = self.shakeAnim3
+
+    -- Check if the stored animation objects exist
+    if not shake1 or not shake2 or not shake3 then 
+        return
+    end
+
+    -- Apply offsets
+    shake1:SetOffset(0, -scaledOffset) -- Move down
+    shake2:SetOffset(0, scaledOffset * 2) -- Move up past center
+    shake3:SetOffset(0, -scaledOffset) -- Return to center (from top)
+
+    -- Check if group exists and is not playing
     if self.shakeAnimGroup and not self.shakeAnimGroup:IsPlaying() then
         self.shakeAnimGroup:Play()
+    else
+        -- Add print if the animation group is already playing
+        if self.shakeAnimGroup and self.shakeAnimGroup:IsPlaying() then
+            -- Animation is already playing, do nothing or maybe call Stop() first?
+            -- For now, just skipping to avoid restarting mid-shake.
+        else
+             -- This case should technically not be reachable if the earlier nil check passed
+             -- print(string.format("DEBUG AuraIcon:Shake: Condition failed unexpectedly before Play() for %s.", self.frame:GetName() or "Unknown"))
+        end
     end
 end
 
