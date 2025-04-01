@@ -394,6 +394,33 @@ end)
 
 BoxxyAuras.Options.ScaleSlider = scaleSlider
 
+-- <<<< INSERT BUTTON START >>>>
+-- Update last element for positioning the new button
+lastElement = scaleSlider
+verticalSpacing = -35 -- Add more space before the button
+
+-- Button to Open Custom Aura Options
+local openCustomOptionsButton = CreateFrame("Button", "BoxxyAurasOpenCustomOptionsButton", contentFrame, "BAURASButtonTemplate")
+openCustomOptionsButton:SetPoint("TOPLEFT", lastElement, "BOTTOMLEFT", 0, verticalSpacing)
+openCustomOptionsButton:SetWidth(contentFrame:GetWidth() - 20) -- Make it wide
+openCustomOptionsButton:SetHeight(25)
+openCustomOptionsButton:SetText("Manage Custom Aura List...")
+openCustomOptionsButton:SetScript("OnClick", function()
+    if BoxxyAuras.CustomOptions and BoxxyAuras.CustomOptions.Toggle then
+        BoxxyAuras.CustomOptions:Toggle()
+    else
+        print("|cffFF0000BoxxyAuras Error:|r Custom Options module not loaded or Toggle function missing.")
+    end
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) -- Use standard click sound
+end)
+
+BoxxyAuras.Options.OpenCustomOptionsButton = openCustomOptionsButton
+
+-- Update last element in case more options are added later
+lastElement = openCustomOptionsButton
+verticalSpacing = -15
+-- <<<< INSERT BUTTON END >>>>
+
 --[[------------------------------------------------------------
 -- Functions to Load/Save/Toggle
 --------------------------------------------------------------]]
@@ -513,6 +540,7 @@ end
 function BoxxyAuras.Options:ApplyLockState(lockState)
     local buffFrame = _G["BoxxyBuffDisplayFrame"]
     local debuffFrame = _G["BoxxyDebuffDisplayFrame"]
+    local customFrame = _G["BoxxyCustomDisplayFrame"] -- <<< ADDED Reference
 
     -- Helper function to apply state to a frame
     local function ApplyToFrame(frame, baseName) -- Accept baseName
@@ -571,6 +599,7 @@ function BoxxyAuras.Options:ApplyLockState(lockState)
 
     ApplyToFrame(buffFrame, "BuffFrame") -- Pass baseName
     ApplyToFrame(debuffFrame, "DebuffFrame") -- Pass baseName
+    ApplyToFrame(customFrame, "CustomFrame") -- <<< ADDED Call for custom frame
 end
 
 -- >> ADDED: Function to apply scale <<
@@ -579,11 +608,15 @@ function BoxxyAuras.Options:ApplyScale(scaleValue)
 
     local buffFrame = _G["BoxxyBuffDisplayFrame"]
     local debuffFrame = _G["BoxxyDebuffDisplayFrame"]
-    local optionsFrm = self.Frame -- Use self.Frame for the options frame
+    local customFrame = _G["BoxxyCustomDisplayFrame"] -- <<< ADDED Reference to custom display frame
+    local optionsFrm = self.Frame -- Use self.Frame for the main options frame
+    local customOptionsFrm = BoxxyAuras.CustomOptions and BoxxyAuras.CustomOptions.Frame -- <<< ADDED Reference to custom options frame
 
     if buffFrame then buffFrame:SetScale(scaleValue) end
     if debuffFrame then debuffFrame:SetScale(scaleValue) end
+    if customFrame then customFrame:SetScale(scaleValue) end -- <<< ADDED Scaling for custom display frame
     if optionsFrm then optionsFrm:SetScale(scaleValue) end
+    if customOptionsFrm then customOptionsFrm:SetScale(scaleValue) end -- <<< ADDED Scaling for custom options frame
 end
 
 -- >> ADDED: Function to apply text alignment <<
@@ -602,11 +635,8 @@ function BoxxyAuras.ApplyBlizzardAuraVisibility(shouldHide)
         if shouldHide then
             BuffFrame:Hide()
             -- TemporaryEnchantFrame might not exist or be relevant in modern UI
-            print("BoxxyAuras: Hiding default Blizzard aura frame (BuffFrame).")
         else
             BuffFrame:Show()
-            -- TemporaryEnchantFrame might not exist or be relevant in modern UI
-            print("BoxxyAuras: Showing default Blizzard aura frame (BuffFrame).")
         end
     else
         print("BoxxyAuras Warning: BuffFrame not found when trying to apply visibility setting.")

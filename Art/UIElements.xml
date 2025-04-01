@@ -112,42 +112,23 @@
         <Scripts>
             <OnLoad>
                 self.Enabled = true
-                BAURASUIBuilder.DrawSlicedBG(self, "BtnBG", "border", -2)
-                BAURASUIBuilder.ColorBGSlicedFrame(self, "border", 0.1, 0.1, 0.1, 1)
-                BAURASUIBuilder.DrawSlicedBG(self, "BtnBorder", "backdrop", -2)
-                BAURASUIBuilder.ColorBGSlicedFrame(self, "backdrop", 0.3, 0.3, 0.3, 1)
-
-                function self:SetText(text)
-                    self.Text:SetText(text)
-                end
-
-                function self:SetEnabled(enabled)
-                    self.Enabled = enabled
-                    if enabled then
-                        BAURASUIBuilder.ColorBGSlicedFrame(self, "backdrop", 0.3, 0.3, 0.3, 1)
-                        BAURASUIBuilder.ColorBGSlicedFrame(self, "border", 0.1, 0.1, 0.1, 1)
-                        self.Text:SetTextColor(0.75, 0.75, 0.75)
-                    else
-                        BAURASUIBuilder.ColorBGSlicedFrame(self, "backdrop", 0.2, 0.2, 0.2, 1)
-                        BAURASUIBuilder.ColorBGSlicedFrame(self, "border", 0.3, 0.3, 0.3, 1)
-                        self.Text:SetTextColor(0.28, 0.28, 0.28)
-                    end
-                end
-
-                function self:IsEnabled()
-                    return self.Enabled
+                -- Call the Lua setup function
+                if BoxxyAuras_SetupGeneralButton then
+                    BoxxyAuras_SetupGeneralButton(self)
+                else
+                    print("|cffFF0000BoxxyAuras Error:|r BoxxyAuras_SetupGeneralButton function not found during BAURASGeneralButton OnLoad.")
                 end
             </OnLoad>
             <OnEnter>
-                if self.Enabled == true then
-                    BAURASUIBuilder.ColorBGSlicedFrame(self, "backdrop", 0.4, 0.4, 0.4, 1)
-                    BAURASUIBuilder.ColorBGSlicedFrame(self, "border", 0.2, 0.2, 0.2, 1)
+                if self.Enabled == true and BoxxyAuras and BoxxyAuras.UIUtils then
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.4, 0.4, 0.4, 1)
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.2, 0.2, 0.2, 1)
                 end
             </OnEnter>
             <OnLeave>
-                if self.Enabled == true then
-                    BAURASUIBuilder.ColorBGSlicedFrame(self, "backdrop", 0.3, 0.3, 0.3, 1)
-                    BAURASUIBuilder.ColorBGSlicedFrame(self, "border", 0.1, 0.1, 0.1, 1)
+                if self.Enabled == true and BoxxyAuras and BoxxyAuras.UIUtils then
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.3, 0.3, 0.3, 1)
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.1, 0.1, 0.1, 1)
                 end
             </OnLeave>
         </Scripts>
@@ -342,4 +323,71 @@
 			</OnLeave>
 		</Scripts>
 	</Slider>
+
+    <EditBox name="BAURASEditBoxTemplate" virtual="true" autoFocus="false" multiLine="true" ignoreParentScale="true">
+        <Size x="200" y="100"/>
+        <Layers>
+            <Layer level="BACKGROUND">
+                <Texture parentKey="Bg" file="Interface\ChatFrame\ChatFrameBackground">
+                    <Gradient orientation="VERTICAL">
+                        <MinColor r="0.1" g="0.1" b="0.1" a="0.8"/>
+                        <MaxColor r="0.2" g="0.2" b="0.2" a="0.8"/>
+                    </Gradient>
+                </Texture>
+            </Layer>
+            <Layer level="BORDER">
+                 <Texture parentKey="BorderTop" file="Interface\ChatFrame\ChatFrameBackground" >
+                     <Size x="0" y="1"/>
+                     <Anchors>
+                         <Anchor point="TOPLEFT" x="0" y="1"/>
+                         <Anchor point="TOPRIGHT" x="0" y="1"/>
+                     </Anchors>
+                     <Color r="0.5" g="0.5" b="0.5" a="0.8"/>
+                 </Texture>
+                 <Texture parentKey="BorderBottom" file="Interface\ChatFrame\ChatFrameBackground" >
+                     <Size x="0" y="1"/>
+                     <Anchors>
+                         <Anchor point="BOTTOMLEFT" x="0" y="-1"/>
+                         <Anchor point="BOTTOMRIGHT" x="0" y="-1"/>
+                     </Anchors>
+                     <Color r="0.5" g="0.5" b="0.5" a="0.8"/>
+                 </Texture>
+                 <Texture parentKey="BorderLeft" file="Interface\ChatFrame\ChatFrameBackground" >
+                     <Size x="1" y="0"/>
+                     <Anchors>
+                         <Anchor point="TOPLEFT" x="-1" y="0"/>
+                         <Anchor point="BOTTOMLEFT" x="-1" y="0"/>
+                     </Anchors>
+                     <Color r="0.5" g="0.5" b="0.5" a="0.8"/>
+                 </Texture>
+                 <Texture parentKey="BorderRight" file="Interface\ChatFrame\ChatFrameBackground" >
+                     <Size x="1" y="0"/>
+                     <Anchors>
+                         <Anchor point="TOPRIGHT" x="1" y="0"/>
+                         <Anchor point="BOTTOMRIGHT" x="1" y="0"/>
+                     </Anchors>
+                     <Color r="0.5" g="0.5" b="0.5" a="0.8"/>
+                 </Texture>
+             </Layer>
+        </Layers>
+        <Scripts>
+            <OnLoad>
+                self:SetTextInsets(5, 5, 5, 5)
+                self:SetFontObject(ChatFontNormal)
+                self:SetMaxLetters(0)
+            </OnLoad>
+            <OnEscapePressed>
+                self:ClearFocus()
+            </OnEscapePressed>
+            <OnEnterPressed>
+                self:ClearFocus()
+            </OnEnterPressed>
+        </Scripts>
+        <FontString inherits="ChatFontNormal"/>
+    </EditBox>
+
+    <Button name="BAURASButtonTemplate" inherits="BAURASGeneralButton" virtual="true">
+        <!-- Inherits Size, Layers, and CORRECTED Scripts from BAURASGeneralButton -->
+        <!-- No overrides needed here anymore -->
+    </Button>
 </Ui>

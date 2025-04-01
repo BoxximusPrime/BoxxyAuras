@@ -34,17 +34,6 @@ BoxxyAuras.FrameTextures =
         cornerSize = 12,
         cornerCoord = 0.25,
     },
-    -- Add Keys for Buff/Debuff Display Frame Backdrops
-    BuffFrameHoverBG = { 
-        file = "SelectionBox", -- Reuse SelectionBox texture
-        cornerSize = 12,
-        cornerCoord = 0.25,
-    },
-    DebuffFrameHoverBG = { 
-        file = "SelectionBox", -- Reuse SelectionBox texture
-        cornerSize = 12,
-        cornerCoord = 0.25,
-    },
     -- >>> ADDED Options Window Background <<<
     OptionsWindowBG = {
         file = "OptionsWindowBG", -- Assuming this texture file exists in Art/
@@ -160,4 +149,51 @@ function BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, layer, r, g, b, a)
     else
         print(string.format("|cffFF0000ColorBGSlicedFrame Error: Invalid layer or texture group not found for frame %s, layer: %s |r", frame:GetName(), tostring(layer)))
     end 
+end
+
+-- Function to set up buttons inheriting from BAURASGeneralButton
+function BoxxyAuras_SetupGeneralButton(button)
+    if not button then return end
+
+    -- Ensure UIUtils functions are available before using them
+    if BoxxyAuras and BoxxyAuras.UIUtils and 
+       BoxxyAuras.UIUtils.DrawSlicedBG and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
+        
+        -- Draw initial background and border
+        BoxxyAuras.UIUtils.DrawSlicedBG(button, "BtnBG", "border", -2)
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(button, "border", 0.1, 0.1, 0.1, 1) -- Default border color
+        BoxxyAuras.UIUtils.DrawSlicedBG(button, "BtnBorder", "backdrop", -2)
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(button, "backdrop", 0.3, 0.3, 0.3, 1) -- Default backdrop color
+
+        -- Define methods directly on the button object
+        function button:SetText(text)
+            if self.Text then -- Check if the FontString child exists
+                self.Text:SetText(text)
+            end
+        end
+
+        function button:SetEnabled(enabled)
+            self.Enabled = enabled -- Use the .Enabled property set in XML OnLoad
+            -- Update appearance based on enabled state
+            if enabled then
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.3, 0.3, 0.3, 1)
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.1, 0.1, 0.1, 1)
+                if self.Text then self.Text:SetTextColor(0.75, 0.75, 0.75) end
+            else
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.2, 0.2, 0.2, 1)
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.3, 0.3, 0.3, 1)
+                if self.Text then self.Text:SetTextColor(0.28, 0.28, 0.28) end
+            end
+        end
+
+        function button:IsEnabled()
+            return self.Enabled
+        end
+
+        -- Apply the initial enabled state visuals
+        button:SetEnabled(button.Enabled)
+
+    else
+        print(string.format("|cffFF0000BoxxyAuras Error:|r UIUtils functions not found when setting up button '%s' via BoxxyAuras_SetupGeneralButton.", button:GetName() or "(unknown)"))
+    end
 end 

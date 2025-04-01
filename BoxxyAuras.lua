@@ -35,6 +35,10 @@ function BoxxyAuras.IsMouseWithinFrame(frame)
     return mouseX >= left and mouseX <= left + width and mouseY >= bottom and mouseY <= bottom + height
 end
 
+local customDisplayFrame = CreateFrame("Frame", "BoxxyCustomDisplayFrame", UIParent) -- NEW Custom Frame
+BoxxyAuras.customIcons = {} -- NEW Custom Icon List
+
+
 -- Create the main addon frame
 local mainFrame = CreateFrame("Frame", "BoxxyAurasMainFrame", UIParent) -- No template needed now
 local defaultMainFrameSettings = { -- Define defaults
@@ -48,16 +52,19 @@ local defaultMainFrameSettings = { -- Define defaults
 -- Create INDEPENDENT display frames parented to UIParent
 local buffDisplayFrame = CreateFrame("Frame", "BoxxyBuffDisplayFrame", UIParent) -- Parent to UIParent, unique name
 local debuffDisplayFrame = CreateFrame("Frame", "BoxxyDebuffDisplayFrame", UIParent) -- Parent to UIParent, unique name
+local customDisplayFrame = CreateFrame("Frame", "BoxxyCustomDisplayFrame", UIParent) -- NEW Custom Frame
 
 -- Attach icon lists to the main addon table
 BoxxyAuras.buffIcons = {}
 BoxxyAuras.debuffIcons = {}
+BoxxyAuras.customIcons = {} -- NEW Custom Icon List
 
 local iconSpacing = 4 -- Keep local if only used here?
 
 -- New Cache Tables
 local trackedBuffs = {}
 local trackedDebuffs = {}
+local trackedCustom = {} -- NEW Cache for Custom Bar
 
 -- New sorting function
 local function SortAurasForDisplay(a, b)
@@ -176,6 +183,8 @@ CreateResizeHandlesForFrame = function(frame, frameName)
                     dbKey = "buffFrameSettings"
                 elseif frame == debuffDisplayFrame then
                     dbKey = "debuffFrameSettings"
+                elseif frame == customDisplayFrame then
+                    dbKey = "customFrameSettings" -- <<< ADDED
                 end
                 if dbKey and BoxxyAurasDB and BoxxyAurasDB[dbKey] then
                      -- Width is implicitly saved via numIconsWide
@@ -187,6 +196,8 @@ CreateResizeHandlesForFrame = function(frame, frameName)
                     iconList = BoxxyAuras.buffIcons
                 elseif frame == debuffDisplayFrame then
                     iconList = BoxxyAuras.debuffIcons
+                elseif frame == customDisplayFrame then
+                    iconList = BoxxyAuras.customIcons -- <<< ADDED
                 end
                 if iconList then
                     BoxxyAuras.LayoutAuras(frame, iconList)
@@ -233,6 +244,13 @@ BoxxyAuras.LayoutAuras = function(targetFrame, iconList)
         settingsKey = "debuffFrameSettings"
         if BoxxyAurasDB and BoxxyAurasDB[settingsKey] then
             alignment = BoxxyAurasDB[settingsKey].debuffTextAlign or "LEFT"
+            numIconsWide = BoxxyAurasDB[settingsKey].numIconsWide or DEFAULT_ICONS_WIDE
+        end
+    elseif targetFrame == customDisplayFrame then
+        frameType = "Custom"
+        settingsKey = "customFrameSettings" -- <<< ADDED
+        if BoxxyAurasDB and BoxxyAurasDB[settingsKey] then
+            alignment = BoxxyAurasDB[settingsKey].customTextAlign or "LEFT"
             numIconsWide = BoxxyAurasDB[settingsKey].numIconsWide or DEFAULT_ICONS_WIDE
         end
     else
@@ -357,6 +375,7 @@ local function OnDisplayFrameResizeUpdate(frame, elapsed)
     local settingsKey = nil
     if frame == buffDisplayFrame then settingsKey = "buffFrameSettings"
     elseif frame == debuffDisplayFrame then settingsKey = "debuffFrameSettings"
+    elseif frame == customDisplayFrame then settingsKey = "customFrameSettings" -- <<< ADDED
     else return end -- Should not happen
 
     if not BoxxyAurasDB or not BoxxyAurasDB[settingsKey] then return end -- Need DB
@@ -457,6 +476,7 @@ end
 -- Attach the generalized OnUpdate to both frames
 buffDisplayFrame:SetScript("OnUpdate", function(self, elapsed) OnDisplayFrameResizeUpdate(self, elapsed) end)
 debuffDisplayFrame:SetScript("OnUpdate", function(self, elapsed) OnDisplayFrameResizeUpdate(self, elapsed) end)
+customDisplayFrame:SetScript("OnUpdate", function(self, elapsed) OnDisplayFrameResizeUpdate(self, elapsed) end)
 
 -- Function to populate trackedAuras and create initial icons
 local function InitializeAuras()
@@ -475,22 +495,26 @@ local function InitializeAuras()
     -- 1. Clear existing cache and icons
     wipe(trackedBuffs)
     wipe(trackedDebuffs)
+    wipe(trackedCustom) -- NEW Cache for Custom Bar
     -- We might need a more robust way to handle existing icon frames later, but wipe is ok for init
     for _, icon in ipairs(BoxxyAuras.buffIcons) do icon.frame:Hide() end
     for _, icon in ipairs(BoxxyAuras.debuffIcons) do icon.frame:Hide() end
+    for _, icon in ipairs(BoxxyAuras.customIcons) do icon.frame:Hide() end
 
     -- 2. Fetch current auras
-    local currentBuffs = {}
-    local currentDebuffs = {}
+    local allCurrentBuffs = {}
+    local allCurrentDebuffs = {}
+    local currentCustom = {} -- NEW Cache for Custom Bar
     local buffSlots = { C_UnitAuras.GetAuraSlots("player", "HELPFUL") }
     local debuffSlots = { C_UnitAuras.GetAuraSlots("player", "HARMFUL") }
+    -- NOTE: We fetch ALL buffs/debuffs, then route them based on name.
 
     for i = 2, #buffSlots do
         local slot = buffSlots[i]
         local auraData = C_UnitAuras.GetAuraDataBySlot("player", slot)
-        if auraData then             
+        if auraData then 
             auraData.slot = slot -- Store the slot/index on the data table
-            table.insert(currentBuffs, auraData) 
+            table.insert(allCurrentBuffs, auraData) 
         end
     end
     for i = 2, #debuffSlots do
@@ -498,17 +522,53 @@ local function InitializeAuras()
         local auraData = C_UnitAuras.GetAuraDataBySlot("player", slot)
         if auraData then
             auraData.slot = slot -- Store the slot/index on the data table
-            table.insert(currentDebuffs, auraData) 
+            table.insert(allCurrentDebuffs, auraData) 
+        end
+    end
+
+    -- 1b. Create custom name lookup for efficient checking
+    local customNamesLookup = {}
+    if BoxxyAurasDB and BoxxyAurasDB.customAuraNames then
+        if type(BoxxyAurasDB.customAuraNames) == "table" then
+            for name, _ in pairs(BoxxyAurasDB.customAuraNames) do
+                customNamesLookup[name] = true
+            end
+        else
+            print("|cffFF0000BoxxyAuras Error:|r customAuraNames in DB is not a table!")
+        end
+    end
+
+    -- 1c. Route fetched auras into CUSTOM or regular buff/debuff lists
+    local currentBuffs = {} -- Will hold buffs NOT going to custom bar
+    local currentDebuffs = {} -- Will hold debuffs NOT going to custom bar
+    local currentCustom = {} -- Will hold auras MATCHING custom names (can be buff or debuff)
+
+    for _, auraData in ipairs(allCurrentBuffs) do
+        local isCustom = customNamesLookup[auraData.name]
+        if isCustom then
+            table.insert(currentCustom, auraData)
+        else
+            table.insert(currentBuffs, auraData)
+        end
+    end
+    for _, auraData in ipairs(allCurrentDebuffs) do
+        local isCustom = customNamesLookup[auraData.name]
+        if isCustom then
+            table.insert(currentCustom, auraData)
+        else
+            table.insert(currentDebuffs, auraData)
         end
     end
 
     -- 3. Sort fetched auras (defines initial order)
     table.sort(currentBuffs, SortAurasForDisplay)
     table.sort(currentDebuffs, SortAurasForDisplay)
+    table.sort(currentCustom, SortAurasForDisplay)
 
     -- 4. Populate tracked cache (copy sorted data)
     for _, auraData in ipairs(currentBuffs) do table.insert(trackedBuffs, auraData) end
     for _, auraData in ipairs(currentDebuffs) do table.insert(trackedDebuffs, auraData) end
+    for _, auraData in ipairs(currentCustom) do table.insert(trackedCustom, auraData) end
 
     -- 5. Create/Update Icon Objects based on tracked cache
     for i, auraData in ipairs(trackedBuffs) do
@@ -529,14 +589,25 @@ local function InitializeAuras()
         auraIcon:Update(auraData, i, "HARMFUL")
         auraIcon.frame:Show()
     end
+    for i, auraData in ipairs(trackedCustom) do
+        local auraIcon = BoxxyAuras.customIcons[i]
+        if not auraIcon then
+            auraIcon = AuraIcon.New(customDisplayFrame, i, "BoxxyAurasCustomIcon")
+            BoxxyAuras.customIcons[i] = auraIcon
+        end
+        auraIcon:Update(auraData, i, "CUSTOM")
+        auraIcon.frame:Show()
+    end
 
     -- 6. Hide any potentially leftover icons 
     for i = #trackedBuffs + 1, #BoxxyAuras.buffIcons do BoxxyAuras.buffIcons[i].frame:Hide() end
     for i = #trackedDebuffs + 1, #BoxxyAuras.debuffIcons do BoxxyAuras.debuffIcons[i].frame:Hide() end
+    for i = #trackedCustom + 1, #BoxxyAuras.customIcons do BoxxyAuras.customIcons[i].frame:Hide() end
 
     -- 7. Layout the visible icons for BOTH frames
     BoxxyAuras.LayoutAuras(buffDisplayFrame, BoxxyAuras.buffIcons) 
     BoxxyAuras.LayoutAuras(debuffDisplayFrame, BoxxyAuras.debuffIcons)
+    BoxxyAuras.LayoutAuras(customDisplayFrame, BoxxyAuras.customIcons)
 
     C_Timer.After(0.05, function() 
         BoxxyAuras.UpdateAuras() -- Pass true to indicate it's from OnLeave
@@ -571,17 +642,19 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
     if not AuraIcon then return end
 
     -- 1. Fetch current auras
-    local currentBuffs = {}
-    local currentDebuffs = {}
+    local allCurrentBuffs = {} -- Temp list to hold all fetched buffs
+    local allCurrentDebuffs = {} -- Temp list to hold all fetched debuffs
+    local currentCustom = {} -- NEW Cache for Custom Bar
     local buffSlots = { C_UnitAuras.GetAuraSlots("player", "HELPFUL") }
     local debuffSlots = { C_UnitAuras.GetAuraSlots("player", "HARMFUL") }
+    -- NOTE: We fetch ALL buffs/debuffs, then route them based on name.
 
     for i = 2, #buffSlots do
         local slot = buffSlots[i]
         local auraData = C_UnitAuras.GetAuraDataBySlot("player", slot)
         if auraData then 
             auraData.slot = slot -- Store the slot/index on the data table
-            table.insert(currentBuffs, auraData) 
+            table.insert(allCurrentBuffs, auraData) 
         end
     end
     for i = 2, #debuffSlots do
@@ -589,28 +662,66 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
         local auraData = C_UnitAuras.GetAuraDataBySlot("player", slot)
         if auraData then
             auraData.slot = slot -- Store the slot/index on the data table
-            table.insert(currentDebuffs, auraData) 
+            table.insert(allCurrentDebuffs, auraData) 
         end
     end
 
+    -- 1b. Create custom name lookup for efficient checking
+    local customNamesLookup = {}
+    if BoxxyAurasDB and BoxxyAurasDB.customAuraNames then
+        if type(BoxxyAurasDB.customAuraNames) == "table" then
+            for name, _ in pairs(BoxxyAurasDB.customAuraNames) do
+                customNamesLookup[name] = true
+            end
+        else
+            print("|cffFF0000BoxxyAuras Error:|r customAuraNames in DB is not a table!")
+        end
+    end
+
+    -- 1c. Route fetched auras into CUSTOM or regular buff/debuff lists
+    local currentBuffs = {} -- Will hold buffs NOT going to custom bar
+    local currentDebuffs = {} -- Will hold debuffs NOT going to custom bar
+    local currentCustom = {} -- Will hold auras MATCHING custom names (can be buff or debuff)
+
+    for _, auraData in ipairs(allCurrentBuffs) do
+        local isCustom = customNamesLookup[auraData.name]
+        -- DEBUG: Print aura name and lookup result
+        if isCustom then
+            table.insert(currentCustom, auraData)
+        else
+            table.insert(currentBuffs, auraData)
+        end
+    end
+    for _, auraData in ipairs(allCurrentDebuffs) do
+        if customNamesLookup[auraData.name] then
+            table.insert(currentCustom, auraData)
+        else
+            table.insert(currentDebuffs, auraData)
+        end
+    end
 
     -- 2. Build Current Lookup Map & Mark Tracked Auras
     local currentBuffMap = {}
-    for _, auraData in ipairs(currentBuffs) do currentBuffMap[auraData.auraInstanceID] = auraData end
+    for _, auraData in ipairs(currentBuffs) do currentBuffMap[auraData.auraInstanceID] = auraData end -- MODIFIED: Use currentBuffs
     local currentDebuffMap = {}
-    for _, auraData in ipairs(currentDebuffs) do currentDebuffMap[auraData.auraInstanceID] = auraData end
+    for _, auraData in ipairs(currentDebuffs) do currentDebuffMap[auraData.auraInstanceID] = auraData end -- MODIFIED: Use currentDebuffs
+    local currentCustomMap = {}
+    for _, auraData in ipairs(currentCustom) do currentCustomMap[auraData.auraInstanceID] = auraData end -- This one is already correct
     
     for _, trackedAura in ipairs(trackedBuffs) do trackedAura.seen = false end
     for _, trackedAura in ipairs(trackedDebuffs) do trackedAura.seen = false end
+    for _, trackedAura in ipairs(trackedCustom) do trackedAura.seen = false end
 
     -- Get hover states for BOTH frames using the direct check function again
     local isHoveringBuffs = BoxxyAuras.IsMouseWithinFrame(buffDisplayFrame)
     local isHoveringDebuffs = BoxxyAuras.IsMouseWithinFrame(debuffDisplayFrame)
+    local isHoveringCustom = BoxxyAuras.IsMouseWithinFrame(customDisplayFrame)
     
     local newBuffsToAdd = {}
     local newDebuffsToAdd = {}
+    local newCustomsToAdd = {}
 
-    -- 3. Process Current Buffs (Mark Seen / Identify New)
+    -- 3a. Process Current REGULAR Buffs (Mark Seen / Identify New)
     for _, currentAura in ipairs(currentBuffs) do
         local foundInTracked = false
         for _, trackedAura in ipairs(trackedBuffs) do
@@ -628,7 +739,7 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
             table.insert(newBuffsToAdd, currentAura) -- Add the whole auraData (includes .slot)
         end
     end
-    -- Process Current Debuffs (Mark Seen / Identify New & Try to Match sourceGUID)
+    -- 3b. Process Current REGULAR Debuffs (Mark Seen / Identify New & Try to Match sourceGUID)
     for _, currentAura in ipairs(currentDebuffs) do
         local foundInTracked = false
         for _, trackedAura in ipairs(trackedDebuffs) do
@@ -658,6 +769,38 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
             end
 
             table.insert(newDebuffsToAdd, currentAura) -- Add aura data (potentially with sourceGUID now)
+        end
+    end
+    -- 3c. Process Current CUSTOM Auras (Mark Seen / Identify New & Try to Match sourceGUID)
+    for _, currentAura in ipairs(currentCustom) do
+        local foundInTracked = false
+        for _, trackedAura in ipairs(trackedCustom) do
+            if trackedAura.auraInstanceID == currentAura.auraInstanceID then
+                -- Update ONLY volatile data & slot
+                trackedAura.expirationTime = currentAura.expirationTime
+                trackedAura.duration = currentAura.duration
+                trackedAura.slot = currentAura.slot -- Update slot in case it changes
+                trackedAura.seen = true
+                foundInTracked = true
+                break
+            end
+        end
+        if not foundInTracked then
+            -- This is a new custom according to C_UnitAuras
+            -- Try to find a matching recent combat log event to get sourceGUID
+            local foundEventMatch = false
+            for i = #BoxxyAuras.recentAuraEvents, 1, -1 do -- Iterate backwards for potentially better timing match
+                local event = BoxxyAuras.recentAuraEvents[i]
+                if event.spellId == currentAura.spellId then
+                    -- Match found! Assign GUID and remove event from queue
+                    currentAura.sourceGUID = event.sourceGUID
+                    table.remove(BoxxyAuras.recentAuraEvents, i)
+                    foundEventMatch = true
+                    break -- Stop searching events for this aura
+                end
+            end
+
+            table.insert(newCustomsToAdd, currentAura) -- Add aura data (potentially with sourceGUID now)
         end
     end
 
@@ -703,8 +846,28 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
              -- If not seen and not hovering, implicitly dropped from tracked list
         end
     end
+    local newTrackedCustoms = {}
+    for _, trackedAura in ipairs(trackedCustom) do
+        if trackedAura.seen then
+            trackedAura.forceExpired = nil -- Ensure flag is nil for active auras
+            table.insert(newTrackedCustoms, trackedAura)
+        else -- Not seen: Expired or Removed
+             -- Use custom frame hover state here
+            if isHoveringCustom then
+                table.insert(newTrackedCustoms, trackedAura) -- Keep if hovering CUSTOM frame
+                trackedAura.forceExpired = true -- Mark it as kept only due to hover
+                trackedAura.expirationTime = 0 -- Set expiration time to ensure it shows as expired
+            else
+                 -- Aura is gone AND we are not hovering, remove from cache if present
+                if trackedAura.spellId and BoxxyAuras.AllAuras[trackedAura.spellId] then
+                    BoxxyAuras.AllAuras[trackedAura.spellId] = nil
+                end
+            end
+             -- If not seen and not hovering, implicitly dropped from tracked list
+        end
+    end
 
-    -- 5. Process New Auras: Replace matching expired-hovered auras or append
+    -- 5a. Process New REGULAR Buffs: Replace matching expired-hovered auras or append
     local buffsToAppend = {}
     for _, newAura in ipairs(newBuffsToAdd) do 
         local replacedExpired = false
@@ -735,7 +898,7 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
         table.insert(newTrackedBuffs, auraToAppend)
     end
 
-    -- Repeat for Debuffs
+    -- 5b. Process New REGULAR Debuffs
     local debuffsToAppend = {}
     for _, newAura in ipairs(newDebuffsToAdd) do 
         local replacedExpired = false
@@ -762,9 +925,37 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
         table.insert(newTrackedDebuffs, auraToAppend)
     end
 
+    -- 5c. Process New CUSTOM Auras
+    local customsToAppend = {}
+    for _, newAura in ipairs(newCustomsToAdd) do 
+        local replacedExpired = false
+        for i, existingAura in ipairs(newTrackedCustoms) do
+            if not existingAura.seen and existingAura.spellId == newAura.spellId then
+                newTrackedCustoms[i] = newAura -- Replace
+                replacedExpired = true
+                local key = newAura.spellId
+        if key and not BoxxyAuras.AllAuras[key] then 
+                    C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "CUSTOM") end)
+                end
+                break
+            end
+        end
+        if not replacedExpired then
+            table.insert(customsToAppend, newAura) -- Mark for appending
+            local key = newAura.spellId
+            if key and not BoxxyAuras.AllAuras[key] then 
+                C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "CUSTOM") end)
+            end
+        end
+    end
+    for _, auraToAppend in ipairs(customsToAppend) do
+        table.insert(newTrackedCustoms, auraToAppend)
+    end
+
     -- 6. Replace Cache
     trackedBuffs = newTrackedBuffs
     trackedDebuffs = newTrackedDebuffs
+    trackedCustom = newTrackedCustoms
 
     -- 6a. Conditionally re-sort if NOT hovering
     if not isHoveringBuffs then
@@ -772,6 +963,9 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
     end
     if not isHoveringDebuffs then
         table.sort(trackedDebuffs, SortAurasForDisplay)
+    end
+    if not isHoveringCustom then
+        table.sort(trackedCustom, SortAurasForDisplay)
     end
 
     -- 7. Update Visual Icons based on final TRACKED cache
@@ -794,6 +988,15 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
         auraIcon:Update(auraData, i, "HARMFUL")
         auraIcon.frame:Show()
     end
+    for i, auraData in ipairs(trackedCustom) do
+        local auraIcon = BoxxyAuras.customIcons[i]
+        if not auraIcon then
+            auraIcon = AuraIcon.New(customDisplayFrame, i, "BoxxyAurasCustomIcon")
+            BoxxyAuras.customIcons[i] = auraIcon
+        end
+        auraIcon:Update(auraData, i, "CUSTOM")
+        auraIcon.frame:Show()
+    end
 
     -- 8. Hide Leftover Visual Icons
     for i = #trackedBuffs + 1, #BoxxyAuras.buffIcons do 
@@ -802,10 +1005,14 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
     for i = #trackedDebuffs + 1, #BoxxyAuras.debuffIcons do 
         if BoxxyAuras.debuffIcons[i] and BoxxyAuras.debuffIcons[i].frame then BoxxyAuras.debuffIcons[i].frame:Hide() end
     end
+    for i = #trackedCustom + 1, #BoxxyAuras.customIcons do 
+        if BoxxyAuras.customIcons[i] and BoxxyAuras.customIcons[i].frame then BoxxyAuras.customIcons[i].frame:Hide() end
+    end
 
     -- 9. Layout BOTH frames
     BoxxyAuras.LayoutAuras(buffDisplayFrame, BoxxyAuras.buffIcons)
     BoxxyAuras.LayoutAuras(debuffDisplayFrame, BoxxyAuras.debuffIcons)
+    BoxxyAuras.LayoutAuras(customDisplayFrame, BoxxyAuras.customIcons)
 end
 
 -- Event handling frame
@@ -816,15 +1023,26 @@ eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     local unit = (...)
     if event == "PLAYER_LOGIN" then
+        
         -- Draw and Color mainFrame backdrop/border here, AFTER UIUtils is loaded
-        BoxxyAuras.UIUtils.DrawSlicedBG(mainFrame, "MainFrameHoverBG", "backdrop", 0)
-        BoxxyAuras.UIUtils.DrawSlicedBG(mainFrame, "EdgedBorder", "border", 0)
+        -- <<< ADDED Safety Checks >>>
+        if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG then
+            BoxxyAuras.UIUtils.DrawSlicedBG(mainFrame, "MainFrameHoverBG", "backdrop", 0)
+            BoxxyAuras.UIUtils.DrawSlicedBG(mainFrame, "EdgedBorder", "border", 0)
+        else
+            print("|cffFF0000BoxxyAuras Error:|r UIUtils.DrawSlicedBG not available during mainFrame setup!")
+        end
         
         local cfgMainBGN = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorNormal) or { r = 0.1, g = 0.1, b = 0.1, a = 0.85 }
         local cfgMainBorder = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or { r = 0.5, g = 0.5, b = 0.5, a = 1.0 }
         
-        BoxxyAuras.UIUtils.ColorBGSlicedFrame(mainFrame, "backdrop", cfgMainBGN.r, cfgMainBGN.g, cfgMainBGN.b, cfgMainBGN.a)
-        BoxxyAuras.UIUtils.ColorBGSlicedFrame(mainFrame, "border", cfgMainBorder.r, cfgMainBorder.g, cfgMainBorder.b, cfgMainBorder.a)
+        -- <<< ADDED Safety Checks >>>
+        if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
+            BoxxyAuras.UIUtils.ColorBGSlicedFrame(mainFrame, "backdrop", cfgMainBGN.r, cfgMainBGN.g, cfgMainBGN.b, cfgMainBGN.a)
+            BoxxyAuras.UIUtils.ColorBGSlicedFrame(mainFrame, "border", cfgMainBorder.r, cfgMainBorder.g, cfgMainBorder.b, cfgMainBorder.a)
+        else
+             print("|cffFF0000BoxxyAuras Error:|r UIUtils.ColorBGSlicedFrame not available during mainFrame setup!")
+        end
         
         -- Initialize Saved Variables
         if BoxxyAurasDB == nil then BoxxyAurasDB = {} end
@@ -852,6 +1070,13 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             debuffTextAlign = "CENTER",
             iconSize = 24 -- <<< ADDED Default Debuff Icon Size
         }
+        local defaultCustomFrameSettings = {
+            x = 0, y = -150 - defaultMinHeight - 60, anchor = "TOP",
+            width = 300, height = defaultMinHeight,
+            numIconsWide = DEFAULT_ICONS_WIDE,
+            customTextAlign = "CENTER",
+            iconSize = 24 -- <<< ADDED Default Custom Icon Size
+        }
         
         local function InitializeSettings(dbKey, defaults)
             -- Add a check here just in case
@@ -878,25 +1103,31 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
 
         local buffSettings = InitializeSettings("buffFrameSettings", defaultBuffFrameSettings)
         local debuffSettings = InitializeSettings("debuffFrameSettings", defaultDebuffFrameSettings)
+        local customSettings = InitializeSettings("customFrameSettings", defaultCustomFrameSettings)
 
         -- Apply Settings (sets width/pos/min_height) using the now global function
         BoxxyAuras.ApplySettings(buffDisplayFrame, buffSettings, "Buff Frame")
         BoxxyAuras.ApplySettings(debuffDisplayFrame, debuffSettings, "Debuff Frame")
+        BoxxyAuras.ApplySettings(customDisplayFrame, customSettings, "Custom Frame")
 
         -- Apply Blizzard frame visibility setting AFTER DB init
         BoxxyAuras.ApplyBlizzardAuraVisibility(BoxxyAurasDB.hideBlizzardAuras)
 
         -- Initialize Handles (uses width set above, initial height might be small)
         CreateResizeHandlesForFrame(buffDisplayFrame, "BuffFrame") 
-        CreateResizeHandlesForFrame(debuffDisplayFrame, "DebuffFrame") 
+        CreateResizeHandlesForFrame(debuffDisplayFrame, "DebuffFrame")
+        CreateResizeHandlesForFrame(customDisplayFrame, "CustomFrame")
         local buffW, buffH = buffDisplayFrame:GetSize()
         local debuffW, debuffH = debuffDisplayFrame:GetSize()
+        local customW, customH = customDisplayFrame:GetSize()
         UpdateEdgeHandleDimensions(buffDisplayFrame, buffW, buffH) -- Handles will resize when LayoutAuras sets final height
         UpdateEdgeHandleDimensions(debuffDisplayFrame, debuffW, debuffH)
+        UpdateEdgeHandleDimensions(customDisplayFrame, customW, customH)
         
         -- Setup Display Frames visuals AFTER settings applied
         BoxxyAuras.SetupDisplayFrame(buffDisplayFrame, "BuffFrame")
         BoxxyAuras.SetupDisplayFrame(debuffDisplayFrame, "DebuffFrame")
+        BoxxyAuras.SetupDisplayFrame(customDisplayFrame, "CustomFrame") -- <<< ENSURE THIS LINE IS PRESENT
         
         -- >> ADDED BACK: Apply initial scale AND lock state to Buff/Debuff frames after setup <<
         if BoxxyAurasDB then
@@ -906,6 +1137,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             -- Apply Scale directly to buff/debuff frames
             if buffDisplayFrame then buffDisplayFrame:SetScale(initialScale) end
             if debuffDisplayFrame then debuffDisplayFrame:SetScale(initialScale) end
+            if customDisplayFrame then customDisplayFrame:SetScale(initialScale) end
             
             -- Apply Lock State directly within the timer for initial load
             if initialLock then
@@ -951,9 +1183,15 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         -- Start polling timers AFTER setup is complete
         C_Timer.NewTicker(0.2, function() BoxxyAuras.PollFrameHoverState(buffDisplayFrame, "Buff Frame") end) 
         C_Timer.NewTicker(0.2, function() BoxxyAuras.PollFrameHoverState(debuffDisplayFrame, "Debuff Frame") end)
+        C_Timer.NewTicker(0.2, function() BoxxyAuras.PollFrameHoverState(customDisplayFrame, "Custom Frame") end) -- <<< ADDED Timer for Custom Frame
 
         -- Schedule Initial Aura Load
-        C_Timer.After(0.2, InitializeAuras) 
+        C_Timer.After(0.2, function() -- <<< WRAPPED in anonymous function for pcall
+            local success, err = pcall(InitializeAuras)
+            if not success then
+                print("|cffFF0000BoxxyAuras Error in InitializeAuras (pcall):|r", err)
+            end
+        end) 
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local timestamp, subevent, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, spellId, spellName, spellSchool, amount = CombatLogGetCurrentEventInfo()
 
@@ -1029,7 +1267,11 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                 BoxxyAuras.updateScheduled = true
                 C_Timer.After(0.1, function() 
                     BoxxyAuras.updateScheduled = false
-                    BoxxyAuras.UpdateAuras()
+                    -- <<< WRAPPED UpdateAuras call in pcall >>>
+                    local success, err = pcall(BoxxyAuras.UpdateAuras) 
+                    if not success then
+                         print("|cffFF0000BoxxyAuras Error in UpdateAuras (pcall):|r", err)
+                    end
                 end) -- Close C_Timer anonymous function
             end -- Close 'if not BoxxyAuras.updateScheduled'
         end -- Close 'if destName... elseif destGUID...'
@@ -1039,6 +1281,11 @@ end)
 -- Re-enabled Generalized polling function for mouse hover state
 BoxxyAuras.PollFrameHoverState = function(frame, frameDesc) -- Make it part of the addon table
     if not frame then return end -- Safety check
+    
+    -- <<< ADDED: Debug print on entry for custom frame >>>
+    if frame == customDisplayFrame then
+        --print(string.format("DEBUG Poll: Running for %s", frameDesc))
+    end
     
     -- Determine current hover state unless locked (locked frames ignore mouse)
     local mouseIsOverNow = BoxxyAuras.IsMouseWithinFrame(frame)
@@ -1122,7 +1369,18 @@ BoxxyAuras.PollFrameHoverState = function(frame, frameDesc) -- Make it part of t
         local hasBackdrop = frame and frame.backdropTextures
         local hasBorder = frame and frame.borderTextures
 
-        if hasBackdrop or hasBorder then -- Proceed if at least one exists
+        -- MODIFIED: More specific checks and debug prints
+        if not hasBackdrop then
+            -- <<< MODIFIED: Added [V2] identifier >>>
+            print(string.format("|cffFF0000DEBUG Poll Error [V2]:|r backdropTextures NOT FOUND for %s! Frame Type: %s", frameDesc or "UnknownFrame", type(frame)))
+        end
+        if not hasBorder then
+             -- <<< MODIFIED: Added [V2] identifier >>>
+             print(string.format("|cffFF0000DEBUG Poll Error [V2]:|r borderTextures NOT FOUND for %s! Frame Type: %s", frameDesc or "UnknownFrame", type(frame)))
+        end
+
+        -- Proceed only if both exist now (stricter check)
+        if hasBackdrop and hasBorder then
             local r_bg, g_bg, b_bg, a_bg = 0, 0, 0, 0 -- Background RGBA
             local r_br, g_br, b_br, a_br = 0, 0, 0, 0 -- Border RGBA (initially transparent)
 
@@ -1147,15 +1405,11 @@ BoxxyAuras.PollFrameHoverState = function(frame, frameDesc) -- Make it part of t
             end
             
             -- Apply the calculated colors/alphas
-            if hasBackdrop then
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, backdropGroupName, r_bg, g_bg, b_bg, a_bg)
-            end
-            if hasBorder then
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, borderGroupName, r_br, g_br, b_br, a_br)
-            end
-        else
-             print(string.format("|cffFF0000DEBUG Poll Error:|r backdropTextures OR borderTextures NOT FOUND for %s! Frame Type: %s", frameDesc or "UnknownFrame", type(frame)))
+            -- No need for inner checks now, as we checked for both above
+            BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, backdropGroupName, r_bg, g_bg, b_bg, a_bg)
+            BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, borderGroupName, r_br, g_br, b_br, a_br)
         end
+        -- REMOVED the old 'else' block that printed the combined error
     end
 end
 
@@ -1252,9 +1506,13 @@ end
 
 -- Common Frame Setup Function
 BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of addon table
+    
     -- Draw backdrop and border using new utility functions
-    BoxxyAuras.UIUtils.DrawSlicedBG(frame, frameName .. "HoverBG", "backdrop", 0)
-    BoxxyAuras.UIUtils.DrawSlicedBG(frame, "EdgedBorder", "border", 0)
+    local backdropTextureKey = "MainFrameHoverBG"
+    local borderTextureKey = "EdgedBorder"
+    
+    BoxxyAuras.UIUtils.DrawSlicedBG(frame, backdropTextureKey, "backdrop", 0)
+    BoxxyAuras.UIUtils.DrawSlicedBG(frame, borderTextureKey, "border", 0)
 
     -- Set initial colors using config
     local cfgBGN = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorNormal) or { r = 0.1, g = 0.1, b = 0.1, a = 0.85 }
@@ -1265,7 +1523,17 @@ BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of add
     BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a)
 
     -- Create and Anchor Title Label
-    local labelText = (frameName == "BuffFrame") and "Buffs" or "Debuffs" -- Should correctly set text to "Buffs" for the buff frame
+    -- MODIFIED: Added check for CustomFrame
+    local labelText
+    if frameName == "BuffFrame" then
+        labelText = "Buffs"
+    elseif frameName == "DebuffFrame" then
+        labelText = "Debuffs"
+    elseif frameName == "CustomFrame" then
+        labelText = "Custom"
+    else
+        labelText = frameName -- Fallback to the provided name
+    end
     local titleLabel = frame:CreateFontString(frameName .. "TitleLabel", "OVERLAY", "GameFontNormalLarge")
         
     if titleLabel then
@@ -1419,32 +1687,5 @@ function BoxxyAuras.TriggerLayout(frameType)
         BoxxyAuras.LayoutAuras(targetFrame, iconList)
     else
         print(string.format("BoxxyAuras Warning: Could not trigger layout for %s. Frame or Icons missing?", frameType))
-    end
-end 
-
--- >> ADDED: Function to show/hide default Blizzard frames <<
-function BoxxyAuras.ApplyBlizzardAuraVisibility(shouldHide)
-    -- Check if BuffFrame exists before trying to modify it
-    -- It might not be loaded immediately on PLAYER_LOGIN
-    if BuffFrame then
-        if shouldHide then
-            BuffFrame:Hide()
-            DebuffFrame:Hide()
-            print("BoxxyAuras: Hiding default Blizzard aura frames (BuffFrame and DebuffFrame).")
-        else
-            BuffFrame:Show()
-            DebuffFrame:Show()
-            print("BoxxyAuras: Showing default Blizzard aura frame (BuffFrame).")
-        end
-    else
-        -- If BuffFrame isn't ready, try again shortly after
-        C_Timer.After(0.5, function() 
-            if BuffFrame then
-                if shouldHide then BuffFrame:Hide() else BuffFrame:Show() end
-                print("BoxxyAuras: Applied Blizzard frame visibility (delayed).")
-            else
-                 print("BoxxyAuras Warning: BuffFrame still not found after delay.")
-            end
-        end)
     end
 end 

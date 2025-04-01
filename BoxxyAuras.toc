@@ -1,6 +1,6 @@
 ## Interface: 100207
 ## Title: BoxxyAuras
-## Author: Your Name
+## Author: BoxximusPrime
 ## Version: 1.0.0
 ## Notes: Displays player buffs and debuffs.
 ## SavedVariables: BoxxyAurasDB
@@ -9,7 +9,9 @@
 Art/Fonts.xml
 Art/UIElements.xml
 
+# Load Lua files in correct dependency order
 UIUtils.lua
+BoxxyAuras.lua
 AuraIcon.lua
 OptionsMenu.lua
-BoxxyAuras.lua 
+CustomAuras.lua
