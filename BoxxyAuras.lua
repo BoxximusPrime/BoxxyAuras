@@ -1370,11 +1370,11 @@ BoxxyAuras.PollFrameHoverState = function(frame, frameDesc) -- Make it part of t
         local hasBorder = frame and frame.borderTextures
 
         -- MODIFIED: More specific checks and debug prints
-        if not hasBackdrop then
+        if not hasBackdrop and not frame.textureSetupComplete then -- <<< Added flag check
             -- <<< MODIFIED: Added [V2] identifier >>>
             print(string.format("|cffFF0000DEBUG Poll Error [V2]:|r backdropTextures NOT FOUND for %s! Frame Type: %s", frameDesc or "UnknownFrame", type(frame)))
         end
-        if not hasBorder then
+        if not hasBorder and not frame.textureSetupComplete then -- <<< Added flag check
              -- <<< MODIFIED: Added [V2] identifier >>>
              print(string.format("|cffFF0000DEBUG Poll Error [V2]:|r borderTextures NOT FOUND for %s! Frame Type: %s", frameDesc or "UnknownFrame", type(frame)))
         end
@@ -1508,11 +1508,21 @@ end
 BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of addon table
     
     -- Draw backdrop and border using new utility functions
-    local backdropTextureKey = "MainFrameHoverBG"
+    local backdropTextureKey = frameName .. "HoverBG" 
     local borderTextureKey = "EdgedBorder"
+    
+    -- <<< Add flag before drawing >>>
+    frame.textureSetupComplete = false 
     
     BoxxyAuras.UIUtils.DrawSlicedBG(frame, backdropTextureKey, "backdrop", 0)
     BoxxyAuras.UIUtils.DrawSlicedBG(frame, borderTextureKey, "border", 0)
+
+    -- <<< Add flag check after drawing >>>
+    if frame.backdropTextures and frame.borderTextures then
+        frame.textureSetupComplete = true
+    else
+        print(string.format("|cffFF0000SetupDisplayFrame Warning:|r Texture setup might have failed for %s.", frameName))
+    end
 
     -- Set initial colors using config
     local cfgBGN = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorNormal) or { r = 0.1, g = 0.1, b = 0.1, a = 0.85 }
@@ -1678,6 +1688,9 @@ function BoxxyAuras.TriggerLayout(frameType)
     elseif frameType == "Debuff" then
         targetFrame = _G["BoxxyDebuffDisplayFrame"]
         iconList = BoxxyAuras.debuffIcons
+    elseif frameType == "Custom" then -- <<< ADDED CUSTOM CASE
+        targetFrame = _G["BoxxyCustomDisplayFrame"]
+        iconList = BoxxyAuras.customIcons
     else
         print(string.format("BoxxyAuras Error: Invalid frameType '%s' passed to TriggerLayout.", tostring(frameType)))
         return
@@ -1689,3 +1702,21 @@ function BoxxyAuras.TriggerLayout(frameType)
         print(string.format("BoxxyAuras Warning: Could not trigger layout for %s. Frame or Icons missing?", frameType))
     end
 end 
+
+-- *** ADDED: Function to hide/show default Blizzard Buff/Debuff frames ***
+function BoxxyAuras.ApplyBlizzardAuraVisibility(shouldHide)
+    -- Ensure BuffFrame and DebuffFrame are valid global names
+    local buffFrame = _G['BuffFrame']
+    local debuffFrame = _G['DebuffFrame']
+    if buffFrame and debuffFrame then
+        if shouldHide then 
+            buffFrame:Hide()
+            debuffFrame:Hide()
+        else 
+            buffFrame:Show()
+            debuffFrame:Show()
+        end
+    else
+        print("|cffFF0000BoxxyAuras Error:|r Default Blizzard BuffFrame or DebuffFrame not found when trying to apply visibility setting.")
+    end
+end

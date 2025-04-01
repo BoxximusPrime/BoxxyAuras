@@ -119,18 +119,6 @@
                     print("|cffFF0000BoxxyAuras Error:|r BoxxyAuras_SetupGeneralButton function not found during BAURASGeneralButton OnLoad.")
                 end
             </OnLoad>
-            <OnEnter>
-                if self.Enabled == true and BoxxyAuras and BoxxyAuras.UIUtils then
-                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.4, 0.4, 0.4, 1)
-                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.2, 0.2, 0.2, 1)
-                end
-            </OnEnter>
-            <OnLeave>
-                if self.Enabled == true and BoxxyAuras and BoxxyAuras.UIUtils then
-                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.3, 0.3, 0.3, 1)
-                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.1, 0.1, 0.1, 1)
-                end
-            </OnLeave>
         </Scripts>
     </Button>
 

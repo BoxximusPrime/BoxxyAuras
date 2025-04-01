@@ -46,6 +46,14 @@ local title = customOptionsFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Ti
 title:SetPoint("TOPLEFT", customOptionsFrame, "TOPLEFT", 20, -23)
 title:SetText("Custom Aura List")
 
+-- Instruction Label
+local instructionLabel = customOptionsFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+instructionLabel:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -15) -- Below title
+instructionLabel:SetPoint("RIGHT", customOptionsFrame, "RIGHT", -10, 0)
+instructionLabel:SetText("Enter exact spell names, separated by commas. Case-sensitive.")
+instructionLabel:SetJustifyH("LEFT")
+instructionLabel:SetWordWrap(true)
+
 -- Close Button
 local closeBtn = CreateFrame("Button", "BoxxyAurasCustomOptionsCloseButton", customOptionsFrame, "BAURASCloseBtn")
 closeBtn:SetPoint("TOPRIGHT", customOptionsFrame, "TOPRIGHT", -12, -12)
@@ -59,21 +67,20 @@ end)
 -- Content: Scroll Frame, Edit Box, Save Button
 --------------------------------------------------------------]]
 local scrollFrame = CreateFrame("ScrollFrame", "BoxxyAurasCustomOptionsScrollFrame", customOptionsFrame, "UIPanelScrollFrameTemplate")
-scrollFrame:SetPoint("TOPLEFT", 10, -50)
-scrollFrame:SetPoint("BOTTOMRIGHT", -30, 50) -- Adjusted bottom point for save button
+scrollFrame:SetPoint("TOPLEFT", instructionLabel, "BOTTOMLEFT", -5, -5) -- Position below new label
+scrollFrame:SetPoint("BOTTOMRIGHT", -30, 50) 
 
 -- Edit Box for Aura Names
-local editBox = CreateFrame("EditBox", "BoxxyAurasCustomAuraEditBox", scrollFrame, "BAURASEditBoxTemplate") -- Use custom template
-editBox:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", 5, -5)
-editBox:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", -5, 5)
+local editBox = CreateFrame("EditBox", "BoxxyAurasCustomAuraEditBox", scrollFrame) -- Removed template for manual setup
+editBox:SetPoint("TOPLEFT")
+editBox:SetWidth(scrollFrame:GetWidth()) 
+editBox:SetHeight(600) -- Height for ~6-7 lines
 editBox:SetMultiLine(true)
-editBox:SetMaxLetters(1024) -- Limit input length
 editBox:SetAutoFocus(false)
-editBox:EnableMouse(true)
-editBox:SetTextInsets(5, 5, 5, 5)
+editBox:SetTextInsets(15, 15, 15, 15)
 -- Set font using template method if available, else manually
 if editBox.SetFont then
-    editBox:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
+    editBox:SetFont("Fonts\\FRIZQT__.TTF", 10, "") -- Decreased Font Size to 10
 else
     editBox:SetFontObject(ChatFontNormal)
 end
@@ -81,14 +88,25 @@ editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 editBox:SetScript("OnTextChanged", function(self)
     -- Optional: Add visual feedback or debounce saving here if desired later
 end)
+
+-- <<< ADD Border >>>
+if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
+    -- Draw the border using EdgedBorder texture
+    BoxxyAuras.UIUtils.DrawSlicedBG(editBox, "EdgedBorder", "border", 0)
+    -- Set initial border color (e.g., dark grey)
+    BoxxyAuras.UIUtils.ColorBGSlicedFrame(editBox, "border", 0.6, 0.6, 0.6, 1)
+else
+    print("|cffFF0000BoxxyAuras Custom Options Error:|r Could not draw EditBox border (UIUtils missing).")
+end
+
 scrollFrame:SetScrollChild(editBox) -- Set EditBox as the scroll child directly
 
 BoxxyAuras.CustomOptions.EditBox = editBox
 
 -- Save Button
-local saveButton = CreateFrame("Button", "BoxxyAurasCustomOptionsSaveButton", customOptionsFrame, "BAURASButtonTemplate") -- Use custom template
-saveButton:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMLEFT", 0, -35)
-saveButton:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", 0, -35)
+local saveButton = CreateFrame("Button", "BoxxyAurasCustomOptionsSaveButton", customOptionsFrame, "BAURASButtonTemplate") 
+saveButton:SetPoint("BOTTOMLEFT", customOptionsFrame, "BOTTOMLEFT", 10, 10)
+saveButton:SetPoint("BOTTOMRIGHT", customOptionsFrame, "BOTTOMRIGHT", -10, 10)
 saveButton:SetHeight(25)
 saveButton:SetText("Save Custom Auras")
 saveButton:SetScript("OnClick", function()
@@ -162,6 +180,43 @@ function BoxxyAuras.CustomOptions:Toggle()
     if frame:IsShown() then
         frame:Hide()
     else
+        -- <<< Positioning Logic Start >>>
+        local mainOptions = BoxxyAuras.Options and BoxxyAuras.Options.Frame
+        if mainOptions and mainOptions:IsShown() then
+            frame:ClearAllPoints()
+            local mainLeft = mainOptions:GetLeft()
+            local mainRight = mainOptions:GetRight()
+            local mainTop = mainOptions:GetTop()
+            local customWidth = frame:GetWidth() * frame:GetEffectiveScale() -- Use effective width
+            local mainWidth = mainOptions:GetWidth() * mainOptions:GetEffectiveScale()
+            local screenWidth = GetScreenWidth()
+            local offset = 10 -- Pixels between frames
+            
+            -- Try positioning to the right
+            local rightX = mainRight + offset
+            if (rightX + customWidth) < screenWidth then
+                print("Positioning CustomOptions to the RIGHT")
+                frame:SetPoint("TOPLEFT", mainOptions, "TOPRIGHT", offset, 0)
+            else
+                -- Try positioning to the left
+                local leftX = mainLeft - customWidth - offset
+                if leftX > 0 then
+                    print("Positioning CustomOptions to the LEFT")
+                    frame:SetPoint("TOPRIGHT", mainOptions, "TOPLEFT", -offset, 0)
+                else
+                    -- Fallback: Position relative to main top-left (ensure on screen)
+                     print("Positioning CustomOptions FALLBACK")
+                     frame:SetPoint("TOPLEFT", mainOptions, "TOPLEFT", 20, -20)
+                 end
+            end
+        else
+            -- Fallback if main options aren't shown or found: Center with offset
+            print("Positioning CustomOptions FALLBACK (Main Hidden)")
+            frame:ClearAllPoints()
+            frame:SetPoint("CENTER", UIParent, "CENTER", 50, 50) 
+        end
+        -- <<< Positioning Logic End >>>
+        
         self:LoadCustomAuras() -- Load current names when showing
         frame:Show()
     end

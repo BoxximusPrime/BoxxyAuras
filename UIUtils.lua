@@ -18,6 +18,16 @@ BoxxyAuras.FrameTextures =
         cornerSize = 8,
         cornerCoord = 24/64,
     },
+    BtnBG = { -- <<< ADDED for General Button Background
+        file = "SelectionBox", -- Reuse SelectionBox or specific button texture
+        cornerSize = 8, 
+        cornerCoord = 0.25,
+    },
+    BtnBorder = { -- <<< ADDED for General Button Border
+        file = "EdgedBorder", -- Reuse EdgedBorder
+        cornerSize = 8,
+        cornerCoord = 0.25,
+    },
     -- Adding a simple border option
     TooltipBorder = {
         file = "Tooltip-Border", -- Standard WoW Tooltip Border
@@ -31,6 +41,22 @@ BoxxyAuras.FrameTextures =
     },
     EdgedBorder = { -- Adding this border option from WhoGotLoots
         file = "EdgedBorder",
+        cornerSize = 12,
+        cornerCoord = 0.25,
+    },
+    -- <<< RE-ADDING Frame Background Keys >>>
+    BuffFrameHoverBG = { 
+        file = "SelectionBox", 
+        cornerSize = 12,
+        cornerCoord = 0.25,
+    },
+    DebuffFrameHoverBG = { 
+        file = "SelectionBox", 
+        cornerSize = 12,
+        cornerCoord = 0.25,
+    },
+    CustomFrameHoverBG = { 
+        file = "SelectionBox", 
         cornerSize = 12,
         cornerCoord = 0.25,
     },
@@ -66,6 +92,7 @@ function BoxxyAuras.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
 
     local data = BoxxyAuras.FrameTextures[textureKey];
     if not data then
+        print(string.format("|cffFF0000DrawSlicedBG Error:|r Texture key '%s' not found in FrameTextures table.", tostring(textureKey)))
         return
     end
 
@@ -85,7 +112,11 @@ function BoxxyAuras.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
             if frame:IsShown() then group[key]:Show() else group[key]:Hide() end
         end
         tex = group[key];
-        tex:SetTexture(file, nil, nil, "LINEAR");
+        local success, err = pcall(tex.SetTexture, tex, file, nil, nil, "LINEAR");
+        if not success then
+            print(string.format("|cffFF0000DrawSlicedBG Error:|r Failed to set texture '%s' for key %s (TextureKey: %s). Error: %s", file, tostring(key), tostring(textureKey), tostring(err)))
+            tex:Hide() -- Hide texture if loading failed
+        end
 
         if key == 2 or key == 8 then
             if key == 2 then
@@ -133,6 +164,9 @@ end
 -- Copied from WhoGotLoots/UIBuilder.lua (Adapted slightly)
 function BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, layer, r, g, b, a)
     local group = nil
+    -- <<< DEBUG PRINT >>>
+    print(string.format("DEBUG ColorBGSlicedFrame: Called for Frame='%s', Layer='%s', Color=(%.1f, %.1f, %.1f, %.1f)", frame:GetName() or "N/A", tostring(layer), r, g, b, a))
+
     if layer == "backdrop" then
         group = frame.backdropTextures
     elseif layer == "border" then
@@ -140,7 +174,11 @@ function BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, layer, r, g, b, a)
     end
 
     if group then
+        -- <<< DEBUG PRINT >>>
+        print(string.format("DEBUG ColorBGSlicedFrame: Found group for Layer='%s'. Looping through textures...", tostring(layer)))
         for key, tex in pairs(group) do
+            -- <<< DEBUG PRINT >>>
+            print(string.format("DEBUG ColorBGSlicedFrame:  - Processing Key='%s', Texture Object Type='%s'", tostring(key), type(tex)))
             local success, err = pcall(tex.SetVertexColor, tex, r, g, b, a)
             if not success then
                 print(string.format("|cffFF0000ERROR:|r ColorBGSlicedFrame: pcall failed for SetVertexColor on key %s. Error: %s", tostring(key), tostring(err)))
@@ -160,10 +198,10 @@ function BoxxyAuras_SetupGeneralButton(button)
        BoxxyAuras.UIUtils.DrawSlicedBG and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
         
         -- Draw initial background and border
-        BoxxyAuras.UIUtils.DrawSlicedBG(button, "BtnBG", "border", -2)
-        BoxxyAuras.UIUtils.ColorBGSlicedFrame(button, "border", 0.1, 0.1, 0.1, 1) -- Default border color
-        BoxxyAuras.UIUtils.DrawSlicedBG(button, "BtnBorder", "backdrop", -2)
+        BoxxyAuras.UIUtils.DrawSlicedBG(button, "BtnBG", "backdrop", -2)
         BoxxyAuras.UIUtils.ColorBGSlicedFrame(button, "backdrop", 0.3, 0.3, 0.3, 1) -- Default backdrop color
+        BoxxyAuras.UIUtils.DrawSlicedBG(button, "BtnBorder", "border", -2)
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(button, "border", 0.1, 0.1, 0.1, 1) -- Default border color
 
         -- Define methods directly on the button object
         function button:SetText(text)
@@ -192,6 +230,69 @@ function BoxxyAuras_SetupGeneralButton(button)
 
         -- Apply the initial enabled state visuals
         button:SetEnabled(button.Enabled)
+
+        -- <<< ADDED LUA HOVER SCRIPTS >>>
+        button:SetScript("OnEnter", function(self)
+            if self:IsEnabled() then
+                 print(string.format("DEBUG Lua OnEnter: Applying hover colors to %s", self:GetName() or "N/A"))
+                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.4, 0.4, 0.4, 1) 
+                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.2, 0.2, 0.2, 1)
+                 if self.Text then 
+                    self.Text:SetTextColor(1, 1, 1, 1) -- White on hover
+                 end
+            end
+        end)
+
+        button:SetScript("OnLeave", function(self)
+            if self:IsEnabled() then
+                 print(string.format("DEBUG Lua OnLeave: Applying normal colors to %s", self:GetName() or "N/A"))
+                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.3, 0.3, 0.3, 1) 
+                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.1, 0.1, 0.1, 1)
+                 if self.Text then
+                     self.Text:SetTextColor(0.75, 0.75, 0.75, 1) -- Default enabled grey
+                 end
+            end
+        end)
+
+        -- <<< ADDED MouseDown/MouseUp Scripts >>>
+        button:SetScript("OnMouseDown", function(self)
+            if self:IsEnabled() then
+                -- Move text down+right
+                if self.Text then
+                    self.Text:ClearAllPoints()
+                    self.Text:SetPoint("CENTER", self, "CENTER", 1, -1) -- Adjust offset as needed
+                end
+                -- Optional: Set "pressed" colors (e.g., slightly darker than hover)
+                print(string.format("DEBUG Lua OnMouseDown: Applying pressed colors to %s", self:GetName() or "N/A"))
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.35, 0.35, 0.35, 1) 
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.15, 0.15, 0.15, 1) 
+            end
+        end)
+
+        button:SetScript("OnMouseUp", function(self)
+            if self:IsEnabled() then
+                -- Move text back to center
+                if self.Text then
+                    self.Text:ClearAllPoints()
+                    self.Text:SetPoint("CENTER", self, "CENTER", 0, 0)
+                end
+                
+                -- Re-apply hover or normal colors based on mouse position
+                if self:IsMouseOver() then 
+                    -- Still hovering: Apply hover colors
+                    print(string.format("DEBUG Lua OnMouseUp (Hover): Applying hover colors to %s", self:GetName() or "N/A"))
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.4, 0.4, 0.4, 1) 
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.2, 0.2, 0.2, 1)
+                    if self.Text then self.Text:SetTextColor(1, 1, 1, 1) end -- Ensure text is hover color
+                else
+                    -- Mouse left while pressed: Apply normal colors
+                    print(string.format("DEBUG Lua OnMouseUp (Left): Applying normal colors to %s", self:GetName() or "N/A"))
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.3, 0.3, 0.3, 1) 
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.1, 0.1, 0.1, 1)
+                    if self.Text then self.Text:SetTextColor(0.75, 0.75, 0.75, 1) end -- Ensure text is normal color
+                end
+            end
+        end)
 
     else
         print(string.format("|cffFF0000BoxxyAuras Error:|r UIUtils functions not found when setting up button '%s' via BoxxyAuras_SetupGeneralButton.", button:GetName() or "(unknown)"))
