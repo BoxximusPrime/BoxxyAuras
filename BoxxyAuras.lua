@@ -944,8 +944,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                     -- Use correct camelCase: trackedDebuff.spellId
                     -- Make sure trackedDebuff and its spellID exist before comparing
                     if trackedDebuff and trackedDebuff.spellId and trackedDebuff.spellId == spellId then
-                        -- Found a match! Print a debug message.
-
                         -- Find the corresponding AuraIcon instance and call Shake
                         for _, auraIcon in ipairs(BoxxyAuras.debuffIcons) do
                             -- Check if the icon exists and its instance ID matches
@@ -972,7 +970,7 @@ BoxxyAuras.PollFrameHoverState = function(frame, frameDesc) -- Make it part of t
     if not frame then return end -- Safety check
     
     -- Determine current hover state unless locked (locked frames ignore mouse)
-    local mouseIsOverNow = not frame.isLocked and BoxxyAuras.IsMouseWithinFrame(frame)
+    local mouseIsOverNow = BoxxyAuras.IsMouseWithinFrame(frame)
     local wasOver = frame.isMouseOver -- Read/Write state from frame object
     local wasLocked = frame.wasLocked -- Read previous lock state
     local isLockedNow = frame.isLocked -- Read current lock state
@@ -985,9 +983,64 @@ BoxxyAuras.PollFrameHoverState = function(frame, frameDesc) -- Make it part of t
         frame.isMouseOver = mouseIsOverNow -- Update hover state
         frame.wasLocked = isLockedNow      -- Update previous lock state for next poll
         
-        -- *** RE-ADD: Trigger UpdateAuras shortly after mouse leaves (if not locked) ***
-        if not mouseIsOverNow and wasOver and not isLockedNow then 
-           C_Timer.After(0.05, BoxxyAuras.UpdateAuras) 
+        -- *** NEW LOGIC for immediate expired aura removal on mouse leave ***
+        if not mouseIsOverNow and wasOver then 
+            -- Determine which lists to use based on the frame
+            local sourceTrackedList = nil
+            local visualIconList = nil
+            local targetFrame = frame -- The frame being polled
+
+            if frame == buffDisplayFrame then
+                sourceTrackedList = trackedBuffs
+                visualIconList = BoxxyAuras.buffIcons
+            elseif frame == debuffDisplayFrame then
+                sourceTrackedList = trackedDebuffs
+                visualIconList = BoxxyAuras.debuffIcons
+            end
+
+            if sourceTrackedList and visualIconList then
+                local newTrackedList = {}
+                local hasExpiredAurasToRemove = false
+                -- Filter the tracked list, keeping only non-forced-expired auras
+                for _, trackedAura in ipairs(sourceTrackedList) do
+                    if not trackedAura.forceExpired then
+                        trackedAura.forceExpired = nil -- Ensure flag is nil just in case
+                        table.insert(newTrackedList, trackedAura)
+                    else
+                        hasExpiredAurasToRemove = true -- Mark that we found at least one to remove
+                    end
+                end
+
+                -- Only proceed if we actually removed something
+                if hasExpiredAurasToRemove then
+                    -- Create a lookup of instance IDs we are keeping
+                    local keptInstanceIDs = {}
+                    for _, keptAura in ipairs(newTrackedList) do
+                        if keptAura.auraInstanceID then
+                            keptInstanceIDs[keptAura.auraInstanceID] = true
+                        end
+                    end
+
+                    -- Hide visual icons that are no longer in the tracked list
+                    for _, auraIcon in ipairs(visualIconList) do
+                        if auraIcon and auraIcon.frame and auraIcon.auraInstanceID then
+                            if not keptInstanceIDs[auraIcon.auraInstanceID] then
+                                auraIcon.frame:Hide()
+                            end
+                        end
+                    end
+
+                    -- Replace the original tracked list
+                    if frame == buffDisplayFrame then
+                        trackedBuffs = newTrackedList
+                    elseif frame == debuffDisplayFrame then
+                        trackedDebuffs = newTrackedList
+                    end
+
+                    -- Relayout this specific frame immediately
+                    BoxxyAuras.LayoutAuras(targetFrame, visualIconList)
+                end
+            end
         end
         
         -- Update visual background AND border effect for THIS frame
@@ -1076,25 +1129,53 @@ function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter)
     -- Get tooltip lines
     local tooltipLines = {}
     local spellNameFromTip = nil -- Variable to store name from tooltip
+
+    -- Use a flag to track if we have processed the first line
+    local firstLineProcessed = false
+
     if tipData.lines then
         for i = 1, #tipData.lines do
             local lineData = tipData.lines[i]
             if lineData and lineData.leftText then
-                local lineText = lineData.leftText
+                local lineText = lineData.leftText -- Keep original left text separate
                 if lineData.rightText then 
                     lineText = lineText .. " " .. lineData.rightText 
                 end
+                
                 -- Store the first line's left text as the potential name
-                if i == 1 and lineData.leftText then 
+                if not firstLineProcessed and lineData.leftText then 
                     spellNameFromTip = lineData.leftText
                 end
                 
-                -- Check if the line contains "remaining" (case-insensitive)
-                if not string.find(lineText, "remaining", 1, true) then
-                    table.insert(tooltipLines, lineText)
+                -- Check if the combined line text contains "remaining" (case-insensitive)
+                local combinedCheckText = lineText .. (lineData.rightText or "")
+                if not string.find(combinedCheckText, "remaining", 1, true) then
+                    -- Store left and right parts separately
+                    local lineInfo = { left = lineData.leftText }
+                    if lineData.rightText then
+                        lineInfo.right = lineData.rightText
+                    end
+                    table.insert(tooltipLines, lineInfo)
+                    
+                    -- Mark first line as processed after adding it
+                    if not firstLineProcessed then firstLineProcessed = true end 
                 end
             end
         end
+    end
+
+    -- Store the collected lines in the global cache using spellId as the key
+    if spellId and tooltipLines and #tooltipLines > 0 then
+        BoxxyAuras.AllAuras[spellId] = { 
+            name = spellNameFromTip or "Unknown", -- Store the name from the first line
+            lines = tooltipLines -- Store the table of line info tables
+        }
+    elseif spellId then
+        -- Even if no lines after filtering, store something to prevent re-scraping
+        BoxxyAuras.AllAuras[spellId] = { 
+            name = spellNameFromTip or "Unknown", 
+            lines = {}
+        }
     end
 end 
 

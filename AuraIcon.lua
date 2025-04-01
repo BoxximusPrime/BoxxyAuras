@@ -220,7 +220,7 @@ function AuraIcon.New(parentFrame, index, baseName)
     local shakeGroup = instance.frame:CreateAnimationGroup("ShakeGroup")
     instance.shakeAnimGroup = shakeGroup -- Store it
 
-    local shakeOffset = 2 -- Pixels to offset
+    local shakeOffset = 4 -- Pixels to offset
     local shakeDur = 0.05 -- Duration of each shake segment
 
     -- Shake Right
@@ -446,16 +446,19 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
             self.lastFormattedDurationText = currentFormattedText -- Store new text state
         end
 
-        -- Update Tint ONLY if expired state changed
-        if currentIsExpired ~= self.lastIsExpiredState then
+        -- Update Tint ONLY if expired state changed OR parent hover state changed
+        -- We need to check hover state change too, because tint depends on it now
+        if currentIsExpired ~= self.lastIsExpiredState or isHoveringParent ~= self.lastIsHoveringParentState then
              if self.textureWidget then
-                 if applyTint then -- Expired
-                     self.textureWidget:SetVertexColor(1, 0.5, 0.5)
-                 else -- Active
-                     self.textureWidget:SetVertexColor(1, 1, 1) 
-                 end
+                 -- Apply red tint ONLY if expired AND hovering parent frame
+                 if applyTint and isHoveringParent then 
+                      self.textureWidget:SetVertexColor(1, 0.5, 0.5)
+                 else -- Otherwise (Active OR Expired but not hovering parent), use normal tint
+                      self.textureWidget:SetVertexColor(1, 1, 1) 
+                  end
              end
              self.lastIsExpiredState = currentIsExpired -- Store new expired state
+             self.lastIsHoveringParentState = isHoveringParent -- Store parent hover state
         end
         
         -- self.isExpired = currentIsExpired -- Update main flag if needed elsewhere (Redundant? Already set in main Update?)
@@ -551,13 +554,16 @@ function AuraIcon.RefreshTooltipContent(self)
         -- If game functions failed, fallback to manual lines from cache or name
         if not tooltipSet then
             local auraInfo = self.auraKey and BoxxyAuras.AllAuras[self.auraKey]
+            -- Check if cached info and lines table exist
             if auraInfo and type(auraInfo.lines) == "table" and #auraInfo.lines > 0 then
-                for idx, line in ipairs(auraInfo.lines) do 
-                    if idx == 1 then
-                        GameTooltip:AddLine(line, 1, 0.82, 0, true) -- Name in gold
-                    else
-                        GameTooltip:AddLine(line, 1, 1, 1, true) -- Description in white
-                    end
+                for idx, lineInfo in ipairs(auraInfo.lines) do 
+                    -- Check if it's the first line and has both left and right parts
+                    if idx == 1 and lineInfo.right then
+                         GameTooltip:AddDoubleLine(lineInfo.left, lineInfo.right, 1, 0.82, 0, 1, 1, 1) -- Left (gold), Right (white)
+                     else
+                        -- Otherwise, just add the left line (description usually)
+                        GameTooltip:AddLine(lineInfo.left, 1, 1, 1, true) -- White text
+                     end
                 end
             else
                 GameTooltip:AddLine(self.name or "Unknown Expired Aura", 1, 1, 1, true)
@@ -565,7 +571,7 @@ function AuraIcon.RefreshTooltipContent(self)
         end
         
         -- Always add expired tag and show immediately for this case
-        GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5)
+        GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5, true)
         -- No need to call GameTooltip:Show() here
 
     else -- Should not happen
