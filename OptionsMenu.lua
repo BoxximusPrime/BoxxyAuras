@@ -48,9 +48,15 @@ title:SetText("BoxxyAuras Options")
 local closeBtn = CreateFrame("Button", "BoxxyAurasOptionsCloseButton", optionsFrame, "BAURASCloseBtn")
 closeBtn:SetPoint("TOPRIGHT", optionsFrame, "TOPRIGHT", -12, -12)
 closeBtn:SetSize(12, 12)
-closeBtn:SetScript("OnClick", function()
+closeBtn:SetScript("OnClick", function(self)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-    optionsFrame:Hide()
+    self:GetParent():Hide() -- Hide the main options frame
+
+    -- <<< ADDED: Also hide custom options if shown >>>
+    if BoxxyAuras.CustomOptions and BoxxyAuras.CustomOptions.Frame and BoxxyAuras.CustomOptions.Frame:IsShown() then
+        BoxxyAuras.CustomOptions.Frame:Hide()
+    end
+    -- <<< END ADDED SECTION >>>
 end)
 
 

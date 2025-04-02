@@ -614,7 +614,7 @@ function BoxxyAuras.FrameHandler.ApplyLockState(isLocked)
                         handle:Hide()
                     else
                         handle:EnableMouse(true)
-                        -- Don't explicitly show here, OnEnter/OnLeave handles it
+                        handle:Show()
                     end
                 end
             end
@@ -756,9 +756,7 @@ function BoxxyAuras.FrameHandler.InitializeFrames()
         if customDisplayFrame then customDisplayFrame:SetScale(initialScale) end
 
         -- Apply initial lock state using the new function
-        if initialLock then
-            BoxxyAuras.FrameHandler.ApplyLockState(true)
-        end
+        BoxxyAuras.FrameHandler.ApplyLockState(initialLock)
     end
 
     -- Start polling timers (Calls local PollFrameHoverState)

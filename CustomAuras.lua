@@ -155,13 +155,7 @@ function BoxxyAuras.CustomOptions:SaveCustomAuras()
         end
     end
 
-    -- DEBUG: Print what we are about to save
-    print("--- Debug: Saving Custom Names Table ---")
-    for name, _ in pairs(newCustomNames) do print("- " .. name) end
-    print("-------------------------------------")
-
     BoxxyAurasDB.customAuraNames = newCustomNames -- Replace the old table
-    print("BoxxyAuras: Custom aura list saved.")
 
     -- Optionally trigger an immediate update of the aura frames
     if BoxxyAuras.UpdateAuras then
