@@ -164,8 +164,6 @@ end
 -- Copied from WhoGotLoots/UIBuilder.lua (Adapted slightly)
 function BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, layer, r, g, b, a)
     local group = nil
-    -- <<< DEBUG PRINT >>>
-    print(string.format("DEBUG ColorBGSlicedFrame: Called for Frame='%s', Layer='%s', Color=(%.1f, %.1f, %.1f, %.1f)", frame:GetName() or "N/A", tostring(layer), r, g, b, a))
 
     if layer == "backdrop" then
         group = frame.backdropTextures
@@ -174,11 +172,7 @@ function BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, layer, r, g, b, a)
     end
 
     if group then
-        -- <<< DEBUG PRINT >>>
-        print(string.format("DEBUG ColorBGSlicedFrame: Found group for Layer='%s'. Looping through textures...", tostring(layer)))
         for key, tex in pairs(group) do
-            -- <<< DEBUG PRINT >>>
-            print(string.format("DEBUG ColorBGSlicedFrame:  - Processing Key='%s', Texture Object Type='%s'", tostring(key), type(tex)))
             local success, err = pcall(tex.SetVertexColor, tex, r, g, b, a)
             if not success then
                 print(string.format("|cffFF0000ERROR:|r ColorBGSlicedFrame: pcall failed for SetVertexColor on key %s. Error: %s", tostring(key), tostring(err)))

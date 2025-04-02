@@ -137,16 +137,11 @@ lastInGroup = hideBlizzardCheck
 -- Set General Group Height
 local lastBottomGen = lastInGroup and lastInGroup:GetBottom()
 local groupTopGen = generalGroup:GetTop()
-if lastBottomGen and groupTopGen then
-    generalGroup:SetHeight(groupTopGen - lastBottomGen + groupPadding + 15) -- << REFINED: Add explicit bottom padding
-else
-    print("|cffFF0000BoxxyAuras Options Error:|r Could not calculate height for generalGroup.")
-    generalGroup:SetHeight(50) -- Fallback height
-end
+generalGroup:SetHeight(65)
 
 -- Update lastElement for next group positioning
 lastElement = generalGroup
-verticalSpacing = -20 -- Space between groups
+verticalSpacing = -5 -- Space between groups
 
 --[[------------------------------------------------------------
 -- Group 2: Display Frame Settings (Alignment & Size)
@@ -154,13 +149,25 @@ verticalSpacing = -20 -- Space between groups
 local displayGroup = CreateFrame("Frame", "BoxxyAurasOptionsDisplayGroup", contentFrame) -- Parent to contentFrame
 displayGroup:SetPoint("TOPLEFT", lastElement, "BOTTOMLEFT", 0, verticalSpacing) -- Position below previous group
 displayGroup:SetWidth(groupWidth)
-StyleGroupContainer(displayGroup)
+-- StyleGroupContainer(displayGroup) -- << REMOVED styling from the main container (Attempt 2)
 
-lastInGroup = displayGroup -- Reset for positioning within this group
-groupVSpacing = internalElementVSpacing -- << Standardized spacing
+local subGroupWidth = groupWidth - (groupPadding * 2) -- << This line is no longer needed
+local subGroupVerticalSpacing = -10 -- Spacing between sub-groups
+local lastSubGroup = displayGroup -- Track the last sub-group for vertical positioning
+
+--[[------------------------
+-- Sub-Group 1: Buffs
+--------------------------]]
+local buffSubGroup = CreateFrame("Frame", "BoxxyAurasOptionsBuffSubGroup", displayGroup)
+buffSubGroup:SetPoint("TOPLEFT", lastSubGroup, "TOPLEFT", 0, internalElementVSpacing) -- << Removed horizontal padding offset
+buffSubGroup:SetWidth(groupWidth) -- << Use groupWidth
+StyleGroupContainer(buffSubGroup) -- << Use default keys
+
+lastInGroup = buffSubGroup -- Reset for positioning within this sub-group
+groupVSpacing = internalElementVSpacing -- Start spacing within the sub-group
 
 -- Buff Text Alignment Title
-local buffAlignLabel = displayGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
+local buffAlignLabel = buffSubGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
 buffAlignLabel:SetPoint("TOPLEFT", lastInGroup, "TOPLEFT", groupPadding + 5, groupVSpacing)
 buffAlignLabel:SetText("Buff Text Alignment")
 BoxxyAuras.Options.BuffAlignLabel = buffAlignLabel
@@ -168,15 +175,15 @@ lastInGroup = buffAlignLabel
 groupVSpacing = -8 -- Keep smaller space after header
 
 -- Buff Alignment Checkboxes (Left, Center, Right)
-local buffAlignLeftCheck = CreateFrame("CheckButton", "BoxxyAurasBuffAlignLeftCheck", displayGroup, "BAURASCheckBoxTemplate")
+local buffAlignLeftCheck = CreateFrame("CheckButton", "BoxxyAurasBuffAlignLeftCheck", buffSubGroup, "BAURASCheckBoxTemplate")
 buffAlignLeftCheck:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", 0, groupVSpacing)
 buffAlignLeftCheck:SetText("Left")
 BoxxyAuras.Options.BuffAlignLeftCheck = buffAlignLeftCheck
-local buffAlignCenterCheck = CreateFrame("CheckButton", "BoxxyAurasBuffAlignCenterCheck", displayGroup, "BAURASCheckBoxTemplate")
+local buffAlignCenterCheck = CreateFrame("CheckButton", "BoxxyAurasBuffAlignCenterCheck", buffSubGroup, "BAURASCheckBoxTemplate")
 buffAlignCenterCheck:SetPoint("LEFT", buffAlignLeftCheck, "RIGHT", checkSpacing, 0)
 buffAlignCenterCheck:SetText("Center")
 BoxxyAuras.Options.BuffAlignCenterCheck = buffAlignCenterCheck
-local buffAlignRightCheck = CreateFrame("CheckButton", "BoxxyAurasBuffAlignRightCheck", displayGroup, "BAURASCheckBoxTemplate")
+local buffAlignRightCheck = CreateFrame("CheckButton", "BoxxyAurasBuffAlignRightCheck", buffSubGroup, "BAURASCheckBoxTemplate")
 buffAlignRightCheck:SetPoint("LEFT", buffAlignCenterCheck, "RIGHT", checkSpacing, 0)
 buffAlignRightCheck:SetText("Right")
 BoxxyAuras.Options.BuffAlignRightCheck = buffAlignRightCheck
@@ -188,11 +195,11 @@ lastInGroup = buffAlignLeftCheck -- Anchor next section below the row
 groupVSpacing = internalElementVSpacing -- << Standardized spacing
 
 -- Buff Icon Size Slider
-local buffSizeLabel = displayGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
+local buffSizeLabel = buffSubGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
 buffSizeLabel:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", 0, groupVSpacing)
 buffSizeLabel:SetText("Buff Icon Size")
 BoxxyAuras.Options.BuffSizeLabel = buffSizeLabel
-local buffSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsBuffSizeSlider", displayGroup, "BAURASSlider")
+local buffSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsBuffSizeSlider", buffSubGroup, "BAURASSlider")
 buffSizeSlider:SetPoint("TOPLEFT", buffSizeLabel, "BOTTOMLEFT", 5, -10)
 buffSizeSlider:SetMinMaxValues(12, 64); buffSizeSlider:SetValueStep(1); buffSizeSlider:SetObeyStepOnDrag(true); buffSizeSlider:SetWidth(160)
 if buffSizeSlider.KeyLabel then buffSizeSlider.KeyLabel:Show() end; if buffSizeSlider.KeyLabel2 then buffSizeSlider.KeyLabel2:Show() end
@@ -208,26 +215,43 @@ buffSizeSlider:SetScript("OnMouseUp", function(self)
 end)
 BoxxyAuras.Options.BuffSizeSlider = buffSizeSlider
 lastInGroup = buffSizeSlider
-groupVSpacing = internalElementVSpacing - 3 -- << Standardized spacing (slightly more after slider)
+
+-- Calculate Buff Sub-Group Height
+local lastBottomBuffSub = lastInGroup and lastInGroup:GetBottom()
+local groupTopBuffSub = buffSubGroup:GetTop()
+buffSubGroup:SetHeight(120)
+
+lastSubGroup = buffSubGroup -- Update tracking for next sub-group
+
+--[[--------------------------
+-- Sub-Group 2: Debuffs
+----------------------------]]
+local debuffSubGroup = CreateFrame("Frame", "BoxxyAurasOptionsDebuffSubGroup", displayGroup)
+debuffSubGroup:SetPoint("TOPLEFT", lastSubGroup, "BOTTOMLEFT", 0, subGroupVerticalSpacing) -- Position below buff group, no horizontal padding
+debuffSubGroup:SetWidth(groupWidth) -- << Use groupWidth
+StyleGroupContainer(debuffSubGroup) -- << Use default keys
+
+lastInGroup = debuffSubGroup -- Reset for positioning within this sub-group
+groupVSpacing = internalElementVSpacing -- Start spacing within the sub-group
 
 -- Debuff Text Alignment Title
-local debuffAlignLabel = displayGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
-debuffAlignLabel:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", -5, groupVSpacing)
+local debuffAlignLabel = debuffSubGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
+debuffAlignLabel:SetPoint("TOPLEFT", lastInGroup, "TOPLEFT", groupPadding + 5, groupVSpacing)
 debuffAlignLabel:SetText("Debuff Text Alignment")
 BoxxyAuras.Options.DebuffAlignLabel = debuffAlignLabel
 lastInGroup = debuffAlignLabel
 groupVSpacing = -8 -- Keep smaller space after header
 
 -- Debuff Alignment Checkboxes
-local debuffAlignLeftCheck = CreateFrame("CheckButton", "BoxxyAurasDebuffAlignLeftCheck", displayGroup, "BAURASCheckBoxTemplate")
+local debuffAlignLeftCheck = CreateFrame("CheckButton", "BoxxyAurasDebuffAlignLeftCheck", debuffSubGroup, "BAURASCheckBoxTemplate")
 debuffAlignLeftCheck:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", 0, groupVSpacing)
 debuffAlignLeftCheck:SetText("Left")
 BoxxyAuras.Options.DebuffAlignLeftCheck = debuffAlignLeftCheck
-local debuffAlignCenterCheck = CreateFrame("CheckButton", "BoxxyAurasDebuffAlignCenterCheck", displayGroup, "BAURASCheckBoxTemplate")
+local debuffAlignCenterCheck = CreateFrame("CheckButton", "BoxxyAurasDebuffAlignCenterCheck", debuffSubGroup, "BAURASCheckBoxTemplate")
 debuffAlignCenterCheck:SetPoint("LEFT", debuffAlignLeftCheck, "RIGHT", checkSpacing, 0)
 debuffAlignCenterCheck:SetText("Center")
 BoxxyAuras.Options.DebuffAlignCenterCheck = debuffAlignCenterCheck
-local debuffAlignRightCheck = CreateFrame("CheckButton", "BoxxyAurasDebuffAlignRightCheck", displayGroup, "BAURASCheckBoxTemplate")
+local debuffAlignRightCheck = CreateFrame("CheckButton", "BoxxyAurasDebuffAlignRightCheck", debuffSubGroup, "BAURASCheckBoxTemplate")
 debuffAlignRightCheck:SetPoint("LEFT", debuffAlignCenterCheck, "RIGHT", checkSpacing, 0)
 debuffAlignRightCheck:SetText("Right")
 BoxxyAuras.Options.DebuffAlignRightCheck = debuffAlignRightCheck
@@ -239,11 +263,11 @@ lastInGroup = debuffAlignLeftCheck
 groupVSpacing = internalElementVSpacing -- << Standardized spacing
 
 -- Debuff Icon Size Slider
-local debuffSizeLabel = displayGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
+local debuffSizeLabel = debuffSubGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
 debuffSizeLabel:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", 0, groupVSpacing)
 debuffSizeLabel:SetText("Debuff Icon Size")
 BoxxyAuras.Options.DebuffSizeLabel = debuffSizeLabel
-local debuffSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsDebuffSizeSlider", displayGroup, "BAURASSlider")
+local debuffSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsDebuffSizeSlider", debuffSubGroup, "BAURASSlider")
 debuffSizeSlider:SetPoint("TOPLEFT", debuffSizeLabel, "BOTTOMLEFT", 5, -10)
 debuffSizeSlider:SetMinMaxValues(12, 64); debuffSizeSlider:SetValueStep(1); debuffSizeSlider:SetObeyStepOnDrag(true); debuffSizeSlider:SetWidth(160)
 if debuffSizeSlider.KeyLabel then debuffSizeSlider.KeyLabel:Show() end; if debuffSizeSlider.KeyLabel2 then debuffSizeSlider.KeyLabel2:Show() end
@@ -259,26 +283,43 @@ debuffSizeSlider:SetScript("OnMouseUp", function(self)
 end)
 BoxxyAuras.Options.DebuffSizeSlider = debuffSizeSlider
 lastInGroup = debuffSizeSlider
-groupVSpacing = internalElementVSpacing - 3 -- << Standardized spacing (slightly more after slider)
+
+-- Calculate Debuff Sub-Group Height
+local lastBottomDebuffSub = lastInGroup and lastInGroup:GetBottom()
+local groupTopDebuffSub = debuffSubGroup:GetTop()
+debuffSubGroup:SetHeight(120)
+
+lastSubGroup = debuffSubGroup -- Update tracking for next sub-group
+
+--[[--------------------------
+-- Sub-Group 3: Custom
+----------------------------]]
+local customSubGroup = CreateFrame("Frame", "BoxxyAurasOptionsCustomSubGroup", displayGroup)
+customSubGroup:SetPoint("TOPLEFT", lastSubGroup, "BOTTOMLEFT", 0, subGroupVerticalSpacing) -- Position below debuff group, no horizontal padding
+customSubGroup:SetWidth(groupWidth) -- << Use groupWidth
+StyleGroupContainer(customSubGroup) -- << Use default keys
+
+lastInGroup = customSubGroup -- Reset for positioning within this sub-group
+groupVSpacing = internalElementVSpacing -- Start spacing within the sub-group
 
 -- Custom Text Alignment Title
-local customAlignLabel = displayGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
-customAlignLabel:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", -5, groupVSpacing)
+local customAlignLabel = customSubGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
+customAlignLabel:SetPoint("TOPLEFT", lastInGroup, "TOPLEFT", groupPadding + 5, groupVSpacing)
 customAlignLabel:SetText("Custom Text Alignment")
 BoxxyAuras.Options.CustomAlignLabel = customAlignLabel
 lastInGroup = customAlignLabel
 groupVSpacing = -8 -- Keep smaller space after header
 
 -- Custom Alignment Checkboxes
-local customAlignLeftCheck = CreateFrame("CheckButton", "BoxxyAurasCustomAlignLeftCheck", displayGroup, "BAURASCheckBoxTemplate")
+local customAlignLeftCheck = CreateFrame("CheckButton", "BoxxyAurasCustomAlignLeftCheck", customSubGroup, "BAURASCheckBoxTemplate")
 customAlignLeftCheck:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", 0, groupVSpacing)
 customAlignLeftCheck:SetText("Left")
 BoxxyAuras.Options.CustomAlignLeftCheck = customAlignLeftCheck
-local customAlignCenterCheck = CreateFrame("CheckButton", "BoxxyAurasCustomAlignCenterCheck", displayGroup, "BAURASCheckBoxTemplate")
+local customAlignCenterCheck = CreateFrame("CheckButton", "BoxxyAurasCustomAlignCenterCheck", customSubGroup, "BAURASCheckBoxTemplate")
 customAlignCenterCheck:SetPoint("LEFT", customAlignLeftCheck, "RIGHT", checkSpacing, 0)
 customAlignCenterCheck:SetText("Center")
 BoxxyAuras.Options.CustomAlignCenterCheck = customAlignCenterCheck
-local customAlignRightCheck = CreateFrame("CheckButton", "BoxxyAurasCustomAlignRightCheck", displayGroup, "BAURASCheckBoxTemplate")
+local customAlignRightCheck = CreateFrame("CheckButton", "BoxxyAurasCustomAlignRightCheck", customSubGroup, "BAURASCheckBoxTemplate")
 customAlignRightCheck:SetPoint("LEFT", customAlignCenterCheck, "RIGHT", checkSpacing, 0)
 customAlignRightCheck:SetText("Right")
 BoxxyAuras.Options.CustomAlignRightCheck = customAlignRightCheck
@@ -290,11 +331,11 @@ lastInGroup = customAlignLeftCheck
 groupVSpacing = internalElementVSpacing -- << Standardized spacing
 
 -- Custom Icon Size Slider
-local customSizeLabel = displayGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
+local customSizeLabel = customSubGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
 customSizeLabel:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", 0, groupVSpacing)
 customSizeLabel:SetText("Custom Icon Size")
 BoxxyAuras.Options.CustomSizeLabel = customSizeLabel
-local customSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsCustomSizeSlider", displayGroup, "BAURASSlider")
+local customSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsCustomSizeSlider", customSubGroup, "BAURASSlider")
 customSizeSlider:SetPoint("TOPLEFT", customSizeLabel, "BOTTOMLEFT", 5, -10)
 customSizeSlider:SetMinMaxValues(12, 64); customSizeSlider:SetValueStep(1); customSizeSlider:SetObeyStepOnDrag(true); customSizeSlider:SetWidth(160)
 if customSizeSlider.KeyLabel then customSizeSlider.KeyLabel:Show() end; if customSizeSlider.KeyLabel2 then customSizeSlider.KeyLabel2:Show() end
@@ -311,19 +352,35 @@ end)
 BoxxyAuras.Options.CustomSizeSlider = customSizeSlider
 lastInGroup = customSizeSlider
 
--- Set Display Group Height
-local lastBottomDisp = lastInGroup and lastInGroup:GetBottom()
-local groupTopDisp = displayGroup:GetTop()
-if lastBottomDisp and groupTopDisp then
-    displayGroup:SetHeight(groupTopDisp - lastBottomDisp + groupPadding + 15) -- << REFINED: Add explicit bottom padding
-else
-    print("|cffFF0000BoxxyAuras Options Error:|r Could not calculate height for displayGroup.")
-    displayGroup:SetHeight(200) -- Fallback height
-end
+-- Button to Open Custom Aura Options
+local openCustomOptionsButton = CreateFrame("Button", "BoxxyAurasOpenCustomOptionsButton", customSubGroup, "BAURASButtonTemplate") -- Parent = customSubGroup
+openCustomOptionsButton:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", -5, -35) -- Position below slider
+openCustomOptionsButton:SetWidth(customSubGroup:GetWidth() - (groupPadding * 2) - 10) -- Fit within sub-group padding
+openCustomOptionsButton:SetHeight(25)
+openCustomOptionsButton:SetText("Manage Custom Aura List...")
+openCustomOptionsButton:SetScript("OnClick", function()
+    if BoxxyAuras.CustomOptions and BoxxyAuras.CustomOptions.Toggle then BoxxyAuras.CustomOptions:Toggle()
+    else print("|cffFF0000BoxxyAuras Error:|r Custom Options module not loaded or Toggle function missing.") end
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+end)
+BoxxyAuras.Options.OpenCustomOptionsButton = openCustomOptionsButton
+lastInGroup = openCustomOptionsButton -- Update lastInGroup for height calc
+
+-- Calculate Custom Sub-Group Height (Now includes button)
+local lastBottomCustomSub = lastInGroup and lastInGroup:GetBottom()
+local groupTopCustomSub = customSubGroup:GetTop()
+customSubGroup:SetHeight(150)
+
+lastSubGroup = customSubGroup -- Update tracking
+
+-- Calculate MAIN Display Group Height (based on last sub-group)
+local lastBottomDisplay = lastSubGroup and lastSubGroup:GetBottom()
+local groupTopDisplay = displayGroup:GetTop()
+displayGroup:SetHeight(400)
 
 -- Update lastElement for next group positioning
 lastElement = displayGroup
-verticalSpacing = -20 -- Space between groups
+verticalSpacing = -20 -- Space between main groups
 
 --[[------------------------------------------------------------
 -- Group 3: Global Settings
@@ -361,54 +418,31 @@ lastInGroup = scaleSlider
 -- Set Scale Group Height
 local lastBottomScale = lastInGroup and lastInGroup:GetBottom()
 local groupTopScale = scaleGroup:GetTop()
-if lastBottomScale and groupTopScale then
-    scaleGroup:SetHeight(groupTopScale - lastBottomScale + groupPadding + 15) -- << REFINED: Add explicit bottom padding
-else
-    print("|cffFF0000BoxxyAuras Options Error:|r Could not calculate height for scaleGroup.")
-    scaleGroup:SetHeight(50) -- Fallback height
-end
+scaleGroup:SetHeight(50)
 
 -- Update lastElement for next group positioning
 lastElement = scaleGroup
-verticalSpacing = -20 -- Space between groups
+-- verticalSpacing = -20 -- No longer needed after the last group
 
 --[[------------------------------------------------------------
--- Group 4: Management
+-- Dynamically Set Content Frame Height
 --------------------------------------------------------------]]
-local manageGroup = CreateFrame("Frame", "BoxxyAurasOptionsManageGroup", contentFrame)
-manageGroup:SetPoint("TOPLEFT", lastElement, "BOTTOMLEFT", 0, verticalSpacing)
-manageGroup:SetWidth(groupWidth)
-StyleGroupContainer(manageGroup)
+local bottomPadding = 20 -- Space below the last element
+local lastElementBottom = lastElement and lastElement:GetBottom()
+local contentTop = contentFrame:GetTop()
 
-lastInGroup = manageGroup
-groupVSpacing = internalElementVSpacing -- << Standardized spacing
-
--- Button to Open Custom Aura Options
-local openCustomOptionsButton = CreateFrame("Button", "BoxxyAurasOpenCustomOptionsButton", manageGroup, "BAURASButtonTemplate")
-openCustomOptionsButton:SetPoint("TOPLEFT", lastInGroup, "TOPLEFT", groupPadding + 5, groupVSpacing)
-openCustomOptionsButton:SetWidth(manageGroup:GetWidth() - (groupPadding * 2) - 10) -- Fit within group padding
-openCustomOptionsButton:SetHeight(25)
-openCustomOptionsButton:SetText("Manage Custom Aura List...")
-openCustomOptionsButton:SetScript("OnClick", function()
-    if BoxxyAuras.CustomOptions and BoxxyAuras.CustomOptions.Toggle then BoxxyAuras.CustomOptions:Toggle()
-    else print("|cffFF0000BoxxyAuras Error:|r Custom Options module not loaded or Toggle function missing.") end
-    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-end)
-BoxxyAuras.Options.OpenCustomOptionsButton = openCustomOptionsButton
-lastInGroup = openCustomOptionsButton
-
--- Set Management Group Height
-local lastBottomManage = lastInGroup and lastInGroup:GetBottom()
-local groupTopManage = manageGroup:GetTop()
-if lastBottomManage and groupTopManage then
-    manageGroup:SetHeight(groupTopManage - lastBottomManage + groupPadding + 15) -- << REFINED: Add explicit bottom padding
+if lastElementBottom and contentTop then
+    local requiredHeight = contentTop - lastElementBottom + bottomPadding
+    contentFrame:SetHeight(requiredHeight)
 else
-    print("|cffFF0000BoxxyAuras Options Error:|r Could not calculate height for manageGroup.")
-    manageGroup:SetHeight(50) -- Fallback height
+    print("|cffFF0000BoxxyAuras Options Error:|r Could not dynamically calculate content frame height. Using fallback.")
+    -- Keep the original fallback or adjust if needed
+    contentFrame:SetHeight(700)
 end
 
--- Update last element for safety, though nothing comes after currently
-lastElement = manageGroup
+--[[------------------------------------------------------------
+-- Group 4: Management (REMOVED - Button moved to Custom Sub-Group)
+--------------------------------------------------------------]]
 
 --[[------------------------------------------------------------
 -- Functions to Load/Save/Toggle
@@ -530,9 +564,7 @@ function BoxxyAuras.Options:Load()
     end
 
     -- Apply the loaded states that affect visuals immediately
-    self:ApplyLockState(BoxxyAurasDB.lockFrames)
-    self:ApplyScale(BoxxyAurasDB.optionsScale)
-    self:ApplyTextAlign()
+    self:ApplyScale(BoxxyAurasDB.optionsScale) -- Scale the Options window itself
 end
 
 function BoxxyAuras.Options:Toggle()
@@ -548,15 +580,25 @@ function BoxxyAuras.Options:Toggle()
 end
 
 function BoxxyAuras.Options:ApplyLockState(lockState)
-    local buffFrame = _G["BoxxyBuffDisplayFrame"]
-    local debuffFrame = _G["BoxxyDebuffDisplayFrame"]
-    local customFrame = _G["BoxxyCustomDisplayFrame"]
+    -- << MODIFIED: Get frame references from BoxxyAuras.Frames >>
+    local buffFrame = BoxxyAuras.Frames and BoxxyAuras.Frames.Buff
+    local debuffFrame = BoxxyAuras.Frames and BoxxyAuras.Frames.Debuff
+    local customFrame = BoxxyAuras.Frames and BoxxyAuras.Frames.Custom
+
+    -- Safety check
+    if not buffFrame or not debuffFrame or not customFrame then
+        print("|cffFF0000BoxxyAuras Options Error:|r Could not get frame references in ApplyLockState.")
+        return
+    end
 
     local function ApplyToFrame(frame, baseName)
         if not frame then return end
+
+        -- 1. Set Movable
         frame:SetMovable(not lockState)
         frame.isLocked = lockState
 
+        -- 2. Handles
         if frame.handles then
             for name, handle in pairs(frame.handles) do
                 handle:EnableMouse(not lockState)
@@ -564,21 +606,46 @@ function BoxxyAuras.Options:ApplyLockState(lockState)
             end
         end
 
+        -- 3. Title Label
         local titleLabelName = baseName .. "TitleLabel"
         local titleLabel = _G[titleLabelName]
         if titleLabel then
             if lockState then titleLabel:Hide() else titleLabel:Show() end
         end
 
-        local bgAlpha = lockState and 0 or (BoxxyAuras.Config.MainFrameBGColorNormal and BoxxyAuras.Config.MainFrameBGColorNormal.a) or 0.85
-        local borderAlpha = lockState and 0 or (BoxxyAuras.Config.BorderColor and BoxxyAuras.Config.BorderColor.a) or 0.8
-        if frame.backdropTextures and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
-            local currentBgColor = frame.backdropTextures[5] and {frame.backdropTextures[5]:GetVertexColor()} or {0.1, 0.1, 0.1}
-            BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "backdrop", currentBgColor[1], currentBgColor[2], currentBgColor[3], bgAlpha)
-        end
-         if frame.borderTextures and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
-            local currentBorderColor = frame.borderTextures[5] and {frame.borderTextures[5]:GetVertexColor()} or {0.4, 0.4, 0.4}
-            BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", currentBorderColor[1], currentBorderColor[2], currentBorderColor[3], borderAlpha)
+        -- 4. Background & Border Visibility/Color
+        if lockState then
+            -- Hide background textures
+            if frame.backdropTextures then
+                for _, texture in ipairs(frame.backdropTextures) do
+                    if texture then texture:Hide() end
+                end
+            end
+            -- Hide border textures
+            if frame.borderTextures then
+                 for _, texture in ipairs(frame.borderTextures) do
+                    if texture then texture:Hide() end
+                end
+            end
+        else
+            -- Show and color background textures
+            if frame.backdropTextures and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
+                for _, texture in ipairs(frame.backdropTextures) do
+                    if texture then texture:Show() end -- Ensure textures are shown
+                end
+                -- Apply color from config
+                local normalBgColor = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorNormal) or { r = 0.1, g = 0.1, b = 0.1, a = 0.85 }
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "backdrop", normalBgColor.r, normalBgColor.g, normalBgColor.b, normalBgColor.a) -- Use full config color including alpha
+            end
+            -- Show and color border textures
+            if frame.borderTextures and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
+                 for _, texture in ipairs(frame.borderTextures) do
+                     if texture then texture:Show() end -- Ensure textures are shown
+                end
+                -- Apply color from config
+                local normalBorderColor = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or { r = 0.4, g = 0.4, b = 0.4, a = 0.8 }
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", normalBorderColor.r, normalBorderColor.g, normalBorderColor.b, normalBorderColor.a) -- Use full config color including alpha
+            end
         end
     end
 
@@ -589,15 +656,17 @@ end
 
 function BoxxyAuras.Options:ApplyScale(scaleValue)
     if not scaleValue then return end
-    local buffFrame = _G["BoxxyBuffDisplayFrame"]
-    local debuffFrame = _G["BoxxyDebuffDisplayFrame"]
-    local customFrame = _G["BoxxyCustomDisplayFrame"]
-    local optionsFrm = self.Frame
-    local customOptionsFrm = BoxxyAuras.CustomOptions and BoxxyAuras.CustomOptions.Frame
+    -- << MODIFIED: Get frame references from BoxxyAuras.Frames >>
+    local buffFrame = BoxxyAuras.Frames and BoxxyAuras.Frames.Buff
+    local debuffFrame = BoxxyAuras.Frames and BoxxyAuras.Frames.Debuff
+    local customFrame = BoxxyAuras.Frames and BoxxyAuras.Frames.Custom
+    local optionsFrm = self.Frame -- This one is local to Options
+    local customOptionsFrm = BoxxyAuras.CustomOptions and BoxxyAuras.CustomOptions.Frame -- This one is local to CustomOptions
 
-    if buffFrame then buffFrame:SetScale(scaleValue) end
-    if debuffFrame then debuffFrame:SetScale(scaleValue) end
-    if customFrame then customFrame:SetScale(scaleValue) end
+    -- Only scale the actual options windows here. Aura frames are scaled on init/slider change.
+    -- if buffFrame then buffFrame:SetScale(scaleValue) end -- REMOVED
+    -- if debuffFrame then debuffFrame:SetScale(scaleValue) end -- REMOVED
+    -- if customFrame then customFrame:SetScale(scaleValue) end -- REMOVED
     if optionsFrm then optionsFrm:SetScale(scaleValue) end
     if customOptionsFrm then customOptionsFrm:SetScale(scaleValue) end
 end

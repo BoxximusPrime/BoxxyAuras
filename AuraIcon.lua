@@ -108,7 +108,7 @@ function AuraIcon.New(parentFrame, index, baseName)
     instance.expirationTime = 0
     instance.auraIndex = 0
     instance.auraType = nil
-    instance.spellID = nil
+    instance.spellId = nil
     instance.name = nil
     instance.auraKey = nil -- ADDED: Key to use in BoxxyAuras.AllAuras
     instance.isExpired = false -- Initialize flag
@@ -118,6 +118,7 @@ function AuraIcon.New(parentFrame, index, baseName)
     instance.isMouseOver = false -- Initialize mouse over flag
     instance.tooltipUpdateTimer = 0 -- Initialize tooltip update timer
     instance.slot = nil -- Initialize slot
+    instance.originalAuraType = nil -- Initialize originalAuraType
 
     -- Set scripts on the frame, referencing methods via AuraIcon
     instance.frame:SetScript("OnEnter", function(frame_self) AuraIcon.OnEnter(instance) end)
@@ -261,24 +262,6 @@ function AuraIcon.New(parentFrame, index, baseName)
     shakeOverlayFadeOut:SetDuration(shakeDur * 3) -- Fade out over the remaining shake duration (segments 2 & 3)
     shakeOverlayFadeOut:SetOrder(2) -- Start after the fade in
 
-    -- Optional: Add a slight vertical shake? (Uncomment if desired)
-    --[[ 
-    local shakeV1 = shakeGroup:CreateAnimation("Translation")
-    shakeV1:SetOffset(0, shakeOffset / 2)
-    shakeV1:SetDuration(shakeDur)
-    shakeV1:SetOrder(1) -- Run concurrently with horizontal shake
-
-    local shakeV2 = shakeGroup:CreateAnimation("Translation")
-    shakeV2:SetOffset(0, -shakeOffset)
-    shakeV2:SetDuration(shakeDur * 2)
-    shakeV2:SetOrder(2)
-
-    local shakeV3 = shakeGroup:CreateAnimation("Translation")
-    shakeV3:SetOffset(0, shakeOffset / 2)
-    shakeV3:SetDuration(shakeDur)
-    shakeV3:SetOrder(3)
-    ]]
-
     return instance -- Return our instance table, not the frame
 end
 
@@ -333,9 +316,11 @@ function AuraIcon.Update(self, auraData, auraIndex, auraType)
     self.expirationTime = auraData.expirationTime
     self.auraIndex = auraIndex
     self.auraType = auraType
-    self.spellID = auraData.spellID
     self.name = auraData.name
-    self.auraInstanceID = auraData.auraInstanceID 
+    -- Only update spellId and originalType if the new data has them
+    if auraData.spellId then self.spellId = auraData.spellId end
+    if auraData.originalAuraType then self.originalAuraType = auraData.originalAuraType end
+    self.auraInstanceID = auraData.auraInstanceID
     self.slot = auraData.slot -- Store the slot index
 
     -- Determine key for global cache - Use spellId ONLY
@@ -452,7 +437,6 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
         end
 
         -- Update Tint ONLY if expired state changed OR parent hover state changed
-        -- We need to check hover state change too, because tint depends on it now
         if currentIsExpired ~= self.lastIsExpiredState or isHoveringParent ~= self.lastIsHoveringParentState then
              if self.textureWidget then
                  -- Apply red tint ONLY if expired AND hovering parent frame
@@ -507,81 +491,44 @@ function AuraIcon.RefreshTooltipContent(self)
     GameTooltip:ClearLines() -- Clear lines before repopulating
 
     if isPermanent or remaining > 0 then -- If permanent or still active
-        -- Prioritize SetSpellByID if we have a spellID
-        if self.spellID then 
-             GameTooltip:SetSpellByID(self.spellID) 
-        -- Fallback to SetUnitAura IF we can find the current index for the instance ID
-        elseif self.auraInstanceID and self.auraType then
+        local tooltipSet = false
+
+        -- 1. Try SetUnitAura first (most specific)
+        if self.auraInstanceID and self.auraType then
             local currentIndex = nil
-            -- Try to find the current index matching the instance ID
-            for i = 1, 40 do 
-                local currentAuraData = C_UnitAuras.GetAuraDataByIndex("player", i, self.auraType)
+            local filterToUse = self.originalAuraType or self.auraType
+            for i = 1, 40 do
+                local currentAuraData = C_UnitAuras.GetAuraDataByIndex("player", i, filterToUse)
                 if currentAuraData and currentAuraData.auraInstanceID == self.auraInstanceID then
                     currentIndex = i
                     break
                 end
             end
-            
             if currentIndex then
-                -- Found current index, use it
-                GameTooltip:SetUnitAura("player", currentIndex, self.auraType)
-            else
-                -- Couldn't find current index (aura likely expired/shifted), show name only
-                GameTooltip:AddLine(self.name or "Unknown Aura (Index Changed)")
+                GameTooltip:SetUnitAura("player", currentIndex, filterToUse)
+                tooltipSet = true -- Tooltip set by SetUnitAura
             end
-        -- Final fallback to just the name if no SpellID or InstanceID
-        else 
+        end
+
+        -- 2. If SetUnitAura wasn't tried or failed, try SetSpellByID
+        if not tooltipSet and self.spellId then
+            GameTooltip:SetSpellByID(self.spellId)
+            tooltipSet = true -- Assume success if spell ID exists
+        end
+
+        -- 3. Final fallback to just the name
+        if not tooltipSet then
             GameTooltip:AddLine(self.name or "Unknown Aura")
         end
-        -- No need to call GameTooltip:Show() here, it's already shown
 
     elseif not isPermanent and remaining <= 0 then -- If expired but held
-        local tooltipSet = false
-        -- Try using game functions first for potential auto-update
-        if self.spellID then 
-             GameTooltip:SetSpellByID(self.spellID) 
-             tooltipSet = true
-        elseif self.auraInstanceID and self.auraType then
-            local currentIndex = nil
-            for i = 1, 40 do 
-                local currentAuraData = C_UnitAuras.GetAuraDataByIndex("player", i, self.auraType)
-                if currentAuraData and currentAuraData.auraInstanceID == self.auraInstanceID then
-                    currentIndex = i
-                    break
-                end
-            end
-            if currentIndex then
-                GameTooltip:SetUnitAura("player", currentIndex, self.auraType)
-                tooltipSet = true
-            end
-        end
-
-        -- If game functions failed, fallback to manual lines from cache or name
-        if not tooltipSet then
-            local auraInfo = self.auraKey and BoxxyAuras.AllAuras[self.auraKey]
-            -- Check if cached info and lines table exist
-            if auraInfo and type(auraInfo.lines) == "table" and #auraInfo.lines > 0 then
-                for idx, lineInfo in ipairs(auraInfo.lines) do 
-                    -- Check if it's the first line and has both left and right parts
-                    if idx == 1 and lineInfo.right then
-                         GameTooltip:AddDoubleLine(lineInfo.left, lineInfo.right, 1, 0.82, 0, 1, 1, 1) -- Left (gold), Right (white)
-                     else
-                        -- Otherwise, just add the left line (description usually)
-                        GameTooltip:AddLine(lineInfo.left, 1, 1, 1, true) -- White text
-                     end
-                end
-            else
-                GameTooltip:AddLine(self.name or "Unknown Expired Aura", 1, 1, 1, true)
-            end
-        end
-        
-        -- Always add expired tag and show immediately for this case
+        -- For expired, SetUnitAura/SetSpellByID might show incorrect duration.
+        -- Prioritize name, then add expired tag.
+        GameTooltip:AddLine(self.name or "Unknown Expired Aura", 1, 1, 1, true)
         GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5, true)
-        -- No need to call GameTooltip:Show() here
 
     else -- Should not happen
         GameTooltip:AddLine(self.name or "Unknown Aura State")
-        -- No need to call GameTooltip:Show() here
     end
 end
 
@@ -623,15 +570,6 @@ function AuraIcon:Shake(scale)
     -- Check if group exists and is not playing
     if self.shakeAnimGroup and not self.shakeAnimGroup:IsPlaying() then
         self.shakeAnimGroup:Play()
-    else
-        -- Add print if the animation group is already playing
-        if self.shakeAnimGroup and self.shakeAnimGroup:IsPlaying() then
-            -- Animation is already playing, do nothing or maybe call Stop() first?
-            -- For now, just skipping to avoid restarting mid-shake.
-        else
-             -- This case should technically not be reachable if the earlier nil check passed
-             -- print(string.format("DEBUG AuraIcon:Shake: Condition failed unexpectedly before Play() for %s.", self.frame:GetName() or "Unknown"))
-        end
     end
 end
 

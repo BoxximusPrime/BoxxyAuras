@@ -2,6 +2,7 @@ local BOXXYAURAS, BoxxyAuras = ... -- Get addon name and private table
 BoxxyAuras.AllAuras = {} -- Global cache for aura info
 BoxxyAuras.updateScheduled = false -- Flag to debounce UNIT_AURA updates
 BoxxyAuras.recentAuraEvents = {} -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
+BoxxyAuras.Frames = {} -- << ADDED: Table to store frame references
 
 -- Configuration Table
 BoxxyAuras.Config = {
@@ -231,7 +232,10 @@ BoxxyAuras.LayoutAuras = function(targetFrame, iconList)
     local numIconsWide = DEFAULT_ICONS_WIDE -- Default columns
     local settingsKey = nil
     
-    if targetFrame == buffDisplayFrame then
+    -- << MODIFIED: Compare frame names instead of references >>
+    local targetFrameName = targetFrame and targetFrame:GetName()
+
+    if targetFrameName == "BoxxyBuffDisplayFrame" then
         frameType = "Buff"
         settingsKey = "buffFrameSettings"
         -- Read alignment, ensure BoxxyAurasDB and the key exist
@@ -239,14 +243,14 @@ BoxxyAuras.LayoutAuras = function(targetFrame, iconList)
             alignment = BoxxyAurasDB[settingsKey].buffTextAlign or "LEFT"
             numIconsWide = BoxxyAurasDB[settingsKey].numIconsWide or DEFAULT_ICONS_WIDE
         end
-    elseif targetFrame == debuffDisplayFrame then
+    elseif targetFrameName == "BoxxyDebuffDisplayFrame" then
         frameType = "Debuff"
         settingsKey = "debuffFrameSettings"
         if BoxxyAurasDB and BoxxyAurasDB[settingsKey] then
             alignment = BoxxyAurasDB[settingsKey].debuffTextAlign or "LEFT"
             numIconsWide = BoxxyAurasDB[settingsKey].numIconsWide or DEFAULT_ICONS_WIDE
         end
-    elseif targetFrame == customDisplayFrame then
+    elseif targetFrameName == "BoxxyCustomDisplayFrame" then
         frameType = "Custom"
         settingsKey = "customFrameSettings" -- <<< ADDED
         if BoxxyAurasDB and BoxxyAurasDB[settingsKey] then
@@ -254,7 +258,15 @@ BoxxyAuras.LayoutAuras = function(targetFrame, iconList)
             numIconsWide = BoxxyAurasDB[settingsKey].numIconsWide or DEFAULT_ICONS_WIDE
         end
     else
-        print("|cffFF0000LayoutAuras Error:|r Unknown target frame.")
+        -- *** REMOVE DEBUGGING HERE ***
+        -- print(string.format("LayoutAuras DEBUG: Received targetFrame type=%s, name=%s", type(targetFrame), targetFrame and targetFrame:GetName() or "NIL"))
+        -- print(string.format("LayoutAuras DEBUG: Local customDisplayFrame type=%s, name=%s", type(customDisplayFrame), customDisplayFrame and customDisplayFrame:GetName() or "NIL"))
+        -- if targetFrame and customDisplayFrame then
+        --     print(string.format("LayoutAuras DEBUG: Comparison (targetFrame == customDisplayFrame) is %s", tostring(targetFrame == customDisplayFrame)))
+        -- end
+        -- *** END DEBUGGING ***
+
+        print("|cffFF0000LayoutAuras Error:|r Unknown target frame: " .. tostring(targetFrame))
         return
     end
     
@@ -330,9 +342,17 @@ BoxxyAuras.LayoutAuras = function(targetFrame, iconList)
 
     local currentVisibleIndex = 0
     for i, auraIcon in ipairs(iconList) do
-        if auraIcon.frame and auraIcon.frame:IsShown() then
+        -- << REMOVE DEBUG START >>
+        local isShown = auraIcon.frame and auraIcon.frame:IsShown()
+        -- if frameType == "Custom" and auraIcon.frame then
+        --     print(string.format("LayoutAuras DEBUG (Custom): Icon %d (%s), frame=%s, IsShown=%s",
+        --         i, tostring(auraIcon.spellName or auraIcon.spellId), auraIcon.frame:GetName(), tostring(isShown)))
+        -- end
+        -- << REMOVE DEBUG END >>
+
+        if isShown then -- Use the stored variable
             currentVisibleIndex = currentVisibleIndex + 1
-            local row = math.floor((currentVisibleIndex - 1) / iconsPerRow) 
+            local row = math.floor((currentVisibleIndex - 1) / iconsPerRow)
             local col_from_left = (currentVisibleIndex - 1) % iconsPerRow
             auraIcon.frame:ClearAllPoints()
             
@@ -357,6 +377,7 @@ BoxxyAuras.LayoutAuras = function(targetFrame, iconList)
             end
             
             auraIcon.frame:SetPoint(iconAnchorPoint, targetFrame, frameAnchorPoint, xOffset, yOffset)
+            auraIcon.frame:Show() -- << ADDED: Explicitly ensure shown after positioning
         end
     end
 end
@@ -546,6 +567,7 @@ local function InitializeAuras()
     for _, auraData in ipairs(allCurrentBuffs) do
         local isCustom = customNamesLookup[auraData.name]
         if isCustom then
+            auraData.originalAuraType = "HELPFUL" -- << Store original type
             table.insert(currentCustom, auraData)
         else
             table.insert(currentBuffs, auraData)
@@ -554,6 +576,7 @@ local function InitializeAuras()
     for _, auraData in ipairs(allCurrentDebuffs) do
         local isCustom = customNamesLookup[auraData.name]
         if isCustom then
+            auraData.originalAuraType = "HARMFUL" -- << Store original type
             table.insert(currentCustom, auraData)
         else
             table.insert(currentDebuffs, auraData)
@@ -726,6 +749,8 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
         local foundInTracked = false
         for _, trackedAura in ipairs(trackedBuffs) do
             if trackedAura.auraInstanceID == currentAura.auraInstanceID then
+                trackedAura.spellId = currentAura.spellId
+                trackedAura.originalAuraType = currentAura.originalAuraType
                 -- Update ONLY volatile data & slot
                 trackedAura.expirationTime = currentAura.expirationTime
                 trackedAura.duration = currentAura.duration
@@ -739,6 +764,7 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
             table.insert(newBuffsToAdd, currentAura) -- Add the whole auraData (includes .slot)
         end
     end
+
     -- 3b. Process Current REGULAR Debuffs (Mark Seen / Identify New & Try to Match sourceGUID)
     for _, currentAura in ipairs(currentDebuffs) do
         local foundInTracked = false
@@ -867,89 +893,85 @@ BoxxyAuras.UpdateAuras = function() -- Make it part of the addon table
         end
     end
 
-    -- 5a. Process New REGULAR Buffs: Replace matching expired-hovered auras or append
-    local buffsToAppend = {}
-    for _, newAura in ipairs(newBuffsToAdd) do 
+    -- 5a. Process New REGULAR Buffs: Try replacing expired-hovered first, then append
+    for _, newAura in ipairs(newBuffsToAdd) do
         local replacedExpired = false
         for i, existingAura in ipairs(newTrackedBuffs) do
-            -- Check if existing is expired (not seen) and matches spellId
-            if not existingAura.seen and existingAura.spellId == newAura.spellId then
-                newTrackedBuffs[i] = newAura -- Replace the expired data with the new aura data
+            -- Check if existing is expired-hovered AND matches spellId
+            if existingAura.forceExpired and existingAura.spellId == newAura.spellId then
+                newTrackedBuffs[i] = newAura -- Replace the expired data in place
                 replacedExpired = true
-                -- Trigger tooltip scrape check for the potentially updated aura info
+                -- Trigger tooltip scrape for the updated aura info
                 local key = newAura.spellId
-        if key and not BoxxyAuras.AllAuras[key] then 
-                    C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "HELPFUL") end)
+                if key and not BoxxyAuras.AllAuras[key] then
+                    local instanceIdForScrape = newAura.auraInstanceID
+                    C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, instanceIdForScrape, "HELPFUL") end) -- << Pass correct filter
                 end
-                break -- Stop searching for this newAura
+                break -- Stop searching for this newAura, only replace one slot
             end
         end
+        -- If no suitable expired slot was found, append it
         if not replacedExpired then
-            table.insert(buffsToAppend, newAura) -- Not replacing, mark for appending
+            table.insert(newTrackedBuffs, newAura)
             -- Trigger tooltip scrape for the genuinely new aura
             local key = newAura.spellId
-            if key and not BoxxyAuras.AllAuras[key] then 
-                C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "HELPFUL") end)
+            if key and not BoxxyAuras.AllAuras[key] then
+                local instanceIdForScrape = newAura.auraInstanceID
+                C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, instanceIdForScrape, "HELPFUL") end) -- << Pass correct filter
             end
         end
     end
-    -- Append any genuinely new buffs
-    for _, auraToAppend in ipairs(buffsToAppend) do
-        table.insert(newTrackedBuffs, auraToAppend)
-    end
 
-    -- 5b. Process New REGULAR Debuffs
-    local debuffsToAppend = {}
-    for _, newAura in ipairs(newDebuffsToAdd) do 
+    -- 5b. Process New REGULAR Debuffs: Try replacing expired-hovered first, then append
+    for _, newAura in ipairs(newDebuffsToAdd) do
         local replacedExpired = false
         for i, existingAura in ipairs(newTrackedDebuffs) do
-            if not existingAura.seen and existingAura.spellId == newAura.spellId then
+            if existingAura.forceExpired and existingAura.spellId == newAura.spellId then
                 newTrackedDebuffs[i] = newAura -- Replace
                 replacedExpired = true
                 local key = newAura.spellId
-        if key and not BoxxyAuras.AllAuras[key] then 
-                    C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "HARMFUL") end)
+                if key and not BoxxyAuras.AllAuras[key] then
+                    local instanceIdForScrape = newAura.auraInstanceID
+                    C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, instanceIdForScrape, "HARMFUL") end) -- << Pass correct filter
                 end
                 break
             end
         end
         if not replacedExpired then
-            table.insert(debuffsToAppend, newAura) -- Mark for appending
+            table.insert(newTrackedDebuffs, newAura)
             local key = newAura.spellId
-            if key and not BoxxyAuras.AllAuras[key] then 
-                C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "HARMFUL") end)
+            if key and not BoxxyAuras.AllAuras[key] then
+                local instanceIdForScrape = newAura.auraInstanceID
+                C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, instanceIdForScrape, "HARMFUL") end) -- << Pass correct filter
             end
         end
     end
-    for _, auraToAppend in ipairs(debuffsToAppend) do
-        table.insert(newTrackedDebuffs, auraToAppend)
-    end
 
-    -- 5c. Process New CUSTOM Auras
-    local customsToAppend = {}
-    for _, newAura in ipairs(newCustomsToAdd) do 
+    -- 5c. Process New CUSTOM Auras: Try replacing expired-hovered first, then append
+    for _, newAura in ipairs(newCustomsToAdd) do
         local replacedExpired = false
         for i, existingAura in ipairs(newTrackedCustoms) do
-            if not existingAura.seen and existingAura.spellId == newAura.spellId then
+            if existingAura.forceExpired and existingAura.spellId == newAura.spellId then
                 newTrackedCustoms[i] = newAura -- Replace
                 replacedExpired = true
                 local key = newAura.spellId
-        if key and not BoxxyAuras.AllAuras[key] then 
-                    C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "CUSTOM") end)
+                if key and not BoxxyAuras.AllAuras[key] then
+                    local instanceIdForScrape = newAura.auraInstanceID
+                    local originalTypeForScrape = newAura.originalAuraType -- Get original type
+                    C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, instanceIdForScrape, originalTypeForScrape or "HELPFUL") end) -- << Pass correct filter (fallback needed?)
                 end
                 break
             end
         end
         if not replacedExpired then
-            table.insert(customsToAppend, newAura) -- Mark for appending
+            table.insert(newTrackedCustoms, newAura)
             local key = newAura.spellId
-            if key and not BoxxyAuras.AllAuras[key] then 
-                C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, newAura.auraInstanceID, "CUSTOM") end)
+            if key and not BoxxyAuras.AllAuras[key] then
+                local instanceIdForScrape = newAura.auraInstanceID
+                local originalTypeForScrape = newAura.originalAuraType -- Get original type
+                C_Timer.After(0.01, function() BoxxyAuras.AttemptTooltipScrape(key, instanceIdForScrape, originalTypeForScrape or "HELPFUL") end) -- << Pass correct filter (fallback needed?)
             end
         end
-    end
-    for _, auraToAppend in ipairs(customsToAppend) do
-        table.insert(newTrackedCustoms, auraToAppend)
     end
 
     -- 6. Replace Cache
@@ -1129,6 +1151,11 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         BoxxyAuras.SetupDisplayFrame(debuffDisplayFrame, "DebuffFrame")
         BoxxyAuras.SetupDisplayFrame(customDisplayFrame, "CustomFrame") -- <<< ENSURE THIS LINE IS PRESENT
         
+        -- << ADDED: Store frame references in BoxxyAuras table >>
+        BoxxyAuras.Frames.Buff = buffDisplayFrame
+        BoxxyAuras.Frames.Debuff = debuffDisplayFrame
+        BoxxyAuras.Frames.Custom = customDisplayFrame
+        
         -- >> ADDED BACK: Apply initial scale AND lock state to Buff/Debuff frames after setup <<
         if BoxxyAurasDB then
             local initialScale = BoxxyAurasDB.optionsScale or 1.0
@@ -1173,6 +1200,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                 
                 DirectApplyLock(buffDisplayFrame, "BuffFrame")
                 DirectApplyLock(debuffDisplayFrame, "DebuffFrame")
+                DirectApplyLock(customDisplayFrame, "CustomFrame") -- << ADDED MISSING CALL
             else
                     -- Optional: Add logic here if you need to ensure frames are explicitly UNLOCKED on load 
                     -- (though ApplySettings and SetupDisplayFrame should handle default appearance)
@@ -1314,6 +1342,9 @@ BoxxyAuras.PollFrameHoverState = function(frame, frameDesc) -- Make it part of t
             elseif frame == debuffDisplayFrame then
                 sourceTrackedList = trackedDebuffs
                 visualIconList = BoxxyAuras.debuffIcons
+            elseif frame == customDisplayFrame then -- << ADDED CUSTOM CASE
+                sourceTrackedList = trackedCustom
+                visualIconList = BoxxyAuras.customIcons
             end
 
             if sourceTrackedList and visualIconList then
@@ -1353,6 +1384,8 @@ BoxxyAuras.PollFrameHoverState = function(frame, frameDesc) -- Make it part of t
                         trackedBuffs = newTrackedList
                     elseif frame == debuffDisplayFrame then
                         trackedDebuffs = newTrackedList
+                    elseif frame == customDisplayFrame then -- << ADDED CUSTOM CASE
+                        trackedCustom = newTrackedList
                     end
 
                     -- Relayout this specific frame immediately
@@ -1439,10 +1472,25 @@ function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter)
 
     -- If we didn't find the aura instance (it might have expired/shifted instantly), abort scrape
     if not currentAuraIndex then
-        return
+        -- << DEBUG START: Log index lookup failure for custom auras >>
+        if filter == "HELPFUL" or filter == "HARMFUL" then -- Check if it was originally helpful/harmful
+            -- Check if this spell ID *is* in the custom list to confirm it's a custom aura scrape
+            local isCustom = false
+            if BoxxyAurasDB and BoxxyAurasDB.customAuraNames then
+                print("can't find aura")
+                 local spellName = GetSpellInfo(spellId)
+                 if spellName and BoxxyAurasDB.customAuraNames[spellName] then isCustom = true end
+            end
+            if isCustom then
+                print(string.format("AttemptTooltipScrape DEBUG: Failed to find current index for CUSTOM aura InstanceID %s (SpellID: %s, Original Filter: %s)",
+                    tostring(targetAuraInstanceID), tostring(spellId), tostring(filter)))
+            end
+        end
+        -- << DEBUG END >>
+        return -- Abort scrape if index not found
     end
 
-    local tipData = C_TooltipInfo.GetUnitAura("player", currentAuraIndex, filter) 
+    local tipData = C_TooltipInfo.GetUnitAura("player", currentAuraIndex, filter)
 
     if not tipData then 
         -- This failure is now less likely, but could still happen in rare cases
@@ -1468,23 +1516,19 @@ function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter)
                 end
                 
                 -- Store the first line's left text as the potential name
-                if not firstLineProcessed and lineData.leftText then 
+                if not firstLineProcessed and lineData.leftText then
                     spellNameFromTip = lineData.leftText
                 end
                 
-                -- Check if the combined line text contains "remaining" (case-insensitive)
-                local combinedCheckText = lineText .. (lineData.rightText or "")
-                if not string.find(combinedCheckText, "remaining", 1, true) then
-                    -- Store left and right parts separately
-                    local lineInfo = { left = lineData.leftText }
-                    if lineData.rightText then
-                        lineInfo.right = lineData.rightText
-                    end
-                    table.insert(tooltipLines, lineInfo)
-                    
-                    -- Mark first line as processed after adding it
-                    if not firstLineProcessed then firstLineProcessed = true end 
+                -- Store left and right parts separately (REMOVE "remaining" check)
+                local lineInfo = { left = lineData.leftText }
+                if lineData.rightText then
+                    lineInfo.right = lineData.rightText
                 end
+                table.insert(tooltipLines, lineInfo)
+
+                -- Mark first line as processed after adding it
+                if not firstLineProcessed then firstLineProcessed = true end
             end
         end
     end
@@ -1502,13 +1546,27 @@ function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter)
             lines = {}
         }
     end
+
+    -- Store SOMETHING minimal in the cache to prevent re-scraping, but don't process lines
+    if spellId then
+        local existingCache = BoxxyAuras.AllAuras[spellId]
+        -- Only add minimal cache if it doesn't exist at all
+        if not existingCache then
+             local spellNameFromApi = GetSpellInfo(spellId)
+            print("spellNameFromApi")
+             BoxxyAuras.AllAuras[spellId] = {
+                 name = spellNameFromApi or "Scrape Pending",
+                 lines = {} -- Keep lines empty, rely on RefreshTooltipContent
+             }
+        end
+    end
 end 
 
 -- Common Frame Setup Function
 BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of addon table
-    
+
     -- Draw backdrop and border using new utility functions
-    local backdropTextureKey = frameName .. "HoverBG" 
+    local backdropTextureKey = frameName .. "HoverBG"
     local borderTextureKey = "EdgedBorder"
     
     -- <<< Add flag before drawing >>>
@@ -1520,7 +1578,16 @@ BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of add
     -- <<< Add flag check after drawing >>>
     if frame.backdropTextures and frame.borderTextures then
         frame.textureSetupComplete = true
+        -- << REMOVE DEBUG START >>
+        -- print(string.format("SetupDisplayFrame DEBUG (%s): Texture tables CREATED. Backdrop count: %d, Border count: %d",
+        --    frameName, #frame.backdropTextures, #frame.borderTextures))
+        -- << REMOVE DEBUG END >>
     else
+        frame.textureSetupComplete = false -- Ensure flag is false if creation failed
+        -- << REMOVE DEBUG START >>
+        -- print(string.format("SetupDisplayFrame DEBUG (%s): Texture tables NOT CREATED or incomplete. backdrop exists: %s, border exists: %s",
+        --    frameName, tostring(frame.backdropTextures ~= nil), tostring(frame.borderTextures ~= nil)))
+        -- << REMOVE DEBUG END >>
         print(string.format("|cffFF0000SetupDisplayFrame Warning:|r Texture setup might have failed for %s.", frameName))
     end
 
@@ -1591,6 +1658,8 @@ BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of add
             dbKey = "buffFrameSettings"
         elseif self == debuffDisplayFrame then
             dbKey = "debuffFrameSettings"
+        elseif self == customDisplayFrame then -- << ADDED CUSTOM CASE
+            dbKey = "customFrameSettings"
         end
 
         if dbKey and BoxxyAurasDB and BoxxyAurasDB[dbKey] then
@@ -1605,6 +1674,8 @@ BoxxyAuras.SetupDisplayFrame = function(frame, frameName) -- Make it part of add
             iconList = BoxxyAuras.buffIcons
         elseif self == debuffDisplayFrame then
             iconList = BoxxyAuras.debuffIcons
+        elseif self == customDisplayFrame then -- << ADDED CUSTOM CASE
+            iconList = BoxxyAuras.customIcons
         end
 
         if iconList then
