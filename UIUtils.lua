@@ -1,6 +1,6 @@
-local BOXXYAURAS, BoxxyAuras = ... -- Get addon name and private table
-BoxxyAuras = BoxxyAuras or {}
-BoxxyAuras.AllAuras = {} -- Global cache for aura info
+local addonNameString, privateTable = ... -- Use different names for the local vars from ...
+_G.BoxxyAuras = _G.BoxxyAuras or {}      -- Explicitly create/assign the GLOBAL table
+local BoxxyAuras = _G.BoxxyAuras        -- Create a convenient local alias to the global table
 
 BoxxyAuras.UIUtils = {}
 

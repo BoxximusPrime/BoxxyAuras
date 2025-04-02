@@ -1,9 +1,6 @@
 <Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/1201/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
     <Button name="BAURASCheckBoxTemplate" virtual="true">
         <Size x="12.0" y="12.0"/>
-        <HitRectInsets>
-            <AbsInset left="-4" right="-70" top="-4" bottom="-4"/>
-        </HitRectInsets>
         <Layers>
             <Layer level="BACKGROUND" textureSubLevel="2">
                 <Texture file="Interface\AddOns\BoxxyAuras\Art\checkbox" Alpha="1" parentKey="NormalBorder" snapToPixelGrid="false" texelSnappingBias="0.0">
@@ -40,6 +37,29 @@
             <OnLoad>
                 self.Checked = false
                 self.r, self.g, self.b, self.a = self.Label:GetTextColor()
+
+                -- Function to update hitbox dynamically
+                function self:UpdateHitRect()
+                    -- Ensure label width is calculated
+                    self.Label:SetWidth(self.Label:GetStringWidth())
+                    -- Calculate the total width needed (checkbox + padding + label)
+                    local checkboxWidth = self.NormalBorder:GetWidth() -- Use the border texture width
+                    local padding = 4 -- Match the label anchor offset
+                    local labelWidth = self.Label:GetWidth()
+                    local totalWidth = checkboxWidth + padding + labelWidth
+
+                    -- Calculate the right inset needed to make the hitbox cover the total width
+                    -- Right inset = ButtonWidth - TotalWidth
+                    -- Since ButtonWidth is 12, this will be negative, extending the hitbox rightwards
+                    local rightInset = self:GetWidth() - totalWidth
+                    
+                    -- Apply the new hit rectangle (left, right, top, bottom)
+                    -- Left = 0 (start at button's left edge)
+                    -- Right = negative value calculated above
+                    -- Top/Bottom = Small values to slightly increase vertical hit area
+                    self:SetHitRectInsets(0, rightInset, -4, -4) 
+                end
+
                 function self:SetChecked(checked)
                     self.Checked = checked
                     if checked then
@@ -55,7 +75,12 @@
                 end
                 function self:SetText(text)
                     self.Label:SetText(text)
+                    -- Update hitbox after text changes
+                    self:UpdateHitRect() 
                 end
+
+                -- Initial hitbox update on load
+                self:UpdateHitRect() 
             </OnLoad>
             <OnEnter>
                 self.Label:SetTextColor(1, 1, 1)
@@ -282,11 +307,6 @@
 				<FontString parentKey="KeyLabel" inherits="BAURASFont_General" text="0" hidden="false" ignoreParentScale="false" justifyH="CENTER" justifyV="TOP">
 					<Anchors>
 						<Anchor point="TOP" relativeKey="$parent.VirtualThumb" relativePoint="BOTTOM" x="0" y="-4"/>
-					</Anchors>
-				</FontString>
-				<FontString parentKey="KeyLabel2" inherits="BAURASFont_General" text="0" hidden="true" ignoreParentScale="false" justifyH="LEFT" justifyV="MIDDLE">
-					<Anchors>
-						<Anchor point="LEFT" relativeKey="$parent" relativePoint="RIGHT" x="6" y="0"/>
 					</Anchors>
 				</FontString>
 			</Layer>

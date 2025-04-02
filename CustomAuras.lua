@@ -2,6 +2,18 @@ local BOXXYAURAS, BoxxyAuras = ... -- Get addon name and private table
 BoxxyAuras = BoxxyAuras or {}
 BoxxyAuras.CustomOptions = {} -- Table to hold custom options elements
 
+-- <<< NEW: Local reference to the profile settings helper >>>
+local function GetCurrentProfileSettings()
+    -- Ensure the main addon table and function exist
+    if BoxxyAuras and BoxxyAuras.GetCurrentProfileSettings then
+        return BoxxyAuras:GetCurrentProfileSettings()
+    else
+        -- Fallback or error if the main function isn't loaded yet or missing
+        -- print("|cffFF0000BoxxyAuras CustomOptions Error:|r Cannot get profile settings helper function!")
+        return { customAuraNames = {} } -- Return a safe default structure
+    end
+end
+
 --[[------------------------------------------------------------
 -- Create Custom Aura Options Frame
 --------------------------------------------------------------]]
@@ -27,7 +39,7 @@ if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG then
     BoxxyAuras.UIUtils.DrawSlicedBG(bg, "OptionsWindowBG", "backdrop", 0)
     BoxxyAuras.UIUtils.ColorBGSlicedFrame(bg, "backdrop", 1, 1, 1, 0.95)
 else
-    print("|cffFF0000BoxxyAuras Custom Options Error:|r Could not draw background.")
+    -- print("|cffFF0000BoxxyAuras Custom Options Error:|r Could not draw background.")
 end
 
 -- Border
@@ -38,7 +50,7 @@ if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG then
     BoxxyAuras.UIUtils.DrawSlicedBG(border, "EdgedBorder", "border", 0)
     BoxxyAuras.UIUtils.ColorBGSlicedFrame(border, "border", 0.4, 0.4, 0.4, 1)
 else
-    print("|cffFF0000BoxxyAuras Custom Options Error:|r Could not draw border.")
+    -- print("|cffFF0000BoxxyAuras Custom Options Error:|r Could not draw border.")
 end
 
 -- Title
@@ -96,7 +108,7 @@ if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG and BoxxyAuras.UIUtils
     -- Set initial border color (e.g., dark grey)
     BoxxyAuras.UIUtils.ColorBGSlicedFrame(editBox, "border", 0.6, 0.6, 0.6, 1)
 else
-    print("|cffFF0000BoxxyAuras Custom Options Error:|r Could not draw EditBox border (UIUtils missing).")
+    -- print("|cffFF0000BoxxyAuras Custom Options Error:|r Could not draw EditBox border (UIUtils missing).")
 end
 
 scrollFrame:SetScrollChild(editBox) -- Set EditBox as the scroll child directly
@@ -122,14 +134,27 @@ BoxxyAuras.CustomOptions.SaveButton = saveButton
 
 -- Function to load aura names into the EditBox
 function BoxxyAuras.CustomOptions:LoadCustomAuras()
-    if not BoxxyAurasDB or not BoxxyAurasDB.customAuraNames then
-        print("|cffFF0000BoxxyAuras Custom Options:|r Cannot load, DB or customAuraNames not found.")
+    -- <<< Get settings from the CURRENTLY ACTIVE profile >>>
+    local currentSettings = GetCurrentProfileSettings()
+
+    if not currentSettings then
+        -- print("|cffFF0000BoxxyAuras Custom Options:|r Cannot load, could not get profile settings.")
         self.EditBox:SetText("")
         return
     end
 
+    -- <<< Use customAuraNames from the profile settings >>>
+    local profileCustomAuras = currentSettings.customAuraNames
+    if not profileCustomAuras then
+        --  print("|cffFF0000BoxxyAuras Custom Options:|r Cannot load, customAuraNames not found in profile.")
+         self.EditBox:SetText("")
+         return
+    end
+
+
     local names = {}
-    for name, _ in pairs(BoxxyAurasDB.customAuraNames) do
+    -- <<< Iterate over the profile's custom aura names >>>
+    for name, _ in pairs(profileCustomAuras) do
         table.insert(names, name)
     end
     table.sort(names) -- Sort alphabetically for consistent display
@@ -138,8 +163,11 @@ end
 
 -- Function to parse EditBox text and save to DB
 function BoxxyAuras.CustomOptions:SaveCustomAuras()
-    if not BoxxyAurasDB then
-        print("|cffFF0000BoxxyAuras Custom Options:|r Cannot save, DB not found.")
+     -- <<< Get settings from the CURRENTLY ACTIVE profile >>>
+    local currentSettings = GetCurrentProfileSettings()
+
+    if not currentSettings then
+        -- print("|cffFF0000BoxxyAuras Custom Options:|r Cannot save, could not get profile settings.")
         return
     end
     if not self.EditBox then return end
@@ -155,9 +183,11 @@ function BoxxyAuras.CustomOptions:SaveCustomAuras()
         end
     end
 
-    BoxxyAurasDB.customAuraNames = newCustomNames -- Replace the old table
+    -- <<< Save the new list to the ACTIVE profile's settings >>>
+    currentSettings.customAuraNames = newCustomNames
 
     -- Optionally trigger an immediate update of the aura frames
+    -- UpdateAuras will now read the custom list from the active profile automatically
     if BoxxyAuras.UpdateAuras then
         BoxxyAuras.UpdateAuras()
     end
@@ -167,7 +197,7 @@ end
 function BoxxyAuras.CustomOptions:Toggle()
     local frame = self.Frame
     if not frame then
-        print("BoxxyAuras Error: Custom Options Frame not found for Toggle.")
+        -- print("BoxxyAuras Error: Custom Options Frame not found for Toggle.")
         return
     end
 
@@ -184,12 +214,13 @@ function BoxxyAuras.CustomOptions:Toggle()
             frame:SetPoint("TOPLEFT", mainOptions, "TOPRIGHT", offset, 0)
         else
             -- Fallback if main options aren't shown or found: Center with offset
-            BoxxyAuras.DebugLog("CustomPos Decision: Placing FALLBACK (Main Hidden)")
+            -- BoxxyAuras.DebugLog("CustomPos Decision: Placing FALLBACK (Main Hidden)")
             frame:ClearAllPoints()
             frame:SetPoint("CENTER", UIParent, "CENTER", 50, 50) 
         end
         -- <<< Positioning Logic End >>>
         
+        -- <<< LoadCustomAuras now reads from the active profile >>>
         self:LoadCustomAuras() -- Load current names when showing
         frame:Show()
     end

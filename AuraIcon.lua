@@ -1,6 +1,10 @@
-local BOXXYAURAS, BoxxyAuras = ... -- Get addon name and private table
-BoxxyAuras = BoxxyAuras or {}
-BoxxyAuras.AllAuras = {} -- Global cache for aura info
+-- Get the GLOBAL addon table correctly
+local addonNameString, privateTable = ...
+_G.BoxxyAuras = _G.BoxxyAuras or {}
+local BoxxyAuras = _G.BoxxyAuras -- Use the global table
+
+-- Remove redundant AllAuras creation if it's already done in BoxxyAuras.lua
+-- BoxxyAuras.AllAuras = {} 
 
 -- Add this near the top of AuraIcon.lua if it's missing
 local DebuffTypeColor = {
@@ -135,7 +139,7 @@ function AuraIcon.New(parentFrame, index, baseName)
         if button == "RightButton" and instance.auraType == "HELPFUL" then
             -- Check if IN COMBAT first
             if InCombatLockdown() then
-                BoxxyAuras.DebugLogWarning("Cannot cancel auras while in combat.")
+                -- BoxxyAuras.DebugLogWarning("Cannot cancel auras while in combat.") -- Removed
                 return -- Do nothing further if in combat
             end
 
@@ -158,11 +162,11 @@ function AuraIcon.New(parentFrame, index, baseName)
                 if buffIndex then
                     CancelUnitBuff("player", buffIndex)
                 else
-                    BoxxyAuras.DebugLogError(string.format("Could not find current buff index for InstanceID: %s (Name: %s)", 
-                        instance.auraInstanceID, instance.name or 'Unknown'))
+                    -- BoxxyAuras.DebugLogError(string.format("Could not find current buff index for InstanceID: %s (Name: %s)", 
+                        -- instance.auraInstanceID, instance.name or 'Unknown')) -- Removed
                 end
             else
-                 BoxxyAuras.DebugLogError(string.format("Missing auraInstanceID on icon %s, cannot cancel.", frame_self:GetName() or '?'))
+                -- BoxxyAuras.DebugLogError(string.format("Missing auraInstanceID on icon %s, cannot cancel.", frame_self:GetName() or '?')) -- Removed
             end
         end
     end)
@@ -392,37 +396,65 @@ function AuraIcon.Update(self, auraData, index, auraType)
     -- *** ADDED: Re-calculate and apply size based on current settings ***
     local settingsKey = nil
     local parentFrame = self.parentDisplayFrame
-    if parentFrame and parentFrame:GetName() == "BoxxyBuffDisplayFrame" then settingsKey = "buffFrameSettings"
-    elseif parentFrame and parentFrame:GetName() == "BoxxyDebuffDisplayFrame" then settingsKey = "debuffFrameSettings"
-    elseif parentFrame and parentFrame:GetName() == "BoxxyCustomDisplayFrame" then settingsKey = "customFrameSettings"
+    -- Ensure parentFrame exists and has a GetName method before calling it
+    if parentFrame and parentFrame.GetName then 
+        local parentName = parentFrame:GetName()
+        if parentName == "BoxxyBuffDisplayFrame" then settingsKey = "buffFrameSettings"
+        elseif parentName == "BoxxyDebuffDisplayFrame" then settingsKey = "debuffFrameSettings"
+        elseif parentName == "BoxxyCustomDisplayFrame" then settingsKey = "customFrameSettings"
+        end
     end
     
     local iconTextureSize = 24 -- Default
-    if settingsKey and BoxxyAurasDB and BoxxyAurasDB[settingsKey] and BoxxyAurasDB[settingsKey].iconSize then
-        iconTextureSize = BoxxyAurasDB[settingsKey].iconSize
+    -- <<< USE GetCurrentProfileSettings() >>>
+    if settingsKey then
+        local currentSettings = BoxxyAuras:GetCurrentProfileSettings() -- Use the helper
+        if currentSettings and currentSettings[settingsKey] and currentSettings[settingsKey].iconSize then
+             iconTextureSize = currentSettings[settingsKey].iconSize
+        end
     end
+    -- <<< END CHANGE >>>
     
+    -- <<< DEBUG: Log Icon Size Read >>>
+    -- print(string.format("AuraIcon.Update [%s - SpellID %s]: Reading iconTextureSize = %d from profile key '%s'", 
+    --     tostring(self.frame:GetName()), tostring(self.spellId), iconTextureSize, tostring(settingsKey)))
+    -- <<< END DEBUG >>>
+
+    -- Use config values with fallbacks if config isn't loaded yet
     local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 8
     local padding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
     local totalIconHeight = iconTextureSize + textHeight + (padding * 2)
     local totalIconWidth = iconTextureSize + (padding * 2)
     
-    -- Apply the potentially new size
+    -- <<< DEBUG: Log Calculated Dimensions >>>
+    -- print(string.format("AuraIcon.Update [%s]: Calculated totalIconWidth=%.2f, totalIconHeight=%.2f", 
+    --     tostring(self.frame:GetName()), totalIconWidth, totalIconHeight))
+    -- <<< END DEBUG >>>
+
+    -- Apply the potentially new size to the main frame
     self.frame:SetSize(totalIconWidth, totalIconHeight)
     
+    -- <<< DEBUG: Log Actual Size After SetSize >>>
+    local actualW, actualH = self.frame:GetSize()
+    -- print(string.format("AuraIcon.Update [%s]: Actual size after SetSize: W=%.2f, H=%.2f", 
+    --     tostring(self.frame:GetName()), actualW, actualH))
+    -- <<< END DEBUG >>>
+
+    -- Apply the new size to the texture and re-anchor/resize children
     if self.textureWidget then
         self.textureWidget:SetSize(iconTextureSize, iconTextureSize)
-        -- Re-anchor count text BG and duration text based on texture size potentially changing
-        if self.frame.countTextBg then
+        -- Re-anchor count text BG relative to count text (which is anchored to texture)
+        if self.frame.countTextBg and self.frame.countText then
             local bgPadding = 2
             self.frame.countTextBg:ClearAllPoints()
             self.frame.countTextBg:SetPoint("TOPLEFT", self.frame.countText, "TOPLEFT", -bgPadding, bgPadding)
             self.frame.countTextBg:SetPoint("BOTTOMRIGHT", self.frame.countText, "BOTTOMRIGHT", bgPadding-4, -bgPadding) -- Original offset
         end
+        -- Re-anchor duration text relative to the (potentially resized) texture widget
         if self.frame.durationText then
             self.frame.durationText:ClearAllPoints()
-            self.frame.durationText:SetPoint("TOPLEFT", self.textureWidget, "BOTTOMLEFT", -padding, -padding)
-            self.frame.durationText:SetPoint("TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", padding, -padding)
+            self.frame.durationText:SetPoint("TOPLEFT", self.textureWidget, "BOTTOMLEFT", -padding, -padding) 
+            self.frame.durationText:SetPoint("TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", padding, -padding) 
             self.frame.durationText:SetPoint("BOTTOM", self.frame, "BOTTOM", 0, padding)
         end
         -- Also resize overlays if they exist
@@ -431,18 +463,13 @@ function AuraIcon.Update(self, auraData, index, auraType)
     end
     -- *** END ADDED SIZE UPDATE SECTION ***
     
-    if self.textureWidget then self.textureWidget:SetTexture(auraData.icon) end
-    if self.frame.countText then 
-        local stackCount = auraData.applications or 0
-        if stackCount > 1 then
-            self.frame.countText:SetText(stackCount)
-            self.frame.countText:Show()
-            if self.frame.countTextBg then self.frame.countTextBg:Show() end
-        else
-            self.frame.countText:Hide()
-            if self.frame.countTextBg then self.frame.countTextBg:Hide() end
-        end
+    -- Show the frame after updating
+    if not self.frame:IsShown() then
+        self.frame:Show()
     end
+
+    -- Initial duration display update
+    AuraIcon.UpdateDurationDisplay(self, GetTime())
 end
 
 function AuraIcon.UpdateDurationDisplay(self, currentTime)
@@ -712,5 +739,5 @@ function AuraIcon:Resize(newIconSize)
     end
 end
 
--- Expose the AuraIcon class to the addon
+-- *** ADDED: Assign the local AuraIcon table to the GLOBAL BoxxyAuras table ***
 BoxxyAuras.AuraIcon = AuraIcon
