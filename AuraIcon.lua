@@ -19,12 +19,17 @@ function AuraIcon.New(parentFrame, index, baseName)
     -- Create the actual frame object
     local frame = CreateFrame("Frame", baseName .. index, parentFrame, "BackdropTemplate")
     
+    -- Explicitly set frame level to draw above parent's background textures
+    frame:SetFrameLevel(parentFrame:GetFrameLevel() + 5)
+    
     -- Determine frame type to read correct iconSize
     local settingsKey = nil
     if parentFrame == _G["BoxxyBuffDisplayFrame"] then
         settingsKey = "buffFrameSettings"
     elseif parentFrame == _G["BoxxyDebuffDisplayFrame"] then
         settingsKey = "debuffFrameSettings"
+    elseif parentFrame == _G["BoxxyCustomDisplayFrame"] then
+        settingsKey = "customFrameSettings"
     end
     
     -- Read config/saved values INSIDE the function
@@ -130,7 +135,7 @@ function AuraIcon.New(parentFrame, index, baseName)
         if button == "RightButton" and instance.auraType == "HELPFUL" then
             -- Check if IN COMBAT first
             if InCombatLockdown() then
-                print("|cffFFCC00BoxxyAuras:|r Cannot cancel auras while in combat.")
+                BoxxyAuras.DebugLogWarning("Cannot cancel auras while in combat.")
                 return -- Do nothing further if in combat
             end
 
@@ -152,14 +157,12 @@ function AuraIcon.New(parentFrame, index, baseName)
                 
                 if buffIndex then
                     CancelUnitBuff("player", buffIndex)
-                    print(string.format("Attempted to cancel buff index: %d (Name: %s, InstanceID: %s)", 
-                        buffIndex, instance.name or 'Unknown', instance.auraInstanceID))
                 else
-                    print(string.format("Could not find current buff index for InstanceID: %s (Name: %s)", 
+                    BoxxyAuras.DebugLogError(string.format("Could not find current buff index for InstanceID: %s (Name: %s)", 
                         instance.auraInstanceID, instance.name or 'Unknown'))
                 end
             else
-                 print(string.format("Missing auraInstanceID on icon %s, cannot cancel.", frame_self:GetName() or '?'))
+                 BoxxyAuras.DebugLogError(string.format("Missing auraInstanceID on icon %s, cannot cancel.", frame_self:GetName() or '?'))
             end
         end
     end)
@@ -274,7 +277,7 @@ local function FormatDuration(seconds)
 end
 
 -- Methods now operate on 'self' (the instance table) and access frame via self.frame
-function AuraIcon.Update(self, auraData, auraIndex, auraType)
+function AuraIcon.Update(self, auraData, index, auraType)
     if not auraData then
         if self.frame and self.frame:IsShown() then -- Only hide and clear OnUpdate if currently shown
             self.frame:Hide()
@@ -283,8 +286,9 @@ function AuraIcon.Update(self, auraData, auraIndex, auraType)
         return
     end
     
-    -- Check if the frame was hidden before this update
+    -- Store initial state
     local wasHidden = not self.frame:IsShown()
+    local oldAuraInstanceID = self.auraInstanceID -- Store the ID before update
     
     -- Reset state for update (initial assumption)
     self.isExpired = false 
@@ -295,7 +299,6 @@ function AuraIcon.Update(self, auraData, auraIndex, auraType)
         self.lastIsExpiredState = true -- Sync state tracking
         if self.textureWidget then self.textureWidget:SetVertexColor(1, 0.5, 0.5) end -- Red tint
         self.frame.durationText:SetText("0s") -- Show 0s duration
-        self.frame.durationText:Show()
         self.frame:SetScript("OnUpdate", nil) -- Ensure no countdown update
     end
     
@@ -314,7 +317,7 @@ function AuraIcon.Update(self, auraData, auraIndex, auraType)
     -- Store data on the instance
     self.duration = auraData.duration
     self.expirationTime = auraData.expirationTime
-    self.auraIndex = auraIndex
+    self.auraIndex = index
     self.auraType = auraType
     self.name = auraData.name
     -- Only update spellId and originalType if the new data has them
@@ -377,10 +380,68 @@ function AuraIcon.Update(self, auraData, auraIndex, auraType)
         end
     end -- End of check for not forceExpired
 
-    -- If the frame was hidden and is now being updated (implicitly shown by parent logic),
-    -- play the 'new aura' animation.
-    if wasHidden and self.newAuraAnimGroup then
-        self.newAuraAnimGroup:Play()
+    -- REMOVED Animation logic - It will now be triggered explicitly by the caller when a new icon is created.
+    --[[ -- REMOVED
+    -- If the frame was hidden OR the aura instance ID is new for this icon, \
+    -- play the 'new aura' animation.\
+    if (wasHidden or (auraData.auraInstanceID ~= oldAuraInstanceID)) and self.newAuraAnimGroup then\
+        self.newAuraAnimGroup:Play()\
+    end\
+    --]]
+
+    -- *** ADDED: Re-calculate and apply size based on current settings ***
+    local settingsKey = nil
+    local parentFrame = self.parentDisplayFrame
+    if parentFrame and parentFrame:GetName() == "BoxxyBuffDisplayFrame" then settingsKey = "buffFrameSettings"
+    elseif parentFrame and parentFrame:GetName() == "BoxxyDebuffDisplayFrame" then settingsKey = "debuffFrameSettings"
+    elseif parentFrame and parentFrame:GetName() == "BoxxyCustomDisplayFrame" then settingsKey = "customFrameSettings"
+    end
+    
+    local iconTextureSize = 24 -- Default
+    if settingsKey and BoxxyAurasDB and BoxxyAurasDB[settingsKey] and BoxxyAurasDB[settingsKey].iconSize then
+        iconTextureSize = BoxxyAurasDB[settingsKey].iconSize
+    end
+    
+    local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 8
+    local padding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
+    local totalIconHeight = iconTextureSize + textHeight + (padding * 2)
+    local totalIconWidth = iconTextureSize + (padding * 2)
+    
+    -- Apply the potentially new size
+    self.frame:SetSize(totalIconWidth, totalIconHeight)
+    
+    if self.textureWidget then
+        self.textureWidget:SetSize(iconTextureSize, iconTextureSize)
+        -- Re-anchor count text BG and duration text based on texture size potentially changing
+        if self.frame.countTextBg then
+            local bgPadding = 2
+            self.frame.countTextBg:ClearAllPoints()
+            self.frame.countTextBg:SetPoint("TOPLEFT", self.frame.countText, "TOPLEFT", -bgPadding, bgPadding)
+            self.frame.countTextBg:SetPoint("BOTTOMRIGHT", self.frame.countText, "BOTTOMRIGHT", bgPadding-4, -bgPadding) -- Original offset
+        end
+        if self.frame.durationText then
+            self.frame.durationText:ClearAllPoints()
+            self.frame.durationText:SetPoint("TOPLEFT", self.textureWidget, "BOTTOMLEFT", -padding, -padding)
+            self.frame.durationText:SetPoint("TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", padding, -padding)
+            self.frame.durationText:SetPoint("BOTTOM", self.frame, "BOTTOM", 0, padding)
+        end
+        -- Also resize overlays if they exist
+        if self.frame.wipeOverlay then self.frame.wipeOverlay:SetSize(iconTextureSize, iconTextureSize) end
+        if self.frame.shakeOverlay then self.frame.shakeOverlay:SetSize(iconTextureSize, iconTextureSize) end
+    end
+    -- *** END ADDED SIZE UPDATE SECTION ***
+    
+    if self.textureWidget then self.textureWidget:SetTexture(auraData.icon) end
+    if self.frame.countText then 
+        local stackCount = auraData.applications or 0
+        if stackCount > 1 then
+            self.frame.countText:SetText(stackCount)
+            self.frame.countText:Show()
+            if self.frame.countTextBg then self.frame.countTextBg:Show() end
+        else
+            self.frame.countText:Hide()
+            if self.frame.countTextBg then self.frame.countTextBg:Hide() end
+        end
     end
 end
 
@@ -390,10 +451,6 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
 
     -- Debug Check (Should pass now if self.frame exists)
     if type(self.frame) ~= "table" or not self.frame.GetObjectType or self.frame:GetObjectType() ~= "Frame" then
-        print(string.format("|cffff0000Warning: UpdateDurationDisplay found unexpected self.frame! Type: %s, GetObjectType: %s|r",
-            type(self.frame), 
-            (type(self.frame) == "table" and self.frame.GetObjectType and self.frame:GetObjectType()) or "N/A"
-        ))
         return
     end
 
@@ -493,39 +550,77 @@ function AuraIcon.RefreshTooltipContent(self)
     if isPermanent or remaining > 0 then -- If permanent or still active
         local tooltipSet = false
 
-        -- 1. Try SetUnitAura first (most specific)
-        if self.auraInstanceID and self.auraType then
-            local currentIndex = nil
-            local filterToUse = self.originalAuraType or self.auraType
-            for i = 1, 40 do
-                local currentAuraData = C_UnitAuras.GetAuraDataByIndex("player", i, filterToUse)
-                if currentAuraData and currentAuraData.auraInstanceID == self.auraInstanceID then
-                    currentIndex = i
-                    break
+        -- NEW: Check if this is a custom aura first
+        if self.auraType == "CUSTOM" then
+            -- For custom, prioritize showing cached lines
+            local cachedData = self.spellId and BoxxyAuras.AllAuras[self.spellId]
+            if cachedData and cachedData.lines then
+                for i, lineInfo in ipairs(cachedData.lines) do
+                    if lineInfo.left then
+                        if i == 1 then
+                            GameTooltip:AddDoubleLine(lineInfo.left, lineInfo.right or nil, nil, nil, nil, nil, nil, nil)
+                        else
+                            GameTooltip:AddDoubleLine(lineInfo.left, lineInfo.right or nil, 1, 1, 1, 1, 1, 1)
+                        end
+                    end
                 end
+                tooltipSet = true -- Mark tooltip as set from cache
             end
-            if currentIndex then
-                GameTooltip:SetUnitAura("player", currentIndex, filterToUse)
-                tooltipSet = true -- Tooltip set by SetUnitAura
+            -- If cache miss for custom, we let it fall through to SetSpellByID below
+        end
+
+        -- If not custom OR if custom cache failed, try SetUnitAura (for non-custom)
+        if not tooltipSet and self.auraType ~= "CUSTOM" then
+            if self.auraInstanceID and self.auraType then
+                local currentIndex = nil
+                local filterToUse = self.originalAuraType or self.auraType
+                for i = 1, 40 do
+                    local currentAuraData = C_UnitAuras.GetAuraDataByIndex("player", i, filterToUse)
+                    if currentAuraData and currentAuraData.auraInstanceID == self.auraInstanceID then
+                        currentIndex = i
+                        break
+                    end
+                end
+                if currentIndex then
+                    GameTooltip:SetUnitAura("player", currentIndex, filterToUse)
+                    tooltipSet = true -- Tooltip set by SetUnitAura
+                end
             end
         end
 
-        -- 2. If SetUnitAura wasn't tried or failed, try SetSpellByID
+        -- If still not set, try SetSpellByID (Applies to non-custom fail, or custom cache fail)
         if not tooltipSet and self.spellId then
             GameTooltip:SetSpellByID(self.spellId)
             tooltipSet = true -- Assume success if spell ID exists
         end
 
-        -- 3. Final fallback to just the name
+        -- Final fallback to just the name
         if not tooltipSet then
             GameTooltip:AddLine(self.name or "Unknown Aura")
         end
 
     elseif not isPermanent and remaining <= 0 then -- If expired but held
-        -- For expired, SetUnitAura/SetSpellByID might show incorrect duration.
-        -- Prioritize name, then add expired tag.
-        GameTooltip:AddLine(self.name or "Unknown Expired Aura", 1, 1, 1, true)
-        GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5, true)
+        -- For expired, try to show cached lines first, then add expired tag.
+        local cachedData = self.spellId and BoxxyAuras.AllAuras[self.spellId]
+        if cachedData and cachedData.lines then
+            for i, lineInfo in ipairs(cachedData.lines) do
+                if lineInfo.left then
+                    if i == 1 then 
+                        -- First line: Use nil colors to let embedded spell name color work
+                        GameTooltip:AddDoubleLine(lineInfo.left, lineInfo.right or nil, nil, nil, nil, nil, nil, nil)
+                    else
+                        -- Subsequent lines: Explicitly set color to white to prevent bleed
+                        GameTooltip:AddDoubleLine(lineInfo.left, lineInfo.right or nil, 1, 1, 1, 1, 1, 1)
+                    end
+                end
+            end
+            -- Add the expired tag after cached lines
+            GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5, true)
+        else
+            -- Fallback if cache miss (should be rare now)
+            GameTooltip:AddLine(self.name or "Unknown Expired Aura", 1, 1, 1, true)
+            GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5, true)
+        end
 
     else -- Should not happen
         GameTooltip:AddLine(self.name or "Unknown Aura State")

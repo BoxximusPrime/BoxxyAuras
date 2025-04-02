@@ -107,12 +107,28 @@ local lockFramesCheck = CreateFrame("CheckButton", "BoxxyAurasLockFramesCheckBut
 lockFramesCheck:SetPoint("TOPLEFT", lastInGroup, "TOPLEFT", groupPadding + 5, groupVSpacing)
 lockFramesCheck:SetText("Lock Frames")
 lockFramesCheck:SetScript("OnClick", function(self)
-    if not BoxxyAurasDB then return end
+    -- BoxxyAuras.DebugLog("LockFramesCheck OnClick Handler Fired!") -- Keep commented for now
+
+    -- 1. Read current saved state
     local currentSavedState = BoxxyAurasDB.lockFrames or false
+
+    -- 2. Calculate the new state by inverting
     local newState = not currentSavedState
+
+    -- 3. Save the new state
     BoxxyAurasDB.lockFrames = newState
-    BoxxyAuras.Options:ApplyLockState(newState)
+
+    -- 4. Apply the new state
+    if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.ApplyLockState then
+        -- BoxxyAuras.DebugLog("LockFramesCheck: Applying new state (newState=" .. tostring(newState) .. ").") -- Keep commented
+        BoxxyAuras.FrameHandler.ApplyLockState(newState)
+    else
+        BoxxyAuras.DebugLogError("LockFramesCheck OnClick: FrameHandler.ApplyLockState not found!")
+    end
+
+    -- 5. Explicitly set the checkbox visual state
     self:SetChecked(newState)
+
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end)
 BoxxyAuras.Options.LockFramesCheck = lockFramesCheck
@@ -125,10 +141,26 @@ hideBlizzardCheck:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", 0, groupVSpacin
 hideBlizzardCheck:SetText("Hide Default Blizzard Auras")
 hideBlizzardCheck:SetScript("OnClick", function(self)
     if not BoxxyAurasDB then return end
-    local newState = not (BoxxyAurasDB.hideBlizzardAuras or false)
+
+    -- 1. Read current saved state
+    local currentSavedState = BoxxyAurasDB.hideBlizzardAuras or false -- Default to false if nil
+
+    -- 2. Calculate the new state by inverting
+    local newState = not currentSavedState
+
+    -- 3. Save the new state
     BoxxyAurasDB.hideBlizzardAuras = newState
-    BoxxyAuras.Options:ApplyLockState(newState)
+
+    -- 4. Apply the new state
+    if BoxxyAuras.ApplyBlizzardAuraVisibility then
+        BoxxyAuras.ApplyBlizzardAuraVisibility(newState)
+    else
+        BoxxyAuras.DebugLogError("HideBlizzardCheck OnClick: BoxxyAuras.ApplyBlizzardAuraVisibility not found!")
+    end
+
+    -- 5. Explicitly set the checkbox visual state
     self:SetChecked(newState)
+
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end)
 BoxxyAuras.Options.HideBlizzardCheck = hideBlizzardCheck
@@ -188,9 +220,9 @@ buffAlignRightCheck:SetPoint("LEFT", buffAlignCenterCheck, "RIGHT", checkSpacing
 buffAlignRightCheck:SetText("Right")
 BoxxyAuras.Options.BuffAlignRightCheck = buffAlignRightCheck
 -- Function to handle mutual exclusivity and saving for BUFFS (Defined later)
-buffAlignLeftCheck:SetScript("OnClick", function(self) HandleBuffAlignmentClick(self, "LEFT") end)
-buffAlignCenterCheck:SetScript("OnClick", function(self) HandleBuffAlignmentClick(self, "CENTER") end)
-buffAlignRightCheck:SetScript("OnClick", function(self) HandleBuffAlignmentClick(self, "RIGHT") end)
+buffAlignLeftCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleBuffAlignmentClick(self, "LEFT") end)
+buffAlignCenterCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleBuffAlignmentClick(self, "CENTER") end)
+buffAlignRightCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleBuffAlignmentClick(self, "RIGHT") end)
 lastInGroup = buffAlignLeftCheck -- Anchor next section below the row
 groupVSpacing = internalElementVSpacing -- << Standardized spacing
 
@@ -256,9 +288,9 @@ debuffAlignRightCheck:SetPoint("LEFT", debuffAlignCenterCheck, "RIGHT", checkSpa
 debuffAlignRightCheck:SetText("Right")
 BoxxyAuras.Options.DebuffAlignRightCheck = debuffAlignRightCheck
 -- Function to handle mutual exclusivity and saving for DEBUFFS (Defined later)
-debuffAlignLeftCheck:SetScript("OnClick", function(self) HandleDebuffAlignmentClick(self, "LEFT") end)
-debuffAlignCenterCheck:SetScript("OnClick", function(self) HandleDebuffAlignmentClick(self, "CENTER") end)
-debuffAlignRightCheck:SetScript("OnClick", function(self) HandleDebuffAlignmentClick(self, "RIGHT") end)
+debuffAlignLeftCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleDebuffAlignmentClick(self, "LEFT") end)
+debuffAlignCenterCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleDebuffAlignmentClick(self, "CENTER") end)
+debuffAlignRightCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleDebuffAlignmentClick(self, "RIGHT") end)
 lastInGroup = debuffAlignLeftCheck
 groupVSpacing = internalElementVSpacing -- << Standardized spacing
 
@@ -324,9 +356,9 @@ customAlignRightCheck:SetPoint("LEFT", customAlignCenterCheck, "RIGHT", checkSpa
 customAlignRightCheck:SetText("Right")
 BoxxyAuras.Options.CustomAlignRightCheck = customAlignRightCheck
 -- Function to handle mutual exclusivity and saving for CUSTOM (Defined later)
-customAlignLeftCheck:SetScript("OnClick", function(self) HandleCustomAlignmentClick(self, "LEFT") end)
-customAlignCenterCheck:SetScript("OnClick", function(self) HandleCustomAlignmentClick(self, "CENTER") end)
-customAlignRightCheck:SetScript("OnClick", function(self) HandleCustomAlignmentClick(self, "RIGHT") end)
+customAlignLeftCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleCustomAlignmentClick(self, "LEFT") end)
+customAlignCenterCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleCustomAlignmentClick(self, "CENTER") end)
+customAlignRightCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleCustomAlignmentClick(self, "RIGHT") end)
 lastInGroup = customAlignLeftCheck
 groupVSpacing = internalElementVSpacing -- << Standardized spacing
 
@@ -447,38 +479,40 @@ end
 --[[------------------------------------------------------------
 -- Functions to Load/Save/Toggle
 --------------------------------------------------------------]]
--- Define alignment handlers (local functions)
-local function HandleBuffAlignmentClick(clickedButton, alignmentValue)
+-- Define alignment handlers as methods of BoxxyAuras.Options
+function BoxxyAuras.Options:HandleBuffAlignmentClick(clickedButton, alignmentValue)
     if not BoxxyAurasDB then return end
     if not BoxxyAurasDB.buffFrameSettings then BoxxyAurasDB.buffFrameSettings = {} end
     clickedButton:SetChecked(true)
-    if clickedButton ~= buffAlignLeftCheck then buffAlignLeftCheck:SetChecked(false) end
-    if clickedButton ~= buffAlignCenterCheck then buffAlignCenterCheck:SetChecked(false) end
-    if clickedButton ~= buffAlignRightCheck then buffAlignRightCheck:SetChecked(false) end
+    if clickedButton ~= self.BuffAlignLeftCheck then self.BuffAlignLeftCheck:SetChecked(false) end
+    if clickedButton ~= self.BuffAlignCenterCheck then self.BuffAlignCenterCheck:SetChecked(false) end
+    if clickedButton ~= self.BuffAlignRightCheck then self.BuffAlignRightCheck:SetChecked(false) end
     BoxxyAurasDB.buffFrameSettings.buffTextAlign = alignmentValue
-    BoxxyAuras.Options:ApplyTextAlign()
+    self:ApplyTextAlign() -- Call method using self
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end
-local function HandleDebuffAlignmentClick(clickedButton, alignmentValue)
+
+function BoxxyAuras.Options:HandleDebuffAlignmentClick(clickedButton, alignmentValue)
     if not BoxxyAurasDB then return end
     if not BoxxyAurasDB.debuffFrameSettings then BoxxyAurasDB.debuffFrameSettings = {} end
     clickedButton:SetChecked(true)
-    if clickedButton ~= debuffAlignLeftCheck then debuffAlignLeftCheck:SetChecked(false) end
-    if clickedButton ~= debuffAlignCenterCheck then debuffAlignCenterCheck:SetChecked(false) end
-    if clickedButton ~= debuffAlignRightCheck then debuffAlignRightCheck:SetChecked(false) end
+    if clickedButton ~= self.DebuffAlignLeftCheck then self.DebuffAlignLeftCheck:SetChecked(false) end
+    if clickedButton ~= self.DebuffAlignCenterCheck then self.DebuffAlignCenterCheck:SetChecked(false) end
+    if clickedButton ~= self.DebuffAlignRightCheck then self.DebuffAlignRightCheck:SetChecked(false) end
     BoxxyAurasDB.debuffFrameSettings.debuffTextAlign = alignmentValue
-    BoxxyAuras.Options:ApplyTextAlign()
+    self:ApplyTextAlign() -- Call method using self
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end
-local function HandleCustomAlignmentClick(clickedButton, alignmentValue)
+
+function BoxxyAuras.Options:HandleCustomAlignmentClick(clickedButton, alignmentValue)
     if not BoxxyAurasDB then return end
     if not BoxxyAurasDB.customFrameSettings then BoxxyAurasDB.customFrameSettings = {} end
     clickedButton:SetChecked(true)
-    if clickedButton ~= customAlignLeftCheck then customAlignLeftCheck:SetChecked(false) end
-    if clickedButton ~= customAlignCenterCheck then customAlignCenterCheck:SetChecked(false) end
-    if clickedButton ~= customAlignRightCheck then customAlignRightCheck:SetChecked(false) end
+    if clickedButton ~= self.CustomAlignLeftCheck then self.CustomAlignLeftCheck:SetChecked(false) end
+    if clickedButton ~= self.CustomAlignCenterCheck then self.CustomAlignCenterCheck:SetChecked(false) end
+    if clickedButton ~= self.CustomAlignRightCheck then self.CustomAlignRightCheck:SetChecked(false) end
     BoxxyAurasDB.customFrameSettings.customTextAlign = alignmentValue
-    BoxxyAuras.Options:ApplyTextAlign()
+    self:ApplyTextAlign() -- Call method using self
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end
 
@@ -672,56 +706,87 @@ function BoxxyAuras.Options:ApplyScale(scaleValue)
 end
 
 function BoxxyAuras.Options:ApplyTextAlign()
-    if BoxxyAuras.TriggerLayout then
-        BoxxyAuras.TriggerLayout("Buff")
-        BoxxyAuras.TriggerLayout("Debuff")
-        BoxxyAuras.TriggerLayout("Custom")
+    if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.TriggerLayout then
+        BoxxyAuras.FrameHandler.TriggerLayout("Buff")
+        BoxxyAuras.FrameHandler.TriggerLayout("Debuff")
+        BoxxyAuras.FrameHandler.TriggerLayout("Custom")
     else
-        print("BoxxyAuras Error: TriggerLayout function not found in ApplyTextAlign.")
+        BoxxyAuras.DebugLogError("ApplyTextAlign Error: FrameHandler.TriggerLayout function not found.")
     end
 end
 
 function BoxxyAuras.Options:ApplyIconSizeChange(frameType)
-    print(string.format("Applying Icon Size change for %s", frameType))
-    local iconList, settingsKey, targetFrame = nil, nil, nil
+    -- print(string.format("Applying Icon Size change for %s", frameType)) -- Keep commented
+    local settingsKey = nil
     local newSize = 24
 
-    if frameType == "Buff" then
-        iconList, settingsKey, targetFrame = BoxxyAuras.buffIcons, "buffFrameSettings", _G["BoxxyBuffDisplayFrame"]
-    elseif frameType == "Debuff" then
-        iconList, settingsKey, targetFrame = BoxxyAuras.debuffIcons, "debuffFrameSettings", _G["BoxxyDebuffDisplayFrame"]
-    elseif frameType == "Custom" then
-        iconList, settingsKey, targetFrame = BoxxyAuras.customIcons, "customFrameSettings", _G["BoxxyCustomDisplayFrame"]
+    if frameType == "Buff" then settingsKey = "buffFrameSettings"
+    elseif frameType == "Debuff" then settingsKey = "debuffFrameSettings"
+    elseif frameType == "Custom" then settingsKey = "customFrameSettings"
     else
-        print("ApplyIconSizeChange Error: Invalid frameType")
+        BoxxyAuras.DebugLogError("ApplyIconSizeChange Error: Invalid frameType")
         return
     end
 
-    if not targetFrame then print("ApplyIconSizeChange Error: Target frame not found."); return end
-
-    local currentNumIconsWide = 6
-    if BoxxyAurasDB and BoxxyAurasDB[settingsKey] then
-        newSize = BoxxyAurasDB[settingsKey].iconSize or 24
-        currentNumIconsWide = BoxxyAurasDB[settingsKey].numIconsWide or 6
+    if not BoxxyAurasDB or not BoxxyAurasDB[settingsKey] then
+        BoxxyAuras.DebugLogError(string.format("ApplyIconSizeChange Error: Settings missing for %s", settingsKey))
+        return
     end
+    newSize = BoxxyAurasDB[settingsKey].iconSize or 24
 
-    if BoxxyAuras.CalculateFrameWidth then
-        local newWidth = BoxxyAuras.CalculateFrameWidth(currentNumIconsWide, newSize)
-        targetFrame:SetWidth(newWidth)
-    else
-        print("ApplyIconSizeChange Warning: CalculateFrameWidth function not found.")
-    end
+    -- Ensure FrameHandler and needed functions exist
+    if BoxxyAuras.FrameHandler and
+       BoxxyAuras.FrameHandler.CalculateFrameWidth and
+       BoxxyAuras.FrameHandler.ApplySettings and
+       BoxxyAuras.FrameHandler.LayoutAuras then
 
-    if iconList and iconList[1] and iconList[1].Resize then
-        for _, auraIcon in ipairs(iconList) do
-            if auraIcon.frame then auraIcon:Resize(newSize) end
+        local currentNumIconsWide = BoxxyAurasDB[settingsKey].numIconsWide or 6
+
+        -- Recalculate width using the new size and CURRENT numIconsWide
+        local newWidth = BoxxyAuras.FrameHandler.CalculateFrameWidth(currentNumIconsWide, newSize)
+
+        -- Update width in DB (iconSize is already updated by slider's OnMouseUp)
+        BoxxyAurasDB[settingsKey].width = newWidth
+
+        -- Apply settings immediately to the frame using the refactored function
+        BoxxyAuras.FrameHandler.ApplySettings(frameType)
+
+        -- Re-layout after settings change
+        BoxxyAuras.FrameHandler.LayoutAuras(frameType)
+
+        -- *** ADDED: Force update on existing visible icons ***
+        -- DEBUG: Log before starting update loop
+        local debugSize = (BoxxyAurasDB and BoxxyAurasDB[settingsKey] and BoxxyAurasDB[settingsKey].iconSize) or '???'
+        BoxxyAuras.DebugLog(string.format("ApplyIconSizeChange: Updating icons for %s. Expected size: %s", frameType, tostring(debugSize)))
+
+        local trackedAuras = BoxxyAuras.GetTrackedAuras and BoxxyAuras.GetTrackedAuras(frameType) or {}
+        local visualIcons = nil
+        local filter = "HELPFUL" -- Default
+        if frameType == "Buff" then 
+            visualIcons = BoxxyAuras.buffIcons 
+            filter = "HELPFUL"
+        elseif frameType == "Debuff" then 
+            visualIcons = BoxxyAuras.debuffIcons 
+            filter = "HARMFUL"
+        elseif frameType == "Custom" then 
+            visualIcons = BoxxyAuras.customIcons 
+            filter = "CUSTOM" 
         end
-        if BoxxyAuras.TriggerLayout then BoxxyAuras.TriggerLayout(frameType)
-        else print("BoxxyAuras Error: TriggerLayout not found after resizing icons.") end
+        
+        if visualIcons and trackedAuras then
+            for i, auraData in ipairs(trackedAuras) do
+                local auraIcon = visualIcons[i]
+                if auraIcon and auraIcon.frame and auraIcon.frame:IsShown() and auraIcon.Update then
+                    -- Recall Update with the existing data, current index, and correct filter
+                    -- This will force it to re-apply dimensions based on the *new* iconSize from DB
+                    auraIcon:Update(auraData, i, filter)
+                end
+            end
+        end
+        -- *** END ADDED SECTION ***
+
     else
-         print(string.format("BoxxyAuras Warning: Could not resize icons for %s. List or Resize method missing?", frameType))
-         if BoxxyAuras.InitializeAuras then BoxxyAuras.InitializeAuras()
-         else print("BoxxyAuras Error: InitializeAuras not found as fallback.") end
+        BoxxyAuras.DebugLogError("ApplyIconSizeChange Error: Required FrameHandler functions not found.")
     end
 end
 

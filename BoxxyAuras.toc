@@ -10,6 +10,7 @@ Art/Fonts.xml
 Art/UIElements.xml
 
 # Load Lua files in correct dependency order
+FrameHandler.lua
 UIUtils.lua
 BoxxyAuras.lua
 AuraIcon.lua

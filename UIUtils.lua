@@ -292,3 +292,130 @@ function BoxxyAuras_SetupGeneralButton(button)
         print(string.format("|cffFF0000BoxxyAuras Error:|r UIUtils functions not found when setting up button '%s' via BoxxyAuras_SetupGeneralButton.", button:GetName() or "(unknown)"))
     end
 end 
+
+-- Tooltip Scraping Function (Using GetUnitAura, finds index via auraInstanceID)
+function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter) 
+    -- Check if already scraped (key exists in AllAuras) - Use spellId as key
+    if spellId and BoxxyAuras.AllAuras[spellId] then return end 
+    -- Validate inputs 
+    if not spellId or not targetAuraInstanceID or not filter then 
+        print(string.format("DEBUG Scrape Error: Invalid arguments. spellId: %s, instanceId: %s, filter: %s",
+            tostring(spellId), tostring(targetAuraInstanceID), tostring(filter)))
+        return 
+    end
+
+    -- Find the CURRENT index for this specific aura instance
+    local currentAuraIndex = nil
+    for i = 1, 40 do -- Check up to 40 auras (standard limit)
+        local auraData = C_UnitAuras.GetAuraDataByIndex("player", i, filter)
+        if auraData then
+            -- Compare instance IDs
+            if auraData.auraInstanceID == targetAuraInstanceID then
+                currentAuraIndex = i
+                break
+            end
+        end
+    end
+
+    local tipData = C_TooltipInfo.GetUnitAura("player", currentAuraIndex, filter)
+
+    if not tipData then 
+        -- This failure is now less likely, but could still happen in rare cases
+        print(string.format("DEBUG Scrape Error: GetUnitAura failed unexpectedly for SpellID: %s (Found Index: %s, Filter: %s) via InstanceID %s", 
+            tostring(spellId), tostring(currentAuraIndex), filter, tostring(targetAuraInstanceID)))
+        return
+    end
+
+    -- Get tooltip lines
+    local tooltipLines = {}
+    local spellNameFromTip = nil -- Variable to store name from tooltip
+
+    -- Use a flag to track if we have processed the first line
+    local firstLineProcessed = false
+
+    if tipData.lines then
+        for i = 1, #tipData.lines do
+            local lineData = tipData.lines[i]
+            if lineData and lineData.leftText then
+                local lineText = lineData.leftText -- Keep original left text separate
+                if lineData.rightText then 
+                    lineText = lineText .. " " .. lineData.rightText 
+                end
+                
+                -- Store the first line's left text as the potential name
+                if not firstLineProcessed and lineData.leftText then
+                    spellNameFromTip = lineData.leftText
+                    firstLineProcessed = true -- Mark as processed here, even if skipped below
+                end
+                
+                -- *** ADDED: Duration Check ***
+                local isDurationLine = false
+                local lowerLineText = string.lower(lineText)
+                if string.find(lowerLineText, "second") or 
+                   string.find(lowerLineText, "minute") or 
+                   string.find(lowerLineText, "hour") then
+                    isDurationLine = true
+                end
+                
+                -- Store left and right parts separately ONLY if NOT a duration line
+                if not isDurationLine then
+                    local lineInfo = { left = lineData.leftText }
+                    if lineData.rightText then
+                        lineInfo.right = lineData.rightText
+                    end
+                    table.insert(tooltipLines, lineInfo)
+                end
+            end
+        end
+    end
+
+    -- Store the collected lines in the global cache using spellId as the key
+    if spellId and tooltipLines and #tooltipLines > 0 then
+        BoxxyAuras.AllAuras[spellId] = { 
+            name = spellNameFromTip or "Unknown", -- Store the name from the first line
+            lines = tooltipLines -- Store the table of line info tables
+        }
+    elseif spellId then
+        -- Even if no lines after filtering, store something to prevent re-scraping
+        BoxxyAuras.AllAuras[spellId] = { 
+            name = spellNameFromTip or "Unknown", 
+            lines = {}
+        }
+    end
+
+    -- Store SOMETHING minimal in the cache to prevent re-scraping, but don't process lines
+    if spellId then
+        local existingCache = BoxxyAuras.AllAuras[spellId]
+        -- Only add minimal cache if it doesn't exist at all
+        if not existingCache then
+            print("Didn't end up cached, THIS SHOULD NOT HAPPEN")
+        end
+    end
+end 
+
+-- Function to check if mouse cursor is within a frame's bounds
+function BoxxyAuras.IsMouseWithinFrame(frame)
+    if not frame or not frame:IsVisible() then return false end
+    local mouseX, mouseY = GetCursorPosition()
+    local scale = frame:GetEffectiveScale()
+    local left, bottom, width, height = frame:GetBoundsRect()
+
+    if not left then return false end -- Frame might not be fully positioned yet
+
+    mouseX = mouseX / scale
+    mouseY = mouseY / scale
+
+    return mouseX >= left and mouseX <= left + width and mouseY >= bottom and mouseY <= bottom + height
+end
+
+function BoxxyAuras.DebugLog(message)
+    print(string.format("DEBUG: %s", message))
+end
+
+function BoxxyAuras.DebugLogError(message)
+    print(string.format("|cffFF0000ERROR:|r %s", message))
+end
+
+function BoxxyAuras.DebugLogWarning(message)
+    print(string.format("|cffFFFF00WARNING:|r %s", message))
+end
