@@ -201,7 +201,7 @@ groupVSpacing = internalElementVSpacing -- Start spacing within the sub-group
 -- Buff Text Alignment Title
 local buffAlignLabel = buffSubGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
 buffAlignLabel:SetPoint("TOPLEFT", lastInGroup, "TOPLEFT", groupPadding + 5, groupVSpacing)
-buffAlignLabel:SetText("Buff Text Alignment")
+buffAlignLabel:SetText("|cffb9ac9dBuff Text Alignment|r")
 BoxxyAuras.Options.BuffAlignLabel = buffAlignLabel
 lastInGroup = buffAlignLabel
 groupVSpacing = -8 -- Keep smaller space after header
@@ -269,7 +269,7 @@ groupVSpacing = internalElementVSpacing -- Start spacing within the sub-group
 -- Debuff Text Alignment Title
 local debuffAlignLabel = debuffSubGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
 debuffAlignLabel:SetPoint("TOPLEFT", lastInGroup, "TOPLEFT", groupPadding + 5, groupVSpacing)
-debuffAlignLabel:SetText("Debuff Text Alignment")
+debuffAlignLabel:SetText("|cffb9ac9dDebuff Text Alignment|r")
 BoxxyAuras.Options.DebuffAlignLabel = debuffAlignLabel
 lastInGroup = debuffAlignLabel
 groupVSpacing = -8 -- Keep smaller space after header
@@ -337,7 +337,7 @@ groupVSpacing = internalElementVSpacing -- Start spacing within the sub-group
 -- Custom Text Alignment Title
 local customAlignLabel = customSubGroup:CreateFontString(nil, "ARTWORK", "BAURASFont_Header")
 customAlignLabel:SetPoint("TOPLEFT", lastInGroup, "TOPLEFT", groupPadding + 5, groupVSpacing)
-customAlignLabel:SetText("Custom Text Alignment")
+customAlignLabel:SetText("|cffb9ac9dCustom Text Alignment|r")
 BoxxyAuras.Options.CustomAlignLabel = customAlignLabel
 lastInGroup = customAlignLabel
 groupVSpacing = -8 -- Keep smaller space after header

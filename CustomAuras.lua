@@ -184,34 +184,13 @@ function BoxxyAuras.CustomOptions:Toggle()
         local mainOptions = BoxxyAuras.Options and BoxxyAuras.Options.Frame
         if mainOptions and mainOptions:IsShown() then
             frame:ClearAllPoints()
-            local mainLeft = mainOptions:GetLeft()
-            local mainRight = mainOptions:GetRight()
-            local mainTop = mainOptions:GetTop()
-            local customWidth = frame:GetWidth() * frame:GetEffectiveScale() -- Use effective width
-            local mainWidth = mainOptions:GetWidth() * mainOptions:GetEffectiveScale()
-            local screenWidth = GetScreenWidth()
             local offset = 10 -- Pixels between frames
             
-            -- Try positioning to the right
-            local rightX = mainRight + offset
-            if (rightX + customWidth) < screenWidth then
-                print("Positioning CustomOptions to the RIGHT")
-                frame:SetPoint("TOPLEFT", mainOptions, "TOPRIGHT", offset, 0)
-            else
-                -- Try positioning to the left
-                local leftX = mainLeft - customWidth - offset
-                if leftX > 0 then
-                    print("Positioning CustomOptions to the LEFT")
-                    frame:SetPoint("TOPRIGHT", mainOptions, "TOPLEFT", -offset, 0)
-                else
-                    -- Fallback: Position relative to main top-left (ensure on screen)
-                     print("Positioning CustomOptions FALLBACK")
-                     frame:SetPoint("TOPLEFT", mainOptions, "TOPLEFT", 20, -20)
-                 end
-            end
+            -- Always position to the right
+            frame:SetPoint("TOPLEFT", mainOptions, "TOPRIGHT", offset, 0)
         else
             -- Fallback if main options aren't shown or found: Center with offset
-            print("Positioning CustomOptions FALLBACK (Main Hidden)")
+            BoxxyAuras.DebugLog("CustomPos Decision: Placing FALLBACK (Main Hidden)")
             frame:ClearAllPoints()
             frame:SetPoint("CENTER", UIParent, "CENTER", 50, 50) 
         end

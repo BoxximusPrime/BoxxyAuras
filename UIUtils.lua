@@ -228,7 +228,6 @@ function BoxxyAuras_SetupGeneralButton(button)
         -- <<< ADDED LUA HOVER SCRIPTS >>>
         button:SetScript("OnEnter", function(self)
             if self:IsEnabled() then
-                 print(string.format("DEBUG Lua OnEnter: Applying hover colors to %s", self:GetName() or "N/A"))
                  BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.4, 0.4, 0.4, 1) 
                  BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.2, 0.2, 0.2, 1)
                  if self.Text then 
@@ -239,7 +238,6 @@ function BoxxyAuras_SetupGeneralButton(button)
 
         button:SetScript("OnLeave", function(self)
             if self:IsEnabled() then
-                 print(string.format("DEBUG Lua OnLeave: Applying normal colors to %s", self:GetName() or "N/A"))
                  BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.3, 0.3, 0.3, 1) 
                  BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.1, 0.1, 0.1, 1)
                  if self.Text then
@@ -257,7 +255,6 @@ function BoxxyAuras_SetupGeneralButton(button)
                     self.Text:SetPoint("CENTER", self, "CENTER", 1, -1) -- Adjust offset as needed
                 end
                 -- Optional: Set "pressed" colors (e.g., slightly darker than hover)
-                print(string.format("DEBUG Lua OnMouseDown: Applying pressed colors to %s", self:GetName() or "N/A"))
                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.35, 0.35, 0.35, 1) 
                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.15, 0.15, 0.15, 1) 
             end
@@ -274,13 +271,11 @@ function BoxxyAuras_SetupGeneralButton(button)
                 -- Re-apply hover or normal colors based on mouse position
                 if self:IsMouseOver() then 
                     -- Still hovering: Apply hover colors
-                    print(string.format("DEBUG Lua OnMouseUp (Hover): Applying hover colors to %s", self:GetName() or "N/A"))
                     BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.4, 0.4, 0.4, 1) 
                     BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.2, 0.2, 0.2, 1)
                     if self.Text then self.Text:SetTextColor(1, 1, 1, 1) end -- Ensure text is hover color
                 else
                     -- Mouse left while pressed: Apply normal colors
-                    print(string.format("DEBUG Lua OnMouseUp (Left): Applying normal colors to %s", self:GetName() or "N/A"))
                     BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.3, 0.3, 0.3, 1) 
                     BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.1, 0.1, 0.1, 1)
                     if self.Text then self.Text:SetTextColor(0.75, 0.75, 0.75, 1) end -- Ensure text is normal color
