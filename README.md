@@ -5,16 +5,16 @@ A World of Warcraft addon providing highly customizable display frames for playe
 ## Features
 
 *   **Separate Buff & Debuff Frames:** Displays buffs and debuffs in independent frames.
+*   **Custom Buff Bar** That lets you select specific auras to show on the custom bar instead.
 *   **Draggable & Resizable:** Easily move and resize the buff and debuff frames to fit your UI layout.
 *   **Configurable Columns:** Set the number of icons wide each frame should display via resize handles.
 *   **Hold on Hover:** Auras remain visible (don't fade) while your mouse cursor is over the corresponding frame, making tooltips easier to read.
 *   **Customizable Appearance:**
-    *   Set individual icon sizes for buffs and debuffs.
+    *   Set individual icon sizes for buffs and debuffs, and a custom bar with select auras.
     *   Choose Left, Center, or Right alignment for icons within each frame.
     *   Configure internal icon padding and spacing between icons (via config table in code).
 *   **Lockable Frames:** Option to lock frames in place, hiding the background, border, title, and resize handles for a cleaner look.
 *   **Smooth Animations:** Subtle animations play when auras are applied.
-*   **Right-Click Cancellation:** Right-click your own buffs (when out of combat) to cancel them directly from the frame.
 *   **Options Panel:** Configure settings easily using the `/ba` or `/boxxyauras` slash commands.
 
 ## Usage
@@ -33,4 +33,3 @@ A World of Warcraft addon providing highly customizable display frames for playe
 ## Known Issues / Future Plans (Optional)
 
 *   Right-click cancellation does not work while in combat due to Blizzard API restrictions.
-*   (Add any other known quirks or planned features here)
