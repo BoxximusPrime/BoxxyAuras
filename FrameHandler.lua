@@ -75,29 +75,16 @@ local function CreateResizeHandlesForFrame(frame, frameName)
 
         handle:SetScript("OnMouseDown", function(self, button)
             if button == "LeftButton" then
-                -- Uses frame state vars defined above (draggingHandle, dragStartX/Y, etc.)
                 frame.draggingHandle = pointName
-                frame.dragStartX, frame.dragStartY = GetCursorPosition()
+                frame.dragStartX, frame.dragStartY = GetCursorPosition() -- Raw mouse coords
                 frame.frameStartW, frame.frameStartH = frame:GetSize()
-                frame.frameStartX = frame:GetLeft()
-                frame.frameStartY = frame:GetTop()
+                frame.frameStartX = frame:GetLeft()     -- Starting Left X
+                frame.frameStartY = frame:GetBottom()   -- Store Starting Bottom Y
                 self.bg:Show()
                 
-                -- *** ADDED DEBUG LOG for numIconsWide at Drag Start ***
-                local dbKey = nil
-                local frameType = nil
-                local currentBuffFrame = BoxxyAuras.FrameHandler.GetBuffFrame()
-                local currentDebuffFrame = BoxxyAuras.FrameHandler.GetDebuffFrame()
-                local currentCustomFrame = BoxxyAuras.FrameHandler.GetCustomFrame()
-                
-                if frame == currentBuffFrame then dbKey = "buffFrameSettings" frameType = "Buff"
-                elseif frame == currentDebuffFrame then dbKey = "debuffFrameSettings" frameType = "Debuff"
-                elseif frame == currentCustomFrame then dbKey = "customFrameSettings" frameType = "Custom"
-                end
-                
-                local startNumIconsWide = "???" -- Default if not found
-                if dbKey and BoxxyAurasDB and BoxxyAurasDB[dbKey] and BoxxyAurasDB[dbKey].numIconsWide then
-                    startNumIconsWide = BoxxyAurasDB[dbKey].numIconsWide
+                if pointName == "Left" then
+                    -- Store original right edge for left drag calculations
+                    frame.dragOriginalRightX = frame.frameStartX + frame.frameStartW
                 end
             end
         end)
@@ -105,51 +92,47 @@ local function CreateResizeHandlesForFrame(frame, frameName)
             if button == "LeftButton" and frame.draggingHandle == self.pointName then
                 local dbKey = nil
                 local frameType = nil
-                -- Uses local frame variables via Getters
                 local currentBuffFrame = BoxxyAuras.FrameHandler.GetBuffFrame()
                 local currentDebuffFrame = BoxxyAuras.FrameHandler.GetDebuffFrame()
                 local currentCustomFrame = BoxxyAuras.FrameHandler.GetCustomFrame()
                 
                 if frame == currentBuffFrame then 
-                    dbKey = "buffFrameSettings"
-                    frameType = "Buff"
+                    dbKey = "buffFrameSettings"; frameType = "Buff"
                 elseif frame == currentDebuffFrame then 
-                    dbKey = "debuffFrameSettings"
-                    frameType = "Debuff"
+                    dbKey = "debuffFrameSettings"; frameType = "Debuff"
                 elseif frame == currentCustomFrame then 
-                    dbKey = "customFrameSettings"
-                    frameType = "Custom"
+                    dbKey = "customFrameSettings"; frameType = "Custom"
                 end
-                -- Requires BoxxyAurasDB for settings access
-
-                -- *** ADDED DEBUG LOG for numIconsWide at Drag End ***
-                local endNumIconsWide = "???" -- Default if not found
-                if dbKey and BoxxyAurasDB and BoxxyAurasDB[dbKey] and BoxxyAurasDB[dbKey].numIconsWide then
-                    endNumIconsWide = BoxxyAurasDB[dbKey].numIconsWide
-                end
-
-                -- Calls LayoutAuras (needs to be defined in this file)
-                if frameType and LayoutAuras then
-                    LayoutAuras(frameType)
-                else
-                    -- BoxxyAuras.DebugLogWarning("CreateResizeHandlesForFrame OnMouseUp: Could not determine frameType or LayoutAuras not found.")
-                end
+                
+                local originalRightEdgeX = frame.dragOriginalRightX -- Get stored value
+                local originalBottomY = frame.frameStartY -- Get stored Bottom Y
+                local isLeftHandle = (frame.draggingHandle == "Left")
 
                 frame.draggingHandle = nil
                 self.bg:Hide()
 
-                -- Apply changes to DB
-                if dbKey and BoxxyAurasDB then
+                if frameType then
                     local currentProfileSettings = BoxxyAuras:GetCurrentProfileSettings()
                     if currentProfileSettings and currentProfileSettings[dbKey] then
-                        local newWidth = frame:GetWidth()
-                        local newHeight = frame:GetHeight()
-                        local newNumIconsWide = endNumIconsWide
+                        local frameSettings = currentProfileSettings[dbKey]
+                        local finalNumIconsWide = frameSettings.numIconsWide
+                        local iconSize = frameSettings.iconSize or 24
 
-                        currentProfileSettings[dbKey].width = newWidth
-                        currentProfileSettings[dbKey].height = newHeight
-                        currentProfileSettings[dbKey].numIconsWide = newNumIconsWide
+                        if isLeftHandle and originalRightEdgeX then
+                            -- Calculate and SAVE the correct final X and Y for left handle
+                            local finalWidth = BoxxyAuras.FrameHandler.CalculateFrameWidth(finalNumIconsWide, iconSize)
+                            local finalX = originalRightEdgeX - finalWidth
+                            frameSettings.x = finalX -- Update saved X coordinate
+                            frameSettings.y = originalBottomY -- Update saved Y coordinate (Bottom)
+                        end
+                        -- For right handle, the original saved X/Y (frameStartX/Y) are already correct for BOTTOMLEFT anchor
+
+                        BoxxyAuras.FrameHandler.ApplySettings(frameType)
+                        LayoutAuras(frameType)
+                        BoxxyAuras.FrameHandler.UpdateEdgeHandleDimensions(frame, frame:GetWidth(), frame:GetHeight())
                     end
+                else
+                    -- BoxxyAuras.DebugLogWarning("CreateResizeHandlesForFrame OnMouseUp: Could not determine frameType.")
                 end
             end
         end)
@@ -166,6 +149,7 @@ local function UpdateEdgeHandleDimensions(frame, frameW, frameH)
         handle:SetSize(handleSize, frameH * 0.8)
     end
 end
+BoxxyAuras.FrameHandler.UpdateEdgeHandleDimensions = UpdateEdgeHandleDimensions -- Assign to handler table
 
 -- Moved function: Layout Auras
 LayoutAuras = function(frameType) -- Changed argument to frameType string
@@ -553,9 +537,9 @@ local function ApplySettings(frameType) -- Changed primary arg to frameType
         return
     end
 
-    if not targetFrame then 
+    if not targetFrame then
         -- BoxxyAuras.DebugLogError(string.format("ApplySettings Error: Target frame not found for type '%s'.", frameType))
-        return 
+        return
     end
 
     -- <<< Use GetCurrentProfileSettings helper for safety and consistency >>>
@@ -575,97 +559,107 @@ local function ApplySettings(frameType) -- Changed primary arg to frameType
     -- <<< Read target scale >>>
     local targetScale = currentSettings.optionsScale or 1.0
 
-    -- <<< Log values read from profile >>>
-    local savedWidth = settings.width
+    -- <<< Log values read from profile (numIconsWide is key now) >>>
     local savedNumIconsWide = settings.numIconsWide
+    local savedIconSize = settings.iconSize
     -- BoxxyAuras.DebugLog(string.format(
-    --     "ApplySettings [%s]: READ Profile '%s' -> W=%s, numIconsWide=%s", 
-    --     frameType, 
-    --     BoxxyAurasDB and BoxxyAurasDB.activeProfile or "Unknown", 
-    --     tostring(savedWidth),
-    --     tostring(savedNumIconsWide)
+    --     "ApplySettings [%s]: READ Profile '%s' -> numIconsWide=%s, iconSize=%s",
+    --     frameType,
+    --     BoxxyAurasDB and BoxxyAurasDB.activeProfile or "Unknown",
+    --     tostring(savedNumIconsWide),
+    --     tostring(savedIconSize)
     -- ))
     -- <<< END Log >>>
 
-    -- <<< Step 1: Calculate Target Size >>>
+    -- <<< Step 1: Calculate Target Size BASED ON SETTINGS >>>
     local framePadding = (BoxxyAuras.Config and BoxxyAuras.Config.FramePadding) or 12
-    local iconTextureSize = settings.iconSize or 24
+    local iconTextureSize = settings.iconSize or 24 -- Read from settings
     local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 8
-    local internalPadding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6 
+    local internalPadding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
     local iconH = iconTextureSize + textHeight + (internalPadding * 2)
-    local calculatedMinHeight = framePadding + iconH + framePadding 
-    local targetHeight = settings.height or calculatedMinHeight
+    local calculatedMinHeight = framePadding + iconH + framePadding -- Minimum height for one row
 
     local numIconsWideForCalc = settings.numIconsWide or 6 -- Use profile value or default
-    numIconsWideForCalc = math.max(1, numIconsWideForCalc) 
-    local calculatedWidth = BoxxyAuras.FrameHandler.CalculateFrameWidth(numIconsWideForCalc, iconTextureSize)
-    local targetWidth = settings.width or calculatedWidth -- Prioritize saved width
-    
+    numIconsWideForCalc = math.max(1, numIconsWideForCalc)
+    -- <<< ALWAYS calculate width now >>>
+    local targetWidth = BoxxyAuras.FrameHandler.CalculateFrameWidth(numIconsWideForCalc, iconTextureSize)
+
     -- <<< Log final targetWidth >>>
-    -- BoxxyAuras.DebugLog(string.format("ApplySettings [%s]: Decided targetWidth=%.2f (Saved=%s, Calc=%.2f)", 
-    --     frameType, targetWidth, tostring(savedWidth), calculatedWidth)) -- Use tostring for savedWidth
+    -- BoxxyAuras.DebugLog(string.format("ApplySettings [%s]: Calculated targetWidth=%.2f based on numIcons=%d, iconSize=%d",
+    --     frameType, targetWidth, numIconsWideForCalc, iconTextureSize))
     -- <<< END Log >>>
 
-    -- Ensure targetWidth and targetHeight are numbers before SetSize
-    if type(targetWidth) ~= "number" then 
-        -- BoxxyAuras.DebugLogWarning(string.format("ApplySettings [%s]: Invalid targetWidth type (%s), using calculated width %.2f", frameType, type(targetWidth), calculatedWidth))
-        targetWidth = calculatedWidth
+    -- Ensure targetWidth is a number before SetSize
+    if type(targetWidth) ~= "number" then
+        -- BoxxyAuras.DebugLogWarning(string.format("ApplySettings [%s]: Invalid calculated targetWidth type (%s), using fallback 100", frameType, type(targetWidth)))
+        targetWidth = 100 -- Fallback width
     end
-    if type(targetHeight) ~= "number" then
-         -- BoxxyAuras.DebugLogWarning(string.format("ApplySettings [%s]: Invalid targetHeight type (%s), using calculated min height %.2f", frameType, type(targetHeight), calculatedMinHeight))
-         targetHeight = calculatedMinHeight
-    end
+    -- Height will be adjusted by LayoutAuras, use calculatedMinHeight for SetSize
+    local targetHeight = calculatedMinHeight
 
-    -- <<< Step 4: Clear Anchors >>>
-    targetFrame:ClearAllPoints() 
-    -- <<< SetUserPlaced moved into the timer >>>
+
+    -- <<< Step 4: Clear Anchors >>> -- MOVED BEFORE POSITIONING LOGIC
+    targetFrame:ClearAllPoints()
+    -- SetUserPlaced is handled within the positioning block now
 
     -- <<< Step 5: Read saved position and anchor >>>
     local savedX = settings.x or 0
     local savedY = settings.y or 0
-    local savedAnchor = settings.anchor or "CENTER" -- Default to CENTER if not specified
+    local savedAnchor = settings.anchor or "BOTTOMLEFT" -- <<< Default anchor is BOTTOMLEFT >>>
 
+    -- <<< Get Scale to adjust coordinates >>>
     local targetScale = currentSettings.optionsScale or 1.0
-    -- Rely on upvalues for targetWidth/targetHeight calculated earlier
+    -- <<< Adjust saved coordinates by scale >>>
+    local adjustedX = savedX
+    local adjustedY = savedY
 
     -- Ensure frame still exists
     -- NOTE: This is where the frame is actually set to the correct position and size
-    if targetFrame and targetFrame:IsVisible() then
+    if targetFrame then -- Removed IsVisible check, apply even if hidden? Or keep it? Let's keep it for now.
         -- <<< TEMPORARILY UNLOCK FRAME FOR POSITIONING >>>
         -- Store the intended lock state *before* unlocking
         local intendedLockState = false -- Default to unlocked
         if BoxxyAurasDB then
-            local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
-            intendedLockState = currentSettings.lockFrames or false
+            local currentProfileSettingsCheck = BoxxyAuras:GetCurrentProfileSettings() -- Re-get just in case
+            if currentProfileSettingsCheck then intendedLockState = currentProfileSettingsCheck.lockFrames or false end
         end
 
         -- Temporarily ensure the frame is movable/unlocked for setting position/size
-        if targetFrame.isLocked then
+        local wasLocked = targetFrame.isLocked
+        if wasLocked then
             targetFrame:SetMovable(true)
-            targetFrame:EnableMouse(true) -- Make sure mouse interaction is enabled if needed for positioning logic (though SetUserPlaced(false) implies programmatic)
+            targetFrame:EnableMouse(true)
         end
 
-        -- <<< Order: UserPlaced -> Point -> Scale -> Size >>>
-        targetFrame:SetUserPlaced(false)
-        targetFrame:ClearAllPoints()
-
-        -- <<< Set Point based on savedAnchor >>>
-        if savedAnchor == "CENTER" then
-            -- Use CENTER for default/reset positions
-            targetFrame:SetPoint("CENTER", UIParent, "CENTER", savedX, savedY)
-        else -- Assume BOTTOMLEFT for user-dragged positions
-            targetFrame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", savedX, savedY)
-        end
-
-        -- <<< Set Scale >>>
+        -- <<< Order: Scale -> Size -> UserPlaced -> Point >>>
         targetFrame:SetScale(targetScale)
         targetFrame:SetSize(targetWidth, targetHeight)
+        targetFrame:SetUserPlaced(false) -- Indicate programmatic positioning
+        targetFrame:ClearAllPoints() -- Clear again just to be safe
+
+        -- <<< Set Point based on savedAnchor using ADJUSTED coordinates >>>
+        if savedAnchor == "CENTER" then
+            targetFrame:SetPoint("CENTER", UIParent, "CENTER", adjustedX, adjustedY)
+        else -- Assume BOTTOMLEFT for user-dragged positions and default
+            targetFrame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", adjustedX, adjustedY)
+        end
 
         -- <<< RE-APPLY INTENDED LOCK STATE AFTER POSITIONING >>>
-        -- Use the stored intended lock state
-        BoxxyAuras.FrameHandler.ApplyLockState(intendedLockState)
+        -- Use the stored intended lock state (or re-apply if it wasn't locked)
+        targetFrame:SetMovable(not intendedLockState)
+        targetFrame:EnableMouse(not intendedLockState)
+        -- The full ApplyLockState might handle visuals better if needed later
+        -- BoxxyAuras.FrameHandler.ApplyLockState(intendedLockState) -- Maybe too heavy here? Let's try direct set first.
+        -- If direct set causes issues with handles/visuals, revert to calling ApplyLockState(intendedLockState)
+        if targetFrame.titleLabel then targetFrame.titleLabel:EnableMouse(not intendedLockState) end -- Update title label mouse state too
+        if targetFrame.handles then -- Update handle mouse state
+            for _, handle in pairs(targetFrame.handles) do handle:EnableMouse(not intendedLockState) end
+        end
+        targetFrame.isLocked = intendedLockState -- Make sure internal state matches
+
+
     end
-end 
+end
 BoxxyAuras.FrameHandler.ApplySettings = ApplySettings -- Assign to handler table if needed externally
 
 -- Moved function: Trigger Layout Helper
@@ -784,20 +778,14 @@ function BoxxyAuras.FrameHandler.InitializeFrames()
         -- BoxxyAuras.DebugLogError("InitializeFrames Warning: One or more main display frames not found in BoxxyAuras.Frames! Attempting fallback creation. Check load order.")
         -- Attempt to create them *now* as a fallback, but this indicates an earlier load order issue.
         if not buffDisplayFrame then
-            -- <<< DEBUG: Fallback Creation >>>
-            -- print("BoxxyAuras DEBUG: InitializeFrames - Fallback CREATING Buff Frame!")
-            -- <<< END DEBUG >>>
             buffDisplayFrame = CreateFrame("Frame", "BoxxyBuffDisplayFrame", UIParent)
             BoxxyAuras.Frames.Buff = buffDisplayFrame
-            SetupDisplayFrame(buffDisplayFrame, "BuffFrame") -- Setup visuals ONLY if newly created
-            CreateResizeHandlesForFrame(buffDisplayFrame, "BuffFrame") -- Create handles ONLY if newly created
-            buffDisplayFrame:SetScript("OnUpdate", OnDisplayFrameResizeUpdate) -- Attach update script ONLY if newly created
-            C_Timer.NewTicker(0.1, function() PollFrameHoverState(buffDisplayFrame, "Buff Frame") end) -- Start timer ONLY if newly created
+            SetupDisplayFrame(buffDisplayFrame, "BuffFrame")
+            CreateResizeHandlesForFrame(buffDisplayFrame, "BuffFrame")
+            buffDisplayFrame:SetScript("OnUpdate", OnDisplayFrameResizeUpdate)
+            C_Timer.NewTicker(0.1, function() PollFrameHoverState(buffDisplayFrame, "Buff Frame") end)
         end
         if not debuffDisplayFrame then
-             -- <<< DEBUG: Fallback Creation >>>
-             -- print("BoxxyAuras DEBUG: InitializeFrames - Fallback CREATING Debuff Frame!")
-             -- <<< END DEBUG >>>
             debuffDisplayFrame = CreateFrame("Frame", "BoxxyDebuffDisplayFrame", UIParent)
             BoxxyAuras.Frames.Debuff = debuffDisplayFrame
             SetupDisplayFrame(debuffDisplayFrame, "DebuffFrame")
@@ -806,9 +794,6 @@ function BoxxyAuras.FrameHandler.InitializeFrames()
             C_Timer.NewTicker(0.1, function() PollFrameHoverState(debuffDisplayFrame, "Debuff Frame") end)
         end
         if not customDisplayFrame then
-             -- <<< DEBUG: Fallback Creation >>>
-             -- print("BoxxyAuras DEBUG: InitializeFrames - Fallback CREATING Custom Frame!")
-             -- <<< END DEBUG >>>
             customDisplayFrame = CreateFrame("Frame", "BoxxyCustomDisplayFrame", UIParent)
             BoxxyAuras.Frames.Custom = customDisplayFrame
             SetupDisplayFrame(customDisplayFrame, "CustomFrame")
@@ -820,31 +805,36 @@ function BoxxyAuras.FrameHandler.InitializeFrames()
     -- <<< END MODIFICATION & SAFETY CHECK >>>
 
     -- Ensure DB is initialized (Assume BoxxyAuras main file ensures this)
-    if BoxxyAurasDB == nil then 
+    if BoxxyAurasDB == nil then
         -- BoxxyAuras.DebugLogError("InitializeFrames: BoxxyAurasDB is nil!")
         BoxxyAurasDB = {} -- Initialize locally? Risky.
     end
 
-    -- Define defaults (Copied from BoxxyAuras.lua PLAYER_LOGIN)
-    local DEFAULT_ICONS_WIDE = 6 -- Define local default
-    local defaultPadding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
-    local defaultIconSize_ForCalc = 24
-    local defaultTextHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 8
-    local defaultIconH = defaultIconSize_ForCalc + defaultTextHeight + (defaultPadding * 2)
-    local defaultFramePadding = (BoxxyAuras.Config and BoxxyAuras.Config.FramePadding) or 6
-    local defaultMinHeight = defaultFramePadding + defaultIconH + defaultFramePadding
+    -- Define defaults (No longer includes width/height, uses numIconsWide)
+    local DEFAULT_ICONS_WIDE = 6
+    local DEFAULT_ICON_SIZE = 24
 
     -- Use GetDefaultProfileSettings from BoxxyAuras core file
     local defaultSettings = {}
     if BoxxyAuras.GetDefaultProfileSettings then
         defaultSettings = BoxxyAuras:GetDefaultProfileSettings()
+        -- Ensure defaults have the core keys we need now
+        if not defaultSettings.buffFrameSettings then defaultSettings.buffFrameSettings = {} end
+        if not defaultSettings.debuffFrameSettings then defaultSettings.debuffFrameSettings = {} end
+        if not defaultSettings.customFrameSettings then defaultSettings.customFrameSettings = {} end
+        defaultSettings.buffFrameSettings.numIconsWide = defaultSettings.buffFrameSettings.numIconsWide or DEFAULT_ICONS_WIDE
+        defaultSettings.buffFrameSettings.iconSize = defaultSettings.buffFrameSettings.iconSize or DEFAULT_ICON_SIZE
+        defaultSettings.debuffFrameSettings.numIconsWide = defaultSettings.debuffFrameSettings.numIconsWide or DEFAULT_ICONS_WIDE
+        defaultSettings.debuffFrameSettings.iconSize = defaultSettings.debuffFrameSettings.iconSize or DEFAULT_ICON_SIZE
+        defaultSettings.customFrameSettings.numIconsWide = defaultSettings.customFrameSettings.numIconsWide or DEFAULT_ICONS_WIDE
+        defaultSettings.customFrameSettings.iconSize = defaultSettings.customFrameSettings.iconSize or DEFAULT_ICON_SIZE
     else
         -- BoxxyAuras.DebugLogError("InitializeFrames Error: BoxxyAuras.GetDefaultProfileSettings not found!")
         -- Use hardcoded local defaults as fallback
         defaultSettings = {
-             buffFrameSettings = { x = 0, y = -150, anchor = "TOP", width = 300, height = defaultMinHeight, numIconsWide = DEFAULT_ICONS_WIDE, buffTextAlign = "CENTER", iconSize = 24 },
-             debuffFrameSettings = { x = 0, y = -150 - defaultMinHeight - 30, anchor = "TOP", width = 300, height = defaultMinHeight, numIconsWide = DEFAULT_ICONS_WIDE, debuffTextAlign = "CENTER", iconSize = 24 },
-             customFrameSettings = { x = 0, y = -150 - defaultMinHeight - 60, anchor = "TOP", width = 300, height = defaultMinHeight, numIconsWide = DEFAULT_ICONS_WIDE, customTextAlign = "CENTER", iconSize = 24 }
+             buffFrameSettings = { x = 0, y = -150, anchor = "TOP", numIconsWide = DEFAULT_ICONS_WIDE, buffTextAlign = "CENTER", iconSize = DEFAULT_ICON_SIZE },
+             debuffFrameSettings = { x = 0, y = -200, anchor = "TOP", numIconsWide = DEFAULT_ICONS_WIDE, debuffTextAlign = "CENTER", iconSize = DEFAULT_ICON_SIZE },
+             customFrameSettings = { x = 0, y = -250, anchor = "TOP", numIconsWide = DEFAULT_ICONS_WIDE, customTextAlign = "CENTER", iconSize = DEFAULT_ICON_SIZE }
         }
     end
 
@@ -852,57 +842,62 @@ function BoxxyAuras.FrameHandler.InitializeFrames()
     local defaultDebuffFrameSettings = defaultSettings.debuffFrameSettings or {}
     local defaultCustomFrameSettings = defaultSettings.customFrameSettings or {}
 
-    -- Helper for initializing settings (now local to this function)
-    local function InitializeSettings(dbKey, defaults)
-        if type(defaults) ~= "table" then
-            -- BoxxyAuras.DebugLogError(string.format("InitializeSettings Error: Default settings for %s are not a table!", dbKey))
-            if BoxxyAurasDB then BoxxyAurasDB[dbKey] = {} end
-            return BoxxyAurasDB and BoxxyAurasDB[dbKey] or {}
+    -- Helper for initializing settings (Checks for numIconsWide/iconSize)
+    local function InitializeSettings(settingsKey, defaults)
+        local currentProfileSettings = BoxxyAuras:GetCurrentProfileSettings()
+        if not currentProfileSettings then
+            -- BoxxyAuras.DebugLogError("InitializeSettings Error: Could not get current profile settings for " .. settingsKey)
+            return CopyTable(defaults) -- Return a copy of defaults if profile is missing
         end
-        if not BoxxyAurasDB then 
-            -- BoxxyAuras.DebugLogError("InitializeSettings Error: BoxxyAurasDB is nil when initializing "..dbKey)
-            return CopyTable(defaults)
-        end
-        if BoxxyAurasDB[dbKey] == nil then
-            BoxxyAurasDB[dbKey] = CopyTable(defaults) -- Assumes CopyTable is available globally or in BoxxyAuras
+
+        if type(currentProfileSettings[settingsKey]) ~= "table" then
+            -- BoxxyAuras.DebugLogWarning(string.format("InitializeSettings Warning: Existing settings for %s is not a table! Using defaults.", settingsKey))
+            currentProfileSettings[settingsKey] = CopyTable(defaults)
         else
-            -- Ensure nested tables exist before attempting to merge
-            if type(BoxxyAurasDB[dbKey]) ~= "table" then
-                -- BoxxyAuras.DebugLogError(string.format("InitializeSettings Warning: Existing DB entry for %s is not a table! Overwriting with defaults.", dbKey))
-                BoxxyAurasDB[dbKey] = CopyTable(defaults)
-            else
-                for key, defaultValue in pairs(defaults) do
-                    if BoxxyAurasDB[dbKey][key] == nil then
-                        BoxxyAurasDB[dbKey][key] = defaultValue
-                    end
+            -- Ensure core keys exist
+            if currentProfileSettings[settingsKey].numIconsWide == nil then
+                 currentProfileSettings[settingsKey].numIconsWide = defaults.numIconsWide or DEFAULT_ICONS_WIDE
+            end
+            if currentProfileSettings[settingsKey].iconSize == nil then
+                 currentProfileSettings[settingsKey].iconSize = defaults.iconSize or DEFAULT_ICON_SIZE
+            end
+            -- Merge other defaults if missing
+            for key, defaultValue in pairs(defaults) do
+                if currentProfileSettings[settingsKey][key] == nil then
+                    currentProfileSettings[settingsKey][key] = defaultValue
                 end
             end
         end
-        return BoxxyAurasDB[dbKey]
+        return currentProfileSettings[settingsKey]
     end
+
 
     local buffSettings = InitializeSettings("buffFrameSettings", defaultBuffFrameSettings)
     local debuffSettings = InitializeSettings("debuffFrameSettings", defaultDebuffFrameSettings)
     local customSettings = InitializeSettings("customFrameSettings", defaultCustomFrameSettings)
 
-    -- Apply Settings (Calls local ApplySettings function)
+    -- Apply Settings (Will calculate initial width based on saved/default numIconsWide & iconSize)
     ApplySettings("Buff")
     ApplySettings("Debuff")
     ApplySettings("Custom")
 
-    -- Update handle dimensions after initial size is set by ApplySettings
-    -- Calls local UpdateEdgeHandleDimensions
+    -- Initial Layout (To set correct height based on content/rows)
+    LayoutAuras("Buff")
+    LayoutAuras("Debuff")
+    LayoutAuras("Custom")
+
+    -- Update handle dimensions AFTER initial size and layout are done
     UpdateEdgeHandleDimensions(buffDisplayFrame, buffDisplayFrame:GetWidth(), buffDisplayFrame:GetHeight())
     UpdateEdgeHandleDimensions(debuffDisplayFrame, debuffDisplayFrame:GetWidth(), debuffDisplayFrame:GetHeight())
     UpdateEdgeHandleDimensions(customDisplayFrame, customDisplayFrame:GetWidth(), customDisplayFrame:GetHeight())
 
     -- Apply initial scale AND lock state
     if BoxxyAurasDB then
-        -- Use GetCurrentProfileSettings to ensure we read from the *active* profile
-        local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
-        local initialLock = currentSettings.lockFrames or false
+        local finalCurrentSettings = BoxxyAuras:GetCurrentProfileSettings() -- Read one last time
+        local initialLock = false
+        if finalCurrentSettings then initialLock = finalCurrentSettings.lockFrames or false end
 
-        -- Apply lock state using the FrameHandler function
+        -- Apply lock state using the FrameHandler function (Handles visuals)
         BoxxyAuras.FrameHandler.ApplyLockState(initialLock)
     end
 end
@@ -918,7 +913,6 @@ function BoxxyAuras.FrameHandler.GetCustomFrame() return customDisplayFrame end
 function OnDisplayFrameResizeUpdate(frame, elapsed)
     if not frame then return end -- Added safety check
     if not frame.draggingHandle then return end
-    --if not IsMouseButtonDown("LeftButton") then return end
 
     -- Determine settings key
     local settingsKey = nil
@@ -927,53 +921,48 @@ function OnDisplayFrameResizeUpdate(frame, elapsed)
     elseif frame == BoxxyAuras.FrameHandler.GetCustomFrame() then settingsKey = "customFrameSettings"
     else return end
 
-    -- <<< MODIFIED: Get settings from the CURRENT ACTIVE PROFILE >>>
     local currentProfileSettings = BoxxyAuras:GetCurrentProfileSettings()
-    if not currentProfileSettings or not currentProfileSettings[settingsKey] then 
-        -- print("ResizeUpdate Error: Could not get profile settings for key: " .. tostring(settingsKey))
-        return -- Need profile settings to proceed
+    if not currentProfileSettings or not currentProfileSettings[settingsKey] then
+        return
     end
     local frameSettings = currentProfileSettings[settingsKey]
-    -- <<< END MODIFICATION >>>
 
-    local fixedFrameH = frame:GetHeight()
-
-    -- Config access (Use fallbacks if necessary)
+    -- Config access
     local framePadding = (BoxxyAuras.Config and BoxxyAuras.Config.FramePadding) or 12
     local iconSpacing = (BoxxyAuras.Config and BoxxyAuras.Config.IconSpacing) or 0
     local internalPadding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
-    -- <<< MODIFIED: Read iconSize from frameSettings >>>
-    local iconTextureSize = frameSettings.iconSize or 24 -- Read from profile settings table
-    -- <<< END MODIFICATION >>>
+    local iconTextureSize = frameSettings.iconSize or 24
 
     local iconW = iconTextureSize + (internalPadding * 2)
-    local minFrameW_Dynamic = (framePadding * 2) + iconW -- Minimum width for 1 icon
+    local minFrameW_Dynamic = (framePadding * 2) + iconW
 
-    -- Dragging calculations
     local mouseX, _ = GetCursorPosition()
     local scale = frame:GetEffectiveScale()
-    
-    local potentialW = 0
-    local finalX = frame.frameStartX -- Default for right handle drag
-    local widthToApply = 0 -- Width that will actually be set
     local draggingHandle = frame.draggingHandle
+    local potentialW = 0
 
     if draggingHandle == "Right" then
         local deltaX = mouseX - (frame.dragStartX or 0)
         local deltaW_local = deltaX / scale
         potentialW = frame.frameStartW + deltaW_local
         potentialW = math.max(minFrameW_Dynamic, potentialW)
+
     elseif draggingHandle == "Left" then
+        local originalRightEdgeX = frame.dragOriginalRightX
+        if not originalRightEdgeX then return end -- Safety
+        
+        -- Calculate potential new left edge based on mouse X relative to screen left
+        -- Need current mouse X relative to original mouse down X
         local deltaX = mouseX - (frame.dragStartX or 0)
-        local deltaW_local = deltaX / scale
-        potentialW = frame.frameStartW - deltaW_local -- Width if left edge followed mouse
+        local currentLeftX = frame.frameStartX + (deltaX / scale) -- Predicted new left edge
+        
+        potentialW = originalRightEdgeX - currentLeftX
         potentialW = math.max(minFrameW_Dynamic, potentialW)
-        -- finalX calculation still happens AFTER snappedW is determined below
     else
         return
     end
 
-    -- Icon fitting calculation (Uses potentialW determined above)
+    -- Icon fitting calculation (potentialNumIconsFit)
     local minNumIconsWide = 1
     local numIconsCheck = minNumIconsWide
     while true do
@@ -983,41 +972,71 @@ function OnDisplayFrameResizeUpdate(frame, elapsed)
         else
             break
         end
-        if numIconsCheck > 100 then break end -- Safety break
+        if numIconsCheck > 100 then break end
     end
     local potentialNumIconsFit = numIconsCheck
 
-    -- <<< MODIFIED: Update numIconsWide in the PROFILE settings >>>
-    local currentNumIconsWide = frameSettings.numIconsWide or 6 -- Read from profile settings, default 6
-    local newNumIconsWide = potentialNumIconsFit -- Use the calculated fit directly
+    -- Update numIconsWide in settings if changed
+    local currentNumIconsWide = frameSettings.numIconsWide or 6
+    local newNumIconsWide = potentialNumIconsFit
+    local numIconsChanged = false
     if newNumIconsWide ~= currentNumIconsWide then
-        frameSettings.numIconsWide = newNumIconsWide -- Write back to profile settings table
-    end
-    -- <<< END MODIFICATION >>>
-
-    -- Use iconTextureSize read from profile settings for width calculation
-    local snappedW = BoxxyAuras.FrameHandler.CalculateFrameWidth(newNumIconsWide, iconTextureSize)
-    widthToApply = snappedW -- This is the width we will set
-
-    -- Adjust X pos for left drag (using the new snappedW)
-    if draggingHandle == "Left" then
-        local originalRightEdgeX = frame.frameStartX + frame.frameStartW -- Recalculate for clarity
-        finalX = originalRightEdgeX - snappedW -- Position left edge based on fixed right edge and snapped width
+        frameSettings.numIconsWide = newNumIconsWide
+        numIconsChanged = true
     end
 
-    -- Apply frame updates if needed
-    local currentW, _ = frame:GetSize()
-    local currentX, _ = frame:GetLeft()
+    -- <<< Visual Update Logic >>>
+    local calculatedWidthForVisual = BoxxyAuras.FrameHandler.CalculateFrameWidth(newNumIconsWide, iconTextureSize)
+    local currentW = frame:GetWidth()
+    local widthChanged = (calculatedWidthForVisual ~= currentW)
 
-    -- Compare against widthToApply and finalX
-    local needsFrameUpdate = (widthToApply ~= currentW or finalX ~= currentX)
-    if needsFrameUpdate then
-        frame:SetSize(widthToApply, fixedFrameH)
-        frame:ClearAllPoints()
-        frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", finalX, frame.frameStartY)
-        if UpdateEdgeHandleDimensions then UpdateEdgeHandleDimensions(frame, widthToApply, fixedFrameH) end
+    if draggingHandle == "Right" and (numIconsChanged or widthChanged) then 
+        -- Right Handle: Update size visually
+        frame:SetSize(calculatedWidthForVisual, frame:GetHeight())
+        if BoxxyAuras.FrameHandler.UpdateEdgeHandleDimensions then 
+            BoxxyAuras.FrameHandler.UpdateEdgeHandleDimensions(frame, calculatedWidthForVisual, frame:GetHeight()) -- Use table reference
+        end
+        -- <<< Trigger layout if VISUAL width changed >>>
+        if widthChanged then 
+            local frameType = BoxxyAuras.FrameHandler.GetFrameType(frame) -- Use table reference
+            if frameType then LayoutAuras(frameType) end
+        end
+
+    elseif draggingHandle == "Left" and (numIconsChanged or widthChanged) then
+        -- Left Handle: Update size AND position visually using BOTTOMLEFT anchor
+        local originalRightEdgeX = frame.dragOriginalRightX
+        local startBottomY = frame.frameStartY -- <<< Use the stored Bottom Y from OnMouseDown >>>
+        if not originalRightEdgeX or not startBottomY then return end -- Safety check
+
+        local visualX = originalRightEdgeX - calculatedWidthForVisual
+        local currentX = frame:GetLeft()
+
+        if calculatedWidthForVisual ~= currentW or visualX ~= currentX then
+            frame:SetSize(calculatedWidthForVisual, frame:GetHeight())
+            frame:ClearAllPoints()
+            -- <<< Use BOTTOMLEFT anchor with original starting Bottom Y >>>
+            frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", visualX, startBottomY)
+            if BoxxyAuras.FrameHandler.UpdateEdgeHandleDimensions then 
+                BoxxyAuras.FrameHandler.UpdateEdgeHandleDimensions(frame, calculatedWidthForVisual, frame:GetHeight()) 
+            end
+            if calculatedWidthForVisual ~= currentW or visualX ~= currentX then
+                local frameType = BoxxyAuras.FrameHandler.GetFrameType(frame) 
+                if frameType then LayoutAuras(frameType) end
+            end
+        end
     end
+
 end
+
+-- <<< Helper Function to get frame type string >>>
+local function GetFrameType(frameObj)
+    if not frameObj then return nil end
+    if frameObj == BoxxyAuras.FrameHandler.GetBuffFrame() then return "Buff"
+    elseif frameObj == BoxxyAuras.FrameHandler.GetDebuffFrame() then return "Debuff"
+    elseif frameObj == BoxxyAuras.FrameHandler.GetCustomFrame() then return "Custom"
+    else return nil end
+end
+BoxxyAuras.FrameHandler.GetFrameType = GetFrameType -- Assign to handler table
 
 -- Placeholder for attaching OnUpdate script - will be done in InitializeFrames later
 --[[
@@ -1076,58 +1095,50 @@ BoxxyAuras.FrameHandler.CalculateIconsWideFromWidth = CalculateIconsWideFromWidt
 -- Moved Drag Handler: OnFrameDragStart
 OnFrameDragStart = function(self)
     if not self.isLocked then 
+        -- <<< REMOVED Explicit anchor setting before dragging >>>
         self:StartMoving() 
     end
 end
 
 -- Moved Drag Handler: OnFrameDragStop
-OnFrameDragStop = function(self) 
+OnFrameDragStop = function(self)
     if not self then
         -- BoxxyAuras.DebugLogError("self is nil in OnDragStop!")
         return
     end
 
     if type(self.StopMovingOrSizing) == "function" then self:StopMovingOrSizing() end
-    self.draggingHandle = nil -- Clear resize handle state too, just in case
+    self.draggingHandle = nil -- Clear resize handle state
 
+    -- <<< Save BOTTOMLEFT coordinates >>>
     local finalX = self:GetLeft()
     local finalY = self:GetBottom() 
     local anchorToSave = "BOTTOMLEFT"
 
-    local settingsKey = nil 
-    local frameType = nil   
+    local settingsKey = nil
+    local frameType = nil
 
     local currentBuffFrame = BoxxyAuras.FrameHandler.GetBuffFrame()
     local currentDebuffFrame = BoxxyAuras.FrameHandler.GetDebuffFrame()
     local currentCustomFrame = BoxxyAuras.FrameHandler.GetCustomFrame()
 
-    if self == currentBuffFrame then 
-        settingsKey = "buffFrameSettings"
-        frameType = "Buff"
-    elseif self == currentDebuffFrame then 
-        settingsKey = "debuffFrameSettings"
-        frameType = "Debuff"
-    elseif self == currentCustomFrame then 
-        settingsKey = "customFrameSettings"
-        frameType = "Custom"
+    if self == currentBuffFrame then settingsKey = "buffFrameSettings"; frameType = "Buff"
+    elseif self == currentDebuffFrame then settingsKey = "debuffFrameSettings"; frameType = "Debuff"
+    elseif self == currentCustomFrame then settingsKey = "customFrameSettings"; frameType = "Custom"
     end
 
     local currentProfileSettings = BoxxyAuras:GetCurrentProfileSettings()
     if currentProfileSettings and currentProfileSettings[settingsKey] then
-        currentProfileSettings[settingsKey].x = finalX 
-        currentProfileSettings[settingsKey].y = finalY 
+        currentProfileSettings[settingsKey].x = finalX
+        currentProfileSettings[settingsKey].y = finalY
         currentProfileSettings[settingsKey].anchor = anchorToSave
-        -- Save height on drag stop? Might be redundant if only width changes
-        -- currentProfileSettings[settingsKey].height = self:GetHeight() 
     else
          -- BoxxyAuras.DebugLogWarning(string.format("OnDragStop [%s]: Could not find settings table for key '%s' in active profile.", frameType, settingsKey))
     end
 
-    -- LayoutAuras is forward declared
-    if frameType and LayoutAuras then 
-        LayoutAuras(frameType) 
-    else
-        -- BoxxyAuras.DebugLogWarning(string.format("OnDragStop Error: Could not determine frameType (%s) or LayoutAuras missing for frame %s", tostring(frameType), self:GetName()))
-    end 
+    -- Apply Settings ensures final state is correct
+    if frameType then
+        BoxxyAuras.FrameHandler.ApplySettings(frameType)
+    end
 end
 

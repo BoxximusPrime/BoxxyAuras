@@ -147,26 +147,54 @@ function BoxxyAuras:GetDefaultProfileSettings()
         hideBlizzardAuras = true,
         optionsScale = 1.0,
         customAuraNames = {},
-        buffFrameSettings = { x = 0, y = 150, anchor = "CENTER", height = defaultMinHeight, numIconsWide = defaultIconsWide_Reset, buffTextAlign = "CENTER", iconSize = 24, width = defaultWidth },
-        debuffFrameSettings = { x = 0, y = 50, anchor = "CENTER", height = defaultMinHeight, numIconsWide = defaultIconsWide_Reset, debuffTextAlign = "CENTER", iconSize = 24, width = defaultWidth },
-        customFrameSettings = { x = 0, y = -50, anchor = "CENTER", height = defaultMinHeight, numIconsWide = defaultIconsWide_Reset, customTextAlign = "CENTER", iconSize = 24, width = defaultWidth }
+        buffFrameSettings = { x = -300, y = 200, anchor = "BOTTOMLEFT", height = defaultMinHeight, numIconsWide = defaultIconsWide_Reset, buffTextAlign = "CENTER", iconSize = 24, width = defaultWidth },
+        debuffFrameSettings = { x = 100, y = 200, anchor = "BOTTOMLEFT", height = defaultMinHeight, numIconsWide = defaultIconsWide_Reset, debuffTextAlign = "CENTER", iconSize = 24, width = defaultWidth },
+        customFrameSettings = { x = -100, y = 100, anchor = "BOTTOMLEFT", height = defaultMinHeight, numIconsWide = defaultIconsWide_Reset, customTextAlign = "CENTER", iconSize = 24, width = defaultWidth }
     }
+end
+
+-- <<< NEW Helper: Get Character Key >>>
+function BoxxyAuras:GetCharacterKey()
+    local name = UnitName("player")
+    local realm = GetRealmName()
+    if name and realm then
+        return name .. "-" .. realm
+    else
+        -- Fallback or error handling if name/realm aren't available
+        -- This might happen very early in login
+        return "UnknownCharacter" 
+    end
+end
+
+-- <<< NEW Helper: Get Active Profile Name for Current Character >>>
+function BoxxyAuras:GetActiveProfileName()
+    local charKey = self:GetCharacterKey()
+    -- Ensure the map exists
+    if not BoxxyAurasDB.characterProfileMap then
+        BoxxyAurasDB.characterProfileMap = {}
+    end
+    return BoxxyAurasDB.characterProfileMap[charKey] or "Default"
 end
 
 -- Helper to get the active profile's settings table
 function BoxxyAuras:GetCurrentProfileSettings()
     if not BoxxyAurasDB then BoxxyAurasDB = {} end
     if not BoxxyAurasDB.profiles then BoxxyAurasDB.profiles = {} end
+    -- <<< ADDED: Ensure character map exists >>>
+    if not BoxxyAurasDB.characterProfileMap then BoxxyAurasDB.characterProfileMap = {} end 
 
-    local activeKey = BoxxyAurasDB.activeProfile or "Default"
+    -- <<< MODIFIED: Get key based on current character >>>
+    local activeKey = self:GetActiveProfileName()
 
+    -- Ensure the profile itself exists (or create from defaults)
     if not BoxxyAurasDB.profiles[activeKey] then
+        -- BoxxyAuras.DebugLog(string.format("Profile '%s' not found for character, creating from defaults.", activeKey))
         BoxxyAurasDB.profiles[activeKey] = CopyTable(self:GetDefaultProfileSettings())
-        -- BoxxyAuras.DebugLog("Created new profile structure for key: " .. activeKey)
     end
 
     local profile = BoxxyAurasDB.profiles[activeKey]
 
+    -- <<< Ensure nested tables and default values exist (existing logic) >>>
     profile.buffFrameSettings = profile.buffFrameSettings or {}
     profile.debuffFrameSettings = profile.debuffFrameSettings or {}
     profile.customFrameSettings = profile.customFrameSettings or {}
@@ -182,6 +210,11 @@ function BoxxyAuras:GetCurrentProfileSettings()
     if profile.buffFrameSettings.iconSize == nil then profile.buffFrameSettings.iconSize = 24 end
     if profile.debuffFrameSettings.iconSize == nil then profile.debuffFrameSettings.iconSize = 24 end
     if profile.customFrameSettings.iconSize == nil then profile.customFrameSettings.iconSize = 24 end
+    
+    -- <<< ADDED: Ensure numIconsWide exists >>>
+    if profile.buffFrameSettings.numIconsWide == nil then profile.buffFrameSettings.numIconsWide = 6 end
+    if profile.debuffFrameSettings.numIconsWide == nil then profile.debuffFrameSettings.numIconsWide = 6 end
+    if profile.customFrameSettings.numIconsWide == nil then profile.customFrameSettings.numIconsWide = 6 end
 
     return profile
 end

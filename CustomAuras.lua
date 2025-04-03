@@ -1,5 +1,9 @@
-local BOXXYAURAS, BoxxyAuras = ... -- Get addon name and private table
-BoxxyAuras = BoxxyAuras or {}
+-- <<< Standardize Initialization >>>
+local addonNameString, privateTable = ... -- Get addon name (optional)
+_G.BoxxyAuras = _G.BoxxyAuras or {}      -- Ensure global table exists
+local BoxxyAuras = _G.BoxxyAuras        -- Create local alias
+
+-- Remove the previous debug print for definition
 BoxxyAuras.CustomOptions = {} -- Table to hold custom options elements
 
 -- <<< NEW: Local reference to the profile settings helper >>>
@@ -204,25 +208,24 @@ function BoxxyAuras.CustomOptions:Toggle()
     if frame:IsShown() then
         frame:Hide()
     else
-        -- <<< Positioning Logic Start >>>
+        -- Positioning Logic Start
         local mainOptions = BoxxyAuras.Options and BoxxyAuras.Options.Frame
         if mainOptions and mainOptions:IsShown() then
             frame:ClearAllPoints()
-            local offset = 10 -- Pixels between frames
-            
-            -- Always position to the right
+            local offset = 10
             frame:SetPoint("TOPLEFT", mainOptions, "TOPRIGHT", offset, 0)
         else
-            -- Fallback if main options aren't shown or found: Center with offset
-            -- BoxxyAuras.DebugLog("CustomPos Decision: Placing FALLBACK (Main Hidden)")
             frame:ClearAllPoints()
             frame:SetPoint("CENTER", UIParent, "CENTER", 50, 50) 
         end
-        -- <<< Positioning Logic End >>>
+        -- Positioning Logic End
         
-        -- <<< LoadCustomAuras now reads from the active profile >>>
         self:LoadCustomAuras() -- Load current names when showing
+        -- <<< Add Debug Print >>>
         frame:Show()
     end
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end
+
+-- <<< Add Debug Print at End of File >>>
+print("BoxxyAuras Debug: CustomAuras.lua finished loading.")

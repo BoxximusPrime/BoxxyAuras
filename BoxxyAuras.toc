@@ -14,5 +14,5 @@ UIUtils.lua
 FrameHandler.lua 
 AuraIcon.lua     
 BoxxyAuras.lua   
-OptionsMenu.lua  
 CustomAuras.lua  
+OptionsMenu.lua

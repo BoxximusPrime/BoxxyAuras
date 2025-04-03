@@ -630,9 +630,18 @@ openCustomOptionsButton:SetWidth(customSubGroup:GetWidth() - (groupPadding * 2) 
 openCustomOptionsButton:SetHeight(25)
 openCustomOptionsButton:SetText("Set Custom Auras")
 openCustomOptionsButton:SetScript("OnClick", function()
-    if BoxxyAuras.CustomOptions and BoxxyAuras.CustomOptions.Toggle then BoxxyAuras.CustomOptions:Toggle()
-    else -- print("|cffFF0000BoxxyAuras Error:|r Custom Options module not loaded or Toggle function missing.") 
+    -- <<< Restore IF check using _G >>>
+    if _G.BoxxyAuras and _G.BoxxyAuras.CustomOptions and _G.BoxxyAuras.CustomOptions.Toggle then
+        _G.BoxxyAuras.CustomOptions:Toggle()
+    else
+        -- Print an error if the table or function is missing at click time
+        print("|cffFF0000BoxxyAuras Error:|r CustomOptions table or Toggle function is missing when button clicked!")
+        print(string.format("  _G.BoxxyAuras.CustomOptions type: %s", type(_G.BoxxyAuras.CustomOptions)))
+        if _G.BoxxyAuras.CustomOptions then
+             print(string.format("  _G.BoxxyAuras.CustomOptions.Toggle type: %s", type(_G.BoxxyAuras.CustomOptions.Toggle)))
+        end
     end
+    
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end)
 BoxxyAuras.Options.OpenCustomOptionsButton = openCustomOptionsButton
@@ -831,19 +840,22 @@ function BoxxyAuras.Options:ApplyIconSizeChange(frameType)
     local currentSettings = GetCurrentProfileSettings()
     if not currentSettings or not currentSettings[settingsKey] then return end
 
-    -- Icon size is already saved by the slider's OnMouseUp
-    local iconSize = currentSettings[settingsKey].iconSize or 24
-    local numIconsWide = currentSettings[settingsKey].numIconsWide or 6 -- Use existing saved value
+    -- Icon size is already saved by the slider's OnMouseUp.
+    -- We no longer need to read iconSize, numIconsWide, or currentSavedWidth here.
 
     if BoxxyAuras.FrameHandler and
-       BoxxyAuras.FrameHandler.CalculateFrameWidth and
+       BoxxyAuras.FrameHandler.CalculateFrameWidth and -- Keep check for existence
        BoxxyAuras.FrameHandler.ApplySettings and
        BoxxyAuras.FrameHandler.LayoutAuras then
 
-        -- Apply settings (will use existing saved width and new icon size)
+        -- Remove all width calculation/adjustment logic from here.
+        -- ApplySettings in FrameHandler will now *always* calculate width based on
+        -- the newly saved iconSize and the existing numIconsWide from the profile.
+
+        -- Apply settings (will use the new iconSize and existing numIconsWide to calculate width)
         BoxxyAuras.FrameHandler.ApplySettings(frameType)
-        
-        -- Re-layout icons (will use current numIconsWide, new icon size, and existing frame dimensions)
+
+        -- Re-layout icons (will use the newly calculated frame dimensions)
         BoxxyAuras.FrameHandler.LayoutAuras(frameType)
 
         -- Force update on existing visible icons for size change
@@ -895,48 +907,59 @@ function BoxxyAuras.Options:InitializeProfileDropdown()
             for name, _ in pairs(BoxxyAurasDB.profiles) do table.insert(profileNames, name) end
             table.sort(profileNames)
         end
-        if #profileNames == 0 then table.insert(profileNames, "Default") end
+        if #profileNames == 0 then table.insert(profileNames, "Default") end -- Ensure Default always exists
+        local defaultExists = false
+        for _, name in ipairs(profileNames) do if name == "Default" then defaultExists = true; break; end end
+        if not defaultExists then table.insert(profileNames, 1, "Default") end -- Add Default if missing
 
-        local currentActive = BoxxyAurasDB.activeProfile or "Default"
+        -- <<< Get ACTIVE profile name for THIS character >>>
+        local currentCharacterActiveProfile = "Default"
+        if BoxxyAuras.GetActiveProfileName then 
+            currentCharacterActiveProfile = BoxxyAuras:GetActiveProfileName()
+        end
+
         for _, name in ipairs(profileNames) do
             info.text = name
             info.arg1 = name
-            info.checked = (name == currentActive)
+            -- <<< Check against THIS character's active profile >>>
+            info.checked = (name == currentCharacterActiveProfile)
             info.func = BoxxyAuras.Options.SelectProfile
             UIDropDownMenu_AddButton(info)
         end
-    end, "MENU") -- Added displayMode = "MENU" which might be needed
+    end, "MENU")
 
-    -- Set width and ensure visible (Width is already set, but Show is good)
     dropdown:Show()
 end
 
 -- << MODIFIED: Update Profile UI >>
--- This function now focuses on setting the display text and button states.
 function BoxxyAuras.Options:UpdateProfileUI()
     local dropdown = self.ProfileDropdown
     if not dropdown then
         return
     end
 
-    -- Set the dropdown text to the current active profile
-    local activeProfile = BoxxyAurasDB.activeProfile or "Default"
+    -- <<< Get ACTIVE profile name for THIS character >>>
+    local activeProfile = "Default"
+    if BoxxyAuras.GetActiveProfileName then 
+        activeProfile = BoxxyAuras:GetActiveProfileName()
+    end
+
+    -- Set the dropdown text to the current character's active profile
     if type(activeProfile) == "string" and activeProfile ~= "" then
         UIDropDownMenu_SetText(dropdown, activeProfile)
     else
         UIDropDownMenu_SetText(dropdown, "Default") -- Fallback
     end
 
-
-    -- Enable/disable delete button based on selected profile
+    -- Enable/disable delete button based on selected profile for THIS character
     if self.DeleteProfileButton then
         local canDelete = (activeProfile ~= "Default")
         self.DeleteProfileButton:SetEnabled(canDelete)
         self.DeleteProfileButton:SetAlpha(canDelete and 1 or 0.5)
     end
-     -- Enable/disable copy button if a profile is selected
+     -- Enable/disable copy button if a profile is selected for THIS character
     if self.CopyProfileButton then
-        local canCopy = (activeProfile ~= nil)
+        local canCopy = (activeProfile ~= nil) -- Can always copy if a profile is active
         self.CopyProfileButton:SetEnabled(canCopy)
         self.CopyProfileButton:SetAlpha(canCopy and 1 or 0.5)
     end
@@ -945,33 +968,31 @@ end
 -- << Function called when a profile is selected from the dropdown >>
 function BoxxyAuras.Options.SelectProfile(self, profileName)
     if not profileName then return end
-    local currentActive = BoxxyAurasDB.activeProfile or "Default"
+    
+    local characterKey = BoxxyAuras:GetCharacterKey()
+    if not characterKey then 
+        print("|cffFF0000BoxxyAuras Error:|r Could not get character key to select profile.")
+        return 
+    end
 
-    if profileName ~= currentActive then
-        print(string.format("BoxxyAuras: Switching to profile '%s'", profileName))
-        BoxxyAurasDB.activeProfile = profileName
+    -- Ensure map exists
+    if not BoxxyAurasDB.characterProfileMap then BoxxyAurasDB.characterProfileMap = {} end
 
-        -- 1. Reload the Options UI to show the new profile's settings
-        -- if BoxxyAuras.Options.Load then BoxxyAuras.Options:Load() end -- <<< REMOVED: Load calls ApplyScale too early
+    local currentCharacterActiveProfile = BoxxyAurasDB.characterProfileMap[characterKey] or "Default"
 
-        -- 2. Re-initialize addon frames based on the new profile settings
-        -- InitializeFrames will handle applying settings, lock state, AND scale from the DB
+    if profileName ~= currentCharacterActiveProfile then
+        print(string.format("BoxxyAuras: Setting profile for %s to '%s'", characterKey, profileName))
+        -- <<< SAVE to character map >>>
+        BoxxyAurasDB.characterProfileMap[characterKey] = profileName
+
+        -- Reload options UI, re-initialize frames, re-initialize auras (existing logic)
         if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.InitializeFrames then
              BoxxyAuras.FrameHandler.InitializeFrames()
         end
-
-        -- 3. Re-initialize/update auras based on the new profile settings (incl. custom list)
-        if BoxxyAuras.InitializeAuras then
-            InitializeAuras() -- Full re-init is safer
-        elseif BoxxyAuras.UpdateAuras then
-            BoxxyAuras.UpdateAuras() -- Fallback
-        end
-
-        -- 4. Update the profile UI itself (dropdown text, button states)
+        if BoxxyAuras.InitializeAuras then InitializeAuras()
+        elseif BoxxyAuras.UpdateAuras then BoxxyAuras.UpdateAuras() end
         if BoxxyAuras.Options.UpdateProfileUI then BoxxyAuras.Options:UpdateProfileUI() end
-
-        -- <<< ADDED: Reload options UI controls >>>
-        if BoxxyAuras.Options.Load then BoxxyAuras.Options:Load() end -- Call Load on the Options table
+        if BoxxyAuras.Options.Load then BoxxyAuras.Options:Load() end
 
         PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
     end
@@ -990,17 +1011,15 @@ function BoxxyAuras.Options:CreateProfile(profileName)
     end
 
     print(string.format("BoxxyAuras: Creating new profile '%s'", profileName))
-    -- Create a new profile by copying defaults
     if BoxxyAuras.GetDefaultProfileSettings then
         BoxxyAurasDB.profiles[profileName] = CopyTable(BoxxyAuras:GetDefaultProfileSettings())
     else
          print("|cffFF0000BoxxyAuras Profiles Error:|r Cannot get default settings to create profile.")
-         BoxxyAurasDB.profiles[profileName] = {} -- Fallback to empty
+         BoxxyAurasDB.profiles[profileName] = {} 
     end
 
-
-    -- Automatically switch to the new profile
-    BoxxyAuras.Options.SelectProfile(nil, profileName) -- Use SelectProfile to handle the switch
+    -- <<< Automatically switch THIS CHARACTER to the new profile >>>
+    BoxxyAuras.Options.SelectProfile(nil, profileName) 
 end
 
 -- << Copy Profile >>
@@ -1009,44 +1028,94 @@ function BoxxyAuras.Options:CopyProfile(newProfileName)
         print("BoxxyAuras Profiles: Invalid name for copy.")
         return
     end
+
+    local currentActiveKey = "Default" 
+    if BoxxyAuras.GetActiveProfileName then currentActiveKey = BoxxyAuras:GetActiveProfileName() end
+    
     if BoxxyAurasDB.profiles[newProfileName] then
-        print(string.format("BoxxyAuras Profiles: Profile '%s' already exists.", newProfileName))
-        return
+        -- <<< Store pending data in temporary variables >>>
+        self.pendingOverwriteTarget = newProfileName
+        self.pendingOverwriteSource = currentActiveKey
+        
+        -- Show confirmation dialog (no longer need to pass data via args)
+        StaticPopup_Show("BOXXYAURAS_OVERWRITE_PROFILE_CONFIRM") 
+        return 
     end
 
-    local currentActiveKey = BoxxyAurasDB.activeProfile or "Default"
-    local sourceProfile = GetCurrentProfileSettings() -- Get the currently loaded profile settings
-
+    -- Original logic if profile does NOT exist
+    local sourceProfile = GetCurrentProfileSettings() -- This now gets the correct profile based on character
     if not sourceProfile then
         print("|cffFF0000BoxxyAuras Profiles Error:|r Could not get settings for current profile to copy.")
         return
     end
 
-    print(string.format("BoxxyAuras: Copying profile '%s' to '%s'", currentActiveKey, newProfileName))
-    -- Perform a deep copy (CopyTable is a global WoW function)
+    print(string.format("BoxxyAuras: Copying current profile ('%s') to new profile '%s'", currentActiveKey, newProfileName))
     BoxxyAurasDB.profiles[newProfileName] = CopyTable(sourceProfile)
 
-    -- Update UI
-    -- self:UpdateProfileUI()
-    -- <<< Automatically switch to the new profile >>>
-    BoxxyAuras.Options.SelectProfile(nil, newProfileName) -- <<< Explicitly call the function
+    BoxxyAuras.Options.SelectProfile(nil, newProfileName) -- Switch to the newly created profile
+    PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+end
 
+-- << NEW: Function called when overwrite is confirmed >>
+function BoxxyAuras.Options:CopyProfileConfirmed(data)
+    local targetName = data.targetName
+    local sourceKey = data.sourceKey -- The key of the profile that was active when copy was initiated
+
+    if not targetName or not sourceKey then 
+        print("|cffFF0000BoxxyAuras Profiles Error:|r Missing data for CopyProfileConfirmed.")
+        return 
+    end
+
+    -- Get the settings of the currently active profile (which was the source)
+    local sourceProfile = GetCurrentProfileSettings() 
+    if not sourceProfile then
+        print("|cffFF0000BoxxyAuras Profiles Error:|r Could not get settings for source profile ('"..sourceKey.."') to overwrite.")
+        return
+    end
+
+    print(string.format("BoxxyAuras: OVERWRITING profile '%s' with current settings from '%s'", targetName, sourceKey))
+    BoxxyAurasDB.profiles[targetName] = CopyTable(sourceProfile)
+
+    -- Switch this character to the newly overwritten profile
+    BoxxyAuras.Options.SelectProfile(nil, targetName) 
     PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
 end
 
 -- << Delete Profile (Actual deletion happens in confirmation dialog handler) >>
 function BoxxyAuras.Options:DeleteProfileConfirmed()
-    local profileToDelete = BoxxyAurasDB.activeProfile
+    -- <<< Get the profile name this character is currently using >>>
+    local profileToDelete = "Default"
+    if BoxxyAuras.GetActiveProfileName then 
+        profileToDelete = BoxxyAuras:GetActiveProfileName()
+    end
+
     if not profileToDelete or profileToDelete == "Default" then
-        print("BoxxyAuras Profiles: Cannot delete the 'Default' profile or no profile selected.")
+        print("BoxxyAuras Profiles: Cannot delete the 'Default' profile.")
         return
     end
 
     print(string.format("BoxxyAuras: Deleting profile '%s'", profileToDelete))
-    BoxxyAurasDB.profiles[profileToDelete] = nil
+    BoxxyAurasDB.profiles[profileToDelete] = nil -- Remove from the global list
 
-    -- Switch back to Default profile
-    BoxxyAuras.Options.SelectProfile(nil, "Default") -- Handles UI updates and reloading
+    -- <<< Reset any characters using this profile back to Default >>>
+    if BoxxyAurasDB.characterProfileMap then
+        local charKey = BoxxyAuras:GetCharacterKey()
+        for character, assignedProfile in pairs(BoxxyAurasDB.characterProfileMap) do
+            if assignedProfile == profileToDelete then
+                BoxxyAurasDB.characterProfileMap[character] = "Default"
+                if character == charKey then -- If it was the current character, trigger immediate switch
+                    BoxxyAuras.Options.SelectProfile(nil, "Default")
+                end
+            end
+        end
+    end
+    
+    -- If the current character wasn't using the deleted profile, just update the UI
+    if (BoxxyAurasDB.characterProfileMap and BoxxyAurasDB.characterProfileMap[BoxxyAuras:GetCharacterKey()] or "Default") ~= "Default" then
+        self:UpdateProfileUI() -- Refresh dropdown if current char wasn't switched
+        self:Load() -- Reload options based on current char's profile (which didn't change)
+    end
+
     PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
 end
 
@@ -1210,86 +1279,72 @@ SLASH_BOXXYAURASOPTIONS1 = "/boxxyauras"
 SLASH_BOXXYAURASOPTIONS2 = "/ba"
 SlashCmdList["BOXXYAURASOPTIONS"] = function(msg)
     local command = msg and string.lower(string.trim(msg)) or ""
-    if command == "reset" then
-
-        local activeProfileKey = BoxxyAurasDB and BoxxyAurasDB.activeProfile or "Default"
-        local currentSettings = GetCurrentProfileSettings()
-        if not currentSettings then return end -- Added safety
-
-        local defaultSettings = BoxxyAuras:GetDefaultProfileSettings()
-        if not defaultSettings then return end -- Added safety
-
-        -- <<< Reset settings WITHIN the active profile >>>
-        currentSettings.buffFrameSettings = CopyTable(defaultSettings.buffFrameSettings)
-        currentSettings.debuffFrameSettings = CopyTable(defaultSettings.debuffFrameSettings)
-        currentSettings.customFrameSettings = CopyTable(defaultSettings.customFrameSettings)
-        currentSettings.lockFrames = false
-        currentSettings.hideBlizzardAuras = true
-        currentSettings.optionsScale = 1.0
-        currentSettings.customAuraNames = currentSettings.customAuraNames or {}
-                
-        -- <<< NEW: Explicitly set sliders AFTER resetting DB >>>
-        local defaultIconSize = 24 -- The target reset size
-        if BoxxyAuras.Options.BuffSizeSlider then 
-            BoxxyAuras.Options.BuffSizeSlider:SetValue(defaultIconSize)
-            if BoxxyAuras.Options.BuffSizeSlider.KeyLabel then BoxxyAuras.Options.BuffSizeSlider.KeyLabel:SetText(string.format("%dpx", defaultIconSize)) end
-            local min, max = BoxxyAuras.Options.BuffSizeSlider:GetMinMaxValues(); local range = max - min
-            if range > 0 and BoxxyAuras.Options.BuffSizeSlider.VirtualThumb then BoxxyAuras.Options.BuffSizeSlider.VirtualThumb:SetPoint("CENTER", BoxxyAuras.Options.BuffSizeSlider, "LEFT", (defaultIconSize - min) / range * BoxxyAuras.Options.BuffSizeSlider:GetWidth(), 0) end
-        end
-        if BoxxyAuras.Options.DebuffSizeSlider then 
-            BoxxyAuras.Options.DebuffSizeSlider:SetValue(defaultIconSize)
-            if BoxxyAuras.Options.DebuffSizeSlider.KeyLabel then BoxxyAuras.Options.DebuffSizeSlider.KeyLabel:SetText(string.format("%dpx", defaultIconSize)) end
-             local min, max = BoxxyAuras.Options.DebuffSizeSlider:GetMinMaxValues(); local range = max - min
-            if range > 0 and BoxxyAuras.Options.DebuffSizeSlider.VirtualThumb then BoxxyAuras.Options.DebuffSizeSlider.VirtualThumb:SetPoint("CENTER", BoxxyAuras.Options.DebuffSizeSlider, "LEFT", (defaultIconSize - min) / range * BoxxyAuras.Options.DebuffSizeSlider:GetWidth(), 0) end
-        end
-        if BoxxyAuras.Options.CustomSizeSlider then 
-            BoxxyAuras.Options.CustomSizeSlider:SetValue(defaultIconSize)
-            if BoxxyAuras.Options.CustomSizeSlider.KeyLabel then BoxxyAuras.Options.CustomSizeSlider.KeyLabel:SetText(string.format("%dpx", defaultIconSize)) end
-             local min, max = BoxxyAuras.Options.CustomSizeSlider:GetMinMaxValues(); local range = max - min
-            if range > 0 and BoxxyAuras.Options.CustomSizeSlider.VirtualThumb then BoxxyAuras.Options.CustomSizeSlider.VirtualThumb:SetPoint("CENTER", BoxxyAuras.Options.CustomSizeSlider, "LEFT", (defaultIconSize - min) / range * BoxxyAuras.Options.CustomSizeSlider:GetWidth(), 0) end
-        end
-        -- Also update other relevant option controls if needed (e.g., checkboxes)
-        if BoxxyAuras.Options.LockFramesCheck then BoxxyAuras.Options.LockFramesCheck:SetChecked(false) end
-        if BoxxyAuras.Options.HideBlizzardCheck then BoxxyAuras.Options.HideBlizzardCheck:SetChecked(true) end
-        -- <<< END Explicit Slider Set >>>
-
-        -- Apply settings, init frames, init auras (These read the now-reset DB)
-        if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.ApplySettings then
-             BoxxyAuras.FrameHandler.ApplySettings("Buff")
-             BoxxyAuras.FrameHandler.ApplySettings("Debuff")
-             BoxxyAuras.FrameHandler.ApplySettings("Custom")
-        else print("|cffFF0000BoxxyAuras Reset Error:|r FrameHandler.ApplySettings function not found.") end
-
-         if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.InitializeFrames then
-             BoxxyAuras.FrameHandler.InitializeFrames()
-         end
-         if BoxxyAuras.InitializeAuras then InitializeAuras()
-         elseif BoxxyAuras.UpdateAuras then BoxxyAuras.UpdateAuras() end
-
-        -- <<< REMOVED Options:Load() call >>>
-        -- if BoxxyAuras.Options.Load then BoxxyAuras.Options:Load() end 
-
-        PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
-    else
-        BoxxyAuras.Options:Toggle()
-    end
+    BoxxyAuras.Options:Toggle()
 end
 
 -- << NEW: Confirmation Dialog for Deleting Profile >>
 StaticPopupDialogs["BOXXYAURAS_DELETE_PROFILE_CONFIRM"] = {
     text = "Are you sure you want to delete the profile |cffffd100%s|r?",
-    button1 = ACCEPT, -- Use localized "Accept" string directly
-    button2 = CANCEL, -- Use localized "Cancel" string directly
+    button1 = ACCEPT, 
+    button2 = CANCEL, 
     OnAccept = function(self, data)
         if BoxxyAuras.Options.DeleteProfileConfirmed then
             BoxxyAuras.Options:DeleteProfileConfirmed()
         end
     end,
-    OnCancel = function(self, data)
-        -- Do nothing on cancel
-    end,
+    OnCancel = function(self, data) end,
     timeout = 0,
     whileDead = true,
     hideOnEscape = true,
-    preferredIndex = 3 -- Avoid overlapping core UI popups
+    preferredIndex = 3 
+}
+
+-- <<< NEW: Confirmation Dialog for Overwriting Profile >>>
+StaticPopupDialogs["BOXXYAURAS_OVERWRITE_PROFILE_CONFIRM"] = {
+    -- <<< Remove %s placeholders from base text >>>
+    text = "Profile already exists. Overwrite it with the current settings?", 
+    button1 = ACCEPT,
+    button2 = CANCEL,
+    -- Remove data fields, no longer trying to pass via popup system
+    hasEditBox = false, 
+    
+    OnShow = function(self)
+        -- <<< Format text here using temp vars >>>
+        local targetName = BoxxyAuras.Options.pendingOverwriteTarget or "UnknownTarget"
+        local sourceKey = BoxxyAuras.Options.pendingOverwriteSource or "UnknownSource"
+        -- Define the format string here instead
+        local formatString = "Profile |cffffd100%s|r already exists. Overwrite it with the settings from profile |cffffd100%s|r?"
+        self.text:SetFormattedText(formatString, targetName, sourceKey)
+    end,
+
+    OnAccept = function(self, systemData) 
+        if BoxxyAuras.Options.CopyProfileConfirmed then
+            -- <<< Get data from temporary variables >>>
+            local targetName = BoxxyAuras.Options.pendingOverwriteTarget
+            local sourceKey = BoxxyAuras.Options.pendingOverwriteSource
+            -- <<< Clear temporary variables >>>
+            BoxxyAuras.Options.pendingOverwriteTarget = nil
+            BoxxyAuras.Options.pendingOverwriteSource = nil
+            
+            if type(targetName) ~= "string" or type(sourceKey) ~= "string" then
+                 print("|cffFF0000BoxxyAuras Profile Error:|r Failed to retrieve valid profile names from temporary Options variables.")
+                 print(string.format("  (targetName: %s, sourceKey: %s)", tostring(targetName), tostring(sourceKey)))
+                 return
+            end
+
+            local eventData = { targetName = targetName, sourceKey = sourceKey }
+            BoxxyAuras.Options:CopyProfileConfirmed(eventData)
+        else
+             print("|cffFF0000BoxxyAuras Profile Error:|r CopyProfileConfirmed function not found!")
+        end
+    end,
+    OnCancel = function(self, data) 
+        -- <<< Clear temporary variables on cancel too >>>
+        BoxxyAuras.Options.pendingOverwriteTarget = nil
+        BoxxyAuras.Options.pendingOverwriteSource = nil
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true, -- Automatically calls OnCancel
+    preferredIndex = 3
 }
