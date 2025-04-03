@@ -580,7 +580,8 @@ function AuraIcon.RefreshTooltipContent(self)
         -- NEW: Check if this is a custom aura first
         if self.auraType == "CUSTOM" then
             -- For custom, prioritize showing cached lines
-            local cachedData = self.spellId and BoxxyAuras.AllAuras[self.spellId]
+            -- <<< Use INSTANCE ID for cache lookup >>>
+            local cachedData = self.auraInstanceID and BoxxyAuras.AllAuras[self.auraInstanceID]
             if cachedData and cachedData.lines then
                 for i, lineInfo in ipairs(cachedData.lines) do
                     if lineInfo.left then
@@ -628,7 +629,8 @@ function AuraIcon.RefreshTooltipContent(self)
 
     elseif not isPermanent and remaining <= 0 then -- If expired but held
         -- For expired, try to show cached lines first, then add expired tag.
-        local cachedData = self.spellId and BoxxyAuras.AllAuras[self.spellId]
+        -- <<< Use INSTANCE ID for cache lookup >>>
+        local cachedData = self.auraInstanceID and BoxxyAuras.AllAuras[self.auraInstanceID]
         if cachedData and cachedData.lines then
             for i, lineInfo in ipairs(cachedData.lines) do
                 if lineInfo.left then

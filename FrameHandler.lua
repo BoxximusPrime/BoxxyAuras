@@ -323,34 +323,24 @@ local function PollFrameHoverState(frame, frameDesc)
         return
     end 
     
-    -- <<< REMOVED DEBUG >>>
-    -- local pollBackdropExists = frame.backdropTextures ~= nil
-    -- local pollBorderExists = frame.borderTextures ~= nil
-    -- if not pollBackdropExists or not pollBorderExists then
-    --      BoxxyAuras.DebugLog(string.format("PollFrameHoverState [%s]: Texture check at POLL START. Backdrop: %s, Border: %s",
-    --         frame:GetName() or frameDesc or "Unknown",
-    --         tostring(pollBackdropExists),
-    --         tostring(pollBorderExists)
-    --      ))
-    -- end
-    -- <<< END REMOVED DEBUG >>>
-    
-    -- Requires BoxxyAuras.IsMouseWithinFrame function
-    local mouseIsOverNow = BoxxyAuras.IsMouseWithinFrame(frame) 
+    local mouseIsOverNow = BoxxyAuras.IsMouseWithinFrame(frame)
     local wasOver = frame.isMouseOver 
     local wasLocked = frame.wasLocked 
     local isLockedNow = frame.isLocked 
 
-    -- Uses local frame variables via Getters
     local currentBuffFrame = BoxxyAuras.FrameHandler.GetBuffFrame()
     local currentDebuffFrame = BoxxyAuras.FrameHandler.GetDebuffFrame()
     local currentCustomFrame = BoxxyAuras.FrameHandler.GetCustomFrame()
 
-    -- Update global hover state table in BoxxyAuras
-    if frame == currentBuffFrame then BoxxyAuras.FrameHoverStates.BuffFrame = mouseIsOverNow
-    elseif frame == currentDebuffFrame then BoxxyAuras.FrameHoverStates.DebuffFrame = mouseIsOverNow
-    elseif frame == currentCustomFrame then BoxxyAuras.FrameHoverStates.CustomFrame = mouseIsOverNow
+    -- <<< Get Frame Type String Early >>>
+    local frameType = nil
+    if frame == currentBuffFrame then frameType = "Buff"
+    elseif frame == currentDebuffFrame then frameType = "Debuff"
+    elseif frame == currentCustomFrame then frameType = "Custom"
     end
+
+    -- Update global hover state table in BoxxyAuras
+    if frameType then BoxxyAuras.FrameHoverStates[frameType .. "Frame"] = mouseIsOverNow end
     
     local needsUpdate = (mouseIsOverNow ~= wasOver) or (isLockedNow ~= wasLocked)
     
@@ -358,66 +348,89 @@ local function PollFrameHoverState(frame, frameDesc)
         frame.isMouseOver = mouseIsOverNow 
         frame.wasLocked = isLockedNow      
         
-        -- Logic for immediate expired aura removal on mouse leave
-        if not mouseIsOverNow and wasOver then 
-            local sourceTrackedList = nil
-            local visualIconList = nil
-            local targetFrame = frame 
-            local listType = nil
-
-            if frame == currentBuffFrame then 
-                listType = "Buff"
-                visualIconList = BoxxyAuras.buffIcons
-            elseif frame == currentDebuffFrame then 
-                listType = "Debuff"
-                visualIconList = BoxxyAuras.debuffIcons
-            elseif frame == currentCustomFrame then 
-                listType = "Custom"
-                visualIconList = BoxxyAuras.customIcons
-            end
-
-            -- Requires access to tracked lists from BoxxyAuras
-            -- TODO: Implement GetTrackedAuras/SetTrackedAuras in BoxxyAuras.lua
-            if listType and BoxxyAuras.GetTrackedAuras then 
-                sourceTrackedList = BoxxyAuras.GetTrackedAuras(listType)
-            end
-
-            if sourceTrackedList and visualIconList then
-                local newTrackedList = {}
-                local hasExpiredAurasToRemove = false
-                for _, trackedAura in ipairs(sourceTrackedList) do
-                    if not trackedAura.forceExpired then
-                        trackedAura.forceExpired = nil 
-                        table.insert(newTrackedList, trackedAura)
-                    else
-                        hasExpiredAurasToRemove = true 
-                    end
+        -- <<< Debounce Logic for Expired Aura Removal >>>
+        if frameType then
+            -- If mouse entered, cancel any pending leave timer
+            if mouseIsOverNow and not wasOver then
+                local existingTimer = BoxxyAuras.FrameLeaveTimers[frameType]
+                if existingTimer then
+                    C_Timer.Cancel(existingTimer)
+                    BoxxyAuras.FrameLeaveTimers[frameType] = nil
+                    -- BoxxyAuras.DebugLog(string.format("Poll Hover: Mouse ENTER [%s], cancelled leave timer.", frameType))
                 end
+            
+            -- If mouse left, schedule the removal after a delay
+            elseif not mouseIsOverNow and wasOver then
+                -- Cancel any existing timer for this frame first (shouldn't happen often, but safety)
+                local existingTimer = BoxxyAuras.FrameLeaveTimers[frameType]
+                if existingTimer then C_Timer.Cancel(existingTimer) end
+                
+                -- Schedule the removal
+                local delay = 1.0 -- 1 second debounce
+                BoxxyAuras.FrameLeaveTimers[frameType] = C_Timer.After(delay, function()
+                    -- BoxxyAuras.DebugLog(string.format("Poll Hover: Debounce Timer FIRED for [%s]", frameType))
+                    -- Re-check hover state before removing - user might have re-entered
+                    if not BoxxyAuras.FrameHoverStates[frameType .. "Frame"] then 
+                        -- BoxxyAuras.DebugLog(string.format("Poll Hover: Debounce [%s] - Still not hovering, removing expired.", frameType))
+                        
+                        -- <<< Start of Original Removal Logic >>>
+                        local sourceTrackedList = nil
+                        local visualIconList = nil
+                        local listType = frameType -- Use the frameType captured by the closure
 
-                if hasExpiredAurasToRemove then
-                    local keptInstanceIDs = {}
-                    for _, keptAura in ipairs(newTrackedList) do
-                        if keptAura.auraInstanceID then keptInstanceIDs[keptAura.auraInstanceID] = true end
-                    end
-
-                    for _, auraIcon in ipairs(visualIconList) do
-                        if auraIcon and auraIcon.frame and auraIcon.auraInstanceID then
-                            if not keptInstanceIDs[auraIcon.auraInstanceID] then auraIcon.frame:Hide() end
+                        if listType == "Buff" then visualIconList = BoxxyAuras.buffIcons
+                        elseif listType == "Debuff" then visualIconList = BoxxyAuras.debuffIcons
+                        elseif listType == "Custom" then visualIconList = BoxxyAuras.customIcons
                         end
-                    end
 
-                    -- Requires SetTrackedAuras in BoxxyAuras.lua
-                    if listType and BoxxyAuras.SetTrackedAuras then 
-                        BoxxyAuras.SetTrackedAuras(listType, newTrackedList)
+                        if listType and BoxxyAuras.GetTrackedAuras then 
+                            sourceTrackedList = BoxxyAuras.GetTrackedAuras(listType)
+                        end
+
+                        if sourceTrackedList and visualIconList then
+                            local newTrackedList = {}
+                            local hasExpiredAurasToRemove = false
+                            for _, trackedAura in ipairs(sourceTrackedList) do
+                                if not trackedAura.forceExpired then
+                                    trackedAura.forceExpired = nil 
+                                    table.insert(newTrackedList, trackedAura)
+                                else
+                                    hasExpiredAurasToRemove = true 
+                                end
+                            end
+
+                            if hasExpiredAurasToRemove then
+                                local keptInstanceIDs = {}
+                                for _, keptAura in ipairs(newTrackedList) do
+                                    if keptAura.auraInstanceID then keptInstanceIDs[keptAura.auraInstanceID] = true end
+                                end
+
+                                for _, auraIcon in ipairs(visualIconList) do
+                                    if auraIcon and auraIcon.frame and auraIcon.auraInstanceID then
+                                        if not keptInstanceIDs[auraIcon.auraInstanceID] then auraIcon.frame:Hide() end
+                                    end
+                                end
+
+                                if listType and BoxxyAuras.SetTrackedAuras then 
+                                    BoxxyAuras.SetTrackedAuras(listType, newTrackedList)
+                                end
+                                
+                                LayoutAuras(listType) 
+                            end
+                        end
+                        -- <<< End of Original Removal Logic >>>
+                    else
+                         -- BoxxyAuras.DebugLog(string.format("Poll Hover: Debounce [%s] - User re-entered frame, removal aborted.", frameType))
                     end
-                    
-                    -- Calls local LayoutAuras
-                    LayoutAuras(listType) 
-                end
+                    -- Clear the timer handle regardless of action
+                    BoxxyAuras.FrameLeaveTimers[frameType] = nil 
+                end)
+                -- BoxxyAuras.DebugLog(string.format("Poll Hover: Mouse LEAVE [%s], scheduled removal timer: %s", frameType, tostring(BoxxyAuras.FrameLeaveTimers[frameType])))
             end
         end
+        -- <<< End Debounce Logic >>>
         
-        -- Update visual background AND border effect
+        -- Update visual background AND border effect (This happens immediately)
         local backdropGroupName = "backdrop" 
         local borderGroupName = "border"
         

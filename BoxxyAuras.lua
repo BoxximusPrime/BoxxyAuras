@@ -5,6 +5,8 @@ BoxxyAuras.AllAuras = {} -- Global cache for aura info
 BoxxyAuras.recentAuraEvents = {} -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
 BoxxyAuras.Frames = {} -- << ADDED: Table to store frame references
 
+BoxxyAuras.Version = "1.0.0"
+
 -- Configuration Table
 BoxxyAuras.Config = {
     BackgroundColor = { r = 0.05, g = 0.05, b = 0.05, a = 0.9 }, -- Icon Background
@@ -28,6 +30,9 @@ BoxxyAuras.FrameHoverStates = {
     DebuffFrame = false,
     CustomFrame = false,
 }
+
+-- <<< ADDED: Table to store leave debounce timers >>>
+BoxxyAuras.FrameLeaveTimers = {}
 
 local customDisplayFrame = CreateFrame("Frame", "BoxxyCustomDisplayFrame", UIParent) -- NEW Custom Frame
 BoxxyAuras.customIcons = {} -- NEW Custom Icon List
@@ -105,7 +110,7 @@ BoxxyAuras.ProcessNewAuras = function(newAurasToAdd, trackedAuras, auraCategory)
         end
 
         -- Trigger tooltip scrape for the newly added/updated aura if not already cached
-        local key = newAura.spellId
+        local key = newAura.auraInstanceID
         if key and not BoxxyAuras.AllAuras[key] then
             local instanceIdForScrape = newAura.auraInstanceID
             local filterForScrape = "HELPFUL" -- Default filter
@@ -117,7 +122,7 @@ BoxxyAuras.ProcessNewAuras = function(newAurasToAdd, trackedAuras, auraCategory)
             end
             
             if instanceIdForScrape then
-                BoxxyAuras.AttemptTooltipScrape(key, instanceIdForScrape, filterForScrape)
+                BoxxyAuras.AttemptTooltipScrape(newAura.spellId, instanceIdForScrape, filterForScrape)
             else
                 -- BoxxyAuras.DebugLog(string.format("BoxxyAuras DEBUG: Missing instanceIdForScrape for SpellID %s (%s) in ProcessNewAuras", 
                 --     tostring(key), newAura.name or "N/A"))
@@ -573,9 +578,9 @@ BoxxyAuras.UpdateAuras = function()
                 trackedAura.forceExpired = true
                 trackedAura.expirationTime = 0
             else
-                if trackedAura.spellId and BoxxyAuras.AllAuras[trackedAura.spellId] then
-                    -- BoxxyAuras.DebugLog(string.format("UpdateAuras: Removing SpellID %d from cache (Not Hovering Buffs)", trackedAura.spellId))
-                    BoxxyAuras.AllAuras[trackedAura.spellId] = nil
+                if trackedAura.auraInstanceID and BoxxyAuras.AllAuras[trackedAura.auraInstanceID] then
+                    -- BoxxyAuras.DebugLog(string.format("UpdateAuras: Removing InstanceID %d from cache (Not Hovering Buffs)", trackedAura.auraInstanceID))
+                    BoxxyAuras.AllAuras[trackedAura.auraInstanceID] = nil
                 end
             end
         end
@@ -591,9 +596,9 @@ BoxxyAuras.UpdateAuras = function()
                 trackedAura.forceExpired = true
                 trackedAura.expirationTime = 0
             else
-                if trackedAura.spellId and BoxxyAuras.AllAuras[trackedAura.spellId] then
-                    -- BoxxyAuras.DebugLog(string.format("UpdateAuras: Removing SpellID %d from cache (Not Hovering Debuffs)", trackedAura.spellId))
-                    BoxxyAuras.AllAuras[trackedAura.spellId] = nil
+                if trackedAura.auraInstanceID and BoxxyAuras.AllAuras[trackedAura.auraInstanceID] then
+                    -- BoxxyAuras.DebugLog(string.format("UpdateAuras: Removing InstanceID %d from cache (Not Hovering Debuffs)", trackedAura.auraInstanceID))
+                    BoxxyAuras.AllAuras[trackedAura.auraInstanceID] = nil
                 end
             end
         end
@@ -609,9 +614,9 @@ BoxxyAuras.UpdateAuras = function()
                 trackedAura.forceExpired = true
                 trackedAura.expirationTime = 0
             else
-                if trackedAura.spellId and BoxxyAuras.AllAuras[trackedAura.spellId] then
-                    -- BoxxyAuras.DebugLog(string.format("UpdateAuras: Removing SpellID %d from cache (Not Hovering Custom)", trackedAura.spellId))
-                    BoxxyAuras.AllAuras[trackedAura.spellId] = nil
+                if trackedAura.auraInstanceID and BoxxyAuras.AllAuras[trackedAura.auraInstanceID] then
+                    -- BoxxyAuras.DebugLog(string.format("UpdateAuras: Removing InstanceID %d from cache (Not Hovering Custom)", trackedAura.auraInstanceID))
+                    BoxxyAuras.AllAuras[trackedAura.auraInstanceID] = nil
                 end
             end
         end

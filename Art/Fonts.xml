@@ -5,6 +5,9 @@
     <font name="BAURASFont_Header" font="Interface\Addons\BoxxyAuras\Fonts\OpenSans-SemiBold.ttf" height="11" virtual="true">
         <Color r="0.6" g="0.6" b="0.6"/>
     </font>
+    <font name="BAURASFont_Vers" font="Interface\Addons\BoxxyAuras\Fonts\OpenSans-SemiBold.ttf" height="8" virtual="true">
+        <Color r="0.6" g="0.6" b="0.6"/>
+    </font>
     <font name="BAURASFont_Title" font="Interface\Addons\BoxxyAuras\Fonts\OpenSans-SemiBold.ttf" height="13" virtual="true">
         <Color r="0.6" g="0.6" b="0.6"/>
     </font>

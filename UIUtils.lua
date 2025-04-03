@@ -290,8 +290,8 @@ end
 
 -- Tooltip Scraping Function (Using GetUnitAura, finds index via auraInstanceID)
 function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter) 
-    -- Check if already scraped (key exists in AllAuras) - Use spellId as key
-    if spellId and BoxxyAuras.AllAuras[spellId] then return end 
+    -- Check if already scraped (key exists in AllAuras) - Use INSTANCE ID as key
+    if targetAuraInstanceID and BoxxyAuras.AllAuras[targetAuraInstanceID] then return end 
     -- Validate inputs 
     if not spellId or not targetAuraInstanceID or not filter then 
         print(string.format("DEBUG Scrape Error: Invalid arguments. spellId: %s, instanceId: %s, filter: %s",
@@ -345,21 +345,22 @@ function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter)
         end
     end
     
-    -- Store the collected lines in the global cache using spellId as the key
-    if spellId and tooltipLines and #tooltipLines > 0 then
-        BoxxyAuras.AllAuras[spellId] = { 
+    -- Store the collected lines in the global cache using INSTANCE ID as the key
+    if targetAuraInstanceID and tooltipLines and #tooltipLines > 0 then
+        BoxxyAuras.AllAuras[targetAuraInstanceID] = { 
             name = spellNameFromTip or "Unknown", -- Store the name from the first line
             lines = tooltipLines -- Store the table of line info tables
         }
-    elseif spellId then
+    elseif targetAuraInstanceID then
         -- Even if no lines after filtering, store something to prevent re-scraping
-        BoxxyAuras.AllAuras[spellId] = { 
+        BoxxyAuras.AllAuras[targetAuraInstanceID] = { 
             name = spellNameFromTip or "Unknown", 
             lines = {}
         }
     end
 
-    -- Store SOMETHING minimal in the cache to prevent re-scraping, but don't process lines
+    -- Minimal cache check is implicitly handled by the top check now
+    --[[ -- Remove old spellId minimal cache check
     if spellId then
         local existingCache = BoxxyAuras.AllAuras[spellId]
         -- Only add minimal cache if it doesn't exist at all
@@ -367,6 +368,7 @@ function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter)
             print("Didn't end up cached, THIS SHOULD NOT HAPPEN")
         end
     end
+    --]]
 end 
 
 -- Function to check if mouse cursor is within a frame's bounds

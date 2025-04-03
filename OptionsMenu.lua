@@ -76,6 +76,15 @@ local title = optionsFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Title")
 title:SetPoint("TOPLEFT", optionsFrame, "TOPLEFT", 20, -23)
 title:SetText("BoxxyAuras Options")
 
+-- <<< ADDED: Version Text >>>
+local versionText = optionsFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Vers") -- Use a smaller font
+versionText:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -2) -- Position below title
+local versionString = "v" .. (BoxxyAuras and BoxxyAuras.Version or "?.?.?") -- Get version safely
+versionText:SetText(versionString)
+versionText:SetTextColor(0.7, 0.7, 0.7, 0.9) -- Slightly greyed out
+BoxxyAuras.Options.VersionText = versionText -- Store reference if needed
+-- <<< END Version Text >>>
+
 -- Close Button
 local closeBtn = CreateFrame("Button", "BoxxyAurasOptionsCloseButton", optionsFrame, "BAURASCloseBtn")
 closeBtn:SetPoint("TOPRIGHT", optionsFrame, "TOPRIGHT", -12, -12)
