@@ -299,28 +299,27 @@ function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter)
         return 
     end
 
-    -- Find the CURRENT index for this specific aura instance
-    local currentAuraIndex = nil
-    for i = 1, 40 do -- Check up to 40 auras (standard limit)
-        local auraData = C_UnitAuras.GetAuraDataByIndex("player", i, filter)
-        if auraData then
-            -- Compare instance IDs
-            if auraData.auraInstanceID == targetAuraInstanceID then
-                currentAuraIndex = i
-                break
-            end
-        end
-    end
-
-    local tipData = C_TooltipInfo.GetUnitAura("player", currentAuraIndex, filter)
-
-    if not tipData then 
-        -- This failure is now less likely, but could still happen in rare cases
-        print(string.format("DEBUG Scrape Error: GetUnitAura failed unexpectedly for SpellID: %s (Found Index: %s, Filter: %s) via InstanceID %s", 
-            tostring(spellId), tostring(currentAuraIndex), filter, tostring(targetAuraInstanceID)))
+    -- <<< Simplify: Call appropriate function based on filter >>>
+    local tipData = nil
+    if filter == "HELPFUL" then
+        tipData = C_TooltipInfo.GetUnitBuffByAuraInstanceID("player", targetAuraInstanceID, filter)
+    elseif filter == "HARMFUL" then
+        tipData = C_TooltipInfo.GetUnitDebuffByAuraInstanceID("player", targetAuraInstanceID, filter)
+    else
+        -- Should not happen with current usage, but log if it does
+        print(string.format("DEBUG Scrape Error: Invalid filter '%s' passed to AttemptTooltipScrape for SpellID: %s",
+            tostring(filter), tostring(spellId)))
         return
     end
 
+    if not tipData then 
+        -- Error message is still relevant if the ByInstanceID call fails
+        print(string.format("DEBUG Scrape Error: GetUnit...ByAuraInstanceID failed unexpectedly for SpellID: %s (Filter: %s) via InstanceID %s", 
+            tostring(spellId), tostring(filter), tostring(targetAuraInstanceID)))
+        return
+    end
+
+    -- <<< Keep Tooltip Line Processing and Caching >>>
     -- Get tooltip lines
     local tooltipLines = {}
     local spellNameFromTip = nil -- Variable to store name from tooltip
@@ -328,42 +327,24 @@ function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter)
     -- Use a flag to track if we have processed the first line
     local firstLineProcessed = false
 
-    if tipData.lines then
-        for i = 1, #tipData.lines do
-            local lineData = tipData.lines[i]
-            if lineData and lineData.leftText then
-                local lineText = lineData.leftText -- Keep original left text separate
-                if lineData.rightText then 
-                    lineText = lineText .. " " .. lineData.rightText 
-                end
-                
-                -- Store the first line's left text as the potential name
-                if not firstLineProcessed and lineData.leftText then
-                    spellNameFromTip = lineData.leftText
-                    firstLineProcessed = true -- Mark as processed here, even if skipped below
-                end
-                
-                -- *** ADDED: Duration Check ***
-                local isDurationLine = false
-                local lowerLineText = string.lower(lineText)
-                if string.find(lowerLineText, "second") or 
-                   string.find(lowerLineText, "minute") or 
-                   string.find(lowerLineText, "hour") then
-                    isDurationLine = true
-                end
-                
-                -- Store left and right parts separately ONLY if NOT a duration line
-                if not isDurationLine then
-                    local lineInfo = { left = lineData.leftText }
-                    if lineData.rightText then
-                        lineInfo.right = lineData.rightText
-                    end
-                    table.insert(tooltipLines, lineInfo)
-                end
+    for i = 1, #tipData.lines do
+        local line = tipData.lines[i]
+        -- Only process lines with actual text
+        if line and line.leftText then 
+            local left = line.leftText
+            local right = line.rightText
+            
+            -- Capture the spell name from the first valid line
+            if not firstLineProcessed and left then
+                spellNameFromTip = left 
+                firstLineProcessed = true
             end
+            
+            -- Store line info in a sub-table
+            table.insert(tooltipLines, { left = left, right = right }) 
         end
     end
-
+    
     -- Store the collected lines in the global cache using spellId as the key
     if spellId and tooltipLines and #tooltipLines > 0 then
         BoxxyAuras.AllAuras[spellId] = { 

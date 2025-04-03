@@ -102,7 +102,13 @@ else
 end
 editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 editBox:SetScript("OnTextChanged", function(self)
-    -- Optional: Add visual feedback or debounce saving here if desired later
+    local currentText = self:GetText()
+    -- Compare current text with the stored initial text
+    if currentText ~= BoxxyAuras.CustomOptions.initialText then
+        BoxxyAuras.CustomOptions.SaveButton:SetEnabled(true)
+    else
+        BoxxyAuras.CustomOptions.SaveButton:SetEnabled(false)
+    end
 end)
 
 -- <<< ADD Border >>>
@@ -118,6 +124,7 @@ end
 scrollFrame:SetScrollChild(editBox) -- Set EditBox as the scroll child directly
 
 BoxxyAuras.CustomOptions.EditBox = editBox
+BoxxyAuras.CustomOptions.initialText = "" -- Add field to store initial text
 
 -- Save Button
 local saveButton = CreateFrame("Button", "BoxxyAurasCustomOptionsSaveButton", customOptionsFrame, "BAURASButtonTemplate") 
@@ -127,7 +134,14 @@ saveButton:SetHeight(25)
 saveButton:SetText("Save Custom Auras")
 saveButton:SetScript("OnClick", function()
     BoxxyAuras.CustomOptions:SaveCustomAuras()
-    PlaySound(SOUNDKIT.UI_GARRISON_MISSION_COMPLETE) -- Or another satisfying sound
+    -- <<< Debug and Fallback for Sound >>>
+    local soundToPlay = SOUNDKIT.UI_GARRISON_MISSION_COMPLETE
+    print(string.format("BoxxyAuras Debug: Save Button SoundKit ID: %s (%s)", tostring(soundToPlay), type(soundToPlay)))
+    if not soundToPlay or type(soundToPlay) ~= "number" and type(soundToPlay) ~= "string" then
+        print("BoxxyAuras Warning: Fallback sound used for Save button.")
+        soundToPlay = SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON -- Use a known working sound
+    end
+    PlaySound(soundToPlay)
 end)
 
 BoxxyAuras.CustomOptions.SaveButton = saveButton
@@ -141,28 +155,24 @@ function BoxxyAuras.CustomOptions:LoadCustomAuras()
     -- <<< Get settings from the CURRENTLY ACTIVE profile >>>
     local currentSettings = GetCurrentProfileSettings()
 
-    if not currentSettings then
-        -- print("|cffFF0000BoxxyAuras Custom Options:|r Cannot load, could not get profile settings.")
-        self.EditBox:SetText("")
-        return
+    local loadedText = "" -- Default to empty string
+    if currentSettings and currentSettings.customAuraNames then
+        local profileCustomAuras = currentSettings.customAuraNames
+        local names = {}
+        -- <<< Iterate over the profile's custom aura names >>>
+        for name, _ in pairs(profileCustomAuras) do
+            table.insert(names, name)
+        end
+        table.sort(names) -- Sort alphabetically for consistent display
+        loadedText = table.concat(names, ", ")
+    else
+        -- Handle cases where settings or customAuraNames are missing
+        -- print("|cffFF0000BoxxyAuras Custom Options:|r Cannot load, profile issue or no custom names found.")
     end
 
-    -- <<< Use customAuraNames from the profile settings >>>
-    local profileCustomAuras = currentSettings.customAuraNames
-    if not profileCustomAuras then
-        --  print("|cffFF0000BoxxyAuras Custom Options:|r Cannot load, customAuraNames not found in profile.")
-         self.EditBox:SetText("")
-         return
-    end
-
-
-    local names = {}
-    -- <<< Iterate over the profile's custom aura names >>>
-    for name, _ in pairs(profileCustomAuras) do
-        table.insert(names, name)
-    end
-    table.sort(names) -- Sort alphabetically for consistent display
-    self.EditBox:SetText(table.concat(names, ", "))
+    self.EditBox:SetText(loadedText)
+    self.initialText = loadedText -- Store the loaded text
+    self.SaveButton:SetEnabled(false) -- Use SetEnabled(false) initially
 end
 
 -- Function to parse EditBox text and save to DB
@@ -190,6 +200,10 @@ function BoxxyAuras.CustomOptions:SaveCustomAuras()
     -- <<< Save the new list to the ACTIVE profile's settings >>>
     currentSettings.customAuraNames = newCustomNames
 
+    -- Update initial text state after saving
+    self.initialText = text
+    self.SaveButton:SetEnabled(false) -- Use SetEnabled(false) after saving
+
     -- Optionally trigger an immediate update of the aura frames
     -- UpdateAuras will now read the custom list from the active profile automatically
     if BoxxyAuras.UpdateAuras then
@@ -216,12 +230,11 @@ function BoxxyAuras.CustomOptions:Toggle()
             frame:SetPoint("TOPLEFT", mainOptions, "TOPRIGHT", offset, 0)
         else
             frame:ClearAllPoints()
-            frame:SetPoint("CENTER", UIParent, "CENTER", 50, 50) 
+            frame:SetPoint("CENTER", UIParent, "CENTER", 50, 50)
         end
         -- Positioning Logic End
-        
-        self:LoadCustomAuras() -- Load current names when showing
-        -- <<< Add Debug Print >>>
+
+        self:LoadCustomAuras() -- Load current names WHEN SHOWING
         frame:Show()
     end
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
