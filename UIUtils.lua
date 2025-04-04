@@ -333,15 +333,24 @@ function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter)
         if line and line.leftText then 
             local left = line.leftText
             local right = line.rightText
-            
-            -- Capture the spell name from the first valid line
-            if not firstLineProcessed and left then
-                spellNameFromTip = left 
-                firstLineProcessed = true
+            local skipLine = false
+
+            -- Check if "remaining" exists (case-insensitive)
+            if (left and string.find(left, "remaining", 1, true)) or (right and string.find(right, "remaining", 1, true)) then
+                skipLine = true
             end
-            
-            -- Store line info in a sub-table
-            table.insert(tooltipLines, { left = left, right = right }) 
+
+            -- Only process/store if the line isn't skipped
+            if not skipLine then
+                -- Capture the spell name from the first valid (non-skipped) line
+                if not firstLineProcessed and left then
+                    spellNameFromTip = left 
+                    firstLineProcessed = true
+                end
+                
+                -- Store line info in a sub-table
+                table.insert(tooltipLines, { left = left, right = right }) 
+            end
         end
     end
     

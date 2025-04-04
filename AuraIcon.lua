@@ -415,30 +415,18 @@ function AuraIcon.Update(self, auraData, index, auraType)
     end
     -- <<< END CHANGE >>>
     
-    -- <<< DEBUG: Log Icon Size Read >>>
-    -- print(string.format("AuraIcon.Update [%s - SpellID %s]: Reading iconTextureSize = %d from profile key '%s'", 
-    --     tostring(self.frame:GetName()), tostring(self.spellId), iconTextureSize, tostring(settingsKey)))
-    -- <<< END DEBUG >>>
 
     -- Use config values with fallbacks if config isn't loaded yet
     local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 8
     local padding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
     local totalIconHeight = iconTextureSize + textHeight + (padding * 2)
     local totalIconWidth = iconTextureSize + (padding * 2)
-    
-    -- <<< DEBUG: Log Calculated Dimensions >>>
-    -- print(string.format("AuraIcon.Update [%s]: Calculated totalIconWidth=%.2f, totalIconHeight=%.2f", 
-    --     tostring(self.frame:GetName()), totalIconWidth, totalIconHeight))
-    -- <<< END DEBUG >>>
 
     -- Apply the potentially new size to the main frame
     self.frame:SetSize(totalIconWidth, totalIconHeight)
     
-    -- <<< DEBUG: Log Actual Size After SetSize >>>
+
     local actualW, actualH = self.frame:GetSize()
-    -- print(string.format("AuraIcon.Update [%s]: Actual size after SetSize: W=%.2f, H=%.2f", 
-    --     tostring(self.frame:GetName()), actualW, actualH))
-    -- <<< END DEBUG >>>
 
     -- Apply the new size to the texture and re-anchor/resize children
     if self.textureWidget then
