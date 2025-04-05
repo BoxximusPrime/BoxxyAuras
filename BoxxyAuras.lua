@@ -1,13 +1,23 @@
 local addonNameString, privateTable = ... -- Use different names for the local vars from ...
 _G.BoxxyAuras = _G.BoxxyAuras or {} -- Explicitly create/assign the GLOBAL table
 local BoxxyAuras = _G.BoxxyAuras -- Create a convenient local alias to the global table
+
+BoxxyAuras.Version = "1.1.0"
+
 BoxxyAuras.AllAuras = {} -- Global cache for aura info
 BoxxyAuras.recentAuraEvents = {} -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
 BoxxyAuras.Frames = {} -- << ADDED: Table to store frame references
 BoxxyAuras.HoveredFrame = nil
-BoxxyAuras.DEBUG = true
+BoxxyAuras.DEBUG = false
 
-BoxxyAuras.Version = "1.0.0"
+-- Debounce Timer Variables
+BoxxyAuras.DebounceTargetFrame = nil
+BoxxyAuras.DebounceEndTime = nil
+
+-- Previous Lock State Tracker
+BoxxyAuras.WasLocked = nil
+
+local LibWindow = LibStub("LibWindow-1.1")
 
 -- Configuration Table
 BoxxyAuras.Config = {
@@ -103,12 +113,13 @@ local function SortAurasForDisplay(a, b)
     end
 
     -- Rule 3: If both are non-permanent, use the original start time sort
-    local aStart = (a.expirationTime or 0) - (a.duration or 0)
-    local bStart = (b.expirationTime or 0) - (b.duration or 0)
-    if aStart == bStart then
-        return a.auraInstanceID < b.auraInstanceID -- Stable tiebreaker
+    local aTrackTime = a.originalTrackTime or 0
+    local bTrackTime = b.originalTrackTime or 0
+    if aTrackTime == bTrackTime then
+        -- Use auraInstanceID as a stable tiebreaker if track times are identical (unlikely but possible)
+        return (a.auraInstanceID or 0) < (b.auraInstanceID or 0)
     end
-    return aStart < bStart
+    return aTrackTime < bTrackTime
 end
 
 -- Helper function to process new auras (buffs, debuffs, or custom)
@@ -181,9 +192,9 @@ function BoxxyAuras:GetDefaultProfileSettings()
         optionsScale = 1.0,
         customAuraNames = {},
         buffFrameSettings = {
-            x = -300,
-            y = 200,
-            anchor = "BOTTOMLEFT",
+            x = 0,
+            y = 100,
+            anchor = "CENTER",
             height = defaultMinHeight,
             numIconsWide = defaultIconsWide_Reset,
             buffTextAlign = "CENTER",
@@ -191,9 +202,9 @@ function BoxxyAuras:GetDefaultProfileSettings()
             width = defaultWidth
         },
         debuffFrameSettings = {
-            x = 100,
+            x = 0,
             y = 200,
-            anchor = "BOTTOMLEFT",
+            anchor = "CENTER",
             height = defaultMinHeight,
             numIconsWide = defaultIconsWide_Reset,
             debuffTextAlign = "CENTER",
@@ -201,9 +212,9 @@ function BoxxyAuras:GetDefaultProfileSettings()
             width = defaultWidth
         },
         customFrameSettings = {
-            x = -100,
-            y = 100,
-            anchor = "BOTTOMLEFT",
+            x = 0,
+            y = 300,
+            anchor = "CENTER",
             height = defaultMinHeight,
             numIconsWide = defaultIconsWide_Reset,
             customTextAlign = "CENTER",
@@ -452,9 +463,6 @@ end
 
 -- Function to update displayed auras using cache comparison and stable order
 BoxxyAuras.UpdateAuras = function(forceRefresh)
-    if BoxxyAuras.DEBUG then
-        print("BoxxyAuras.UpdateAuras called" .. (forceRefresh and " with forceRefresh=true" or ""))
-    end
 
     local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
 
@@ -484,19 +492,27 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
 
     -- If we're doing a forced refresh, completely clear and rebuild all auras
     if forceRefresh then
-        if BoxxyAuras.DEBUG then
-            print("BoxxyAuras: Performing full aura refresh")
-        end
-
         -- Initialize auras from scratch
         InitializeAuras()
 
         -- Update all frames after initialization
         BoxxyAuras.FrameHandler.UpdateAllFramesAuras()
 
-        if BoxxyAuras.DEBUG then
-            print("BoxxyAuras: Full aura refresh complete")
+        -- Apply initial lock state after everything is initialized
+        local finalSettings = BoxxyAuras:GetCurrentProfileSettings() -- Get settings again to be sure
+        if finalSettings.lockFrames then
+            -- BoxxyAuras.FrameHandler.ApplyLockState(true) -- Apply immediately (OLD)
+            -- Apply lock state after a short delay to allow UI to settle
+            C_Timer.After(0.1, function()
+                if BoxxyAuras:GetCurrentProfileSettings().lockFrames then -- Re-check in case user unlocked super fast
+                    BoxxyAuras.FrameHandler.ApplyLockState(true)
+                    if BoxxyAuras.DEBUG then
+                        print("Delayed ApplyLockState(true) executed after login.")
+                    end
+                end
+            end)
         end
+
         return
     end
 
@@ -609,13 +625,14 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
             local foundInTracked = false
             for _, trackedAura in ipairs(trackedAuras) do
                 if trackedAura.auraInstanceID == currentAura.auraInstanceID then
-                    -- Update existing aura data
+                    -- Update existing aura data - **DO NOT update originalTrackTime**
                     trackedAura.spellId = currentAura.spellId
                     trackedAura.originalAuraType = currentAura.originalAuraType or currentAura.auraType
                     trackedAura.expirationTime = currentAura.expirationTime
                     trackedAura.duration = currentAura.duration
                     trackedAura.slot = currentAura.slot
                     trackedAura.seen = true
+                    -- trackedAura.originalTrackTime remains untouched if it exists
                     foundInTracked = true
                     break
                 end
@@ -634,6 +651,8 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
                     end
                 end
 
+                -- **Add originalTrackTime when adding a new aura**
+                currentAura.originalTrackTime = GetTime()
                 table.insert(newAurasToAdd, currentAura)
             end
         end
@@ -651,19 +670,10 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
                     trackedAura.forceExpired = true
                     trackedAura.expirationTime = 0 -- Ensure it's treated as expired
                     table.insert(newTrackedAuras, trackedAura)
-
-                    if BoxxyAuras.DEBUG then
-                        print("BoxxyAuras: Keeping expired aura " .. (trackedAura.name or "unknown") ..
-                                  " in hovered frame " .. (frame:GetName() or "?"))
-                    end
                 else
                     -- Not hovering this frame, remove the aura from tracking and cache
                     if trackedAura.auraInstanceID and BoxxyAuras.AllAuras[trackedAura.auraInstanceID] then
                         BoxxyAuras.AllAuras[trackedAura.auraInstanceID] = nil
-                        if BoxxyAuras.DEBUG then
-                            print("BoxxyAuras: Removing expired aura " .. (trackedAura.name or "unknown") ..
-                                      " from cache and non-hovered frame")
-                        end
                     end
                     -- Don't add it to newTrackedAuras
                 end
@@ -853,6 +863,24 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             BoxxyAuras.DebugLogError("Error in InitializeAuras (pcall): " .. tostring(err))
         end
 
+        -- Force a full update on login to ensure all auras get originalTrackTime
+        BoxxyAuras.UpdateAuras(true)
+
+        -- Apply initial lock state after everything is initialized
+        local finalSettings = BoxxyAuras:GetCurrentProfileSettings() -- Get settings again to be sure
+        if finalSettings.lockFrames then
+            -- BoxxyAuras.FrameHandler.ApplyLockState(true) -- Apply immediately (OLD)
+            -- Apply lock state after a short delay to allow UI to settle
+            C_Timer.After(0.1, function()
+                if BoxxyAuras:GetCurrentProfileSettings().lockFrames then -- Re-check in case user unlocked super fast
+                    BoxxyAuras.FrameHandler.ApplyLockState(true)
+                    if BoxxyAuras.DEBUG then
+                        print("Delayed ApplyLockState(true) executed after login.")
+                    end
+                end
+            end)
+        end
+
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local timestamp, subevent, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, spellId, spellName,
             spellSchool, amount = CombatLogGetCurrentEventInfo()
@@ -950,26 +978,66 @@ function SlashCmdList.BOXXYAURAS(msg, editBox)
     elseif command == "reset" then
         print("|cFF00FF00BoxxyAuras:|r Resetting frame positions...")
         local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
-        if not currentSettings then
-            print("|cFFFF0000BoxxyAuras Error:|r Cannot get current settings to reset positions.")
+        local defaultSettings = BoxxyAuras:GetDefaultProfileSettings() -- Get defaults for position/scale
+
+        if not currentSettings or not defaultSettings then
+            print("|cFFFF0000BoxxyAuras Error:|r Cannot get settings to reset positions.")
             return
         end
 
         local frameTypes = {"Buff", "Debuff", "Custom"}
         for _, frameType in ipairs(frameTypes) do
             local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-            if settingsKey and currentSettings[settingsKey] then
+            local frame = BoxxyAuras.Frames and BoxxyAuras.Frames[frameType]
+
+            if settingsKey and currentSettings[settingsKey] and frame then
                 print("|cFF00FF00BoxxyAuras:|r   Resetting " .. frameType .. " frame saved data.")
+                -- Clear DB settings
                 currentSettings[settingsKey].x = nil
                 currentSettings[settingsKey].y = nil
                 currentSettings[settingsKey].point = nil
-                currentSettings[settingsKey].scale = 1.0
+                currentSettings[settingsKey].scale = nil
+
+                -- Clear size settings
+                currentSettings[settingsKey].numIconsWide = nil
+                currentSettings[settingsKey].iconSize = nil
+
+                -- Apply Default Position Manually
+                local defaultPos = defaultSettings[settingsKey] -- Get defaults for THIS frame type
+                local defaultAnchor = defaultPos and defaultPos.anchor or "CENTER"
+                local defaultX = defaultPos and defaultPos.x or 0
+                local defaultY = defaultPos and defaultPos.y or 0
+
+                -- === Update DB with default coords BEFORE SetPoint/Save ===
+                currentSettings[settingsKey].x = defaultX
+                currentSettings[settingsKey].y = defaultY
+                currentSettings[settingsKey].point = defaultAnchor
+                -- === End DB Update ===
+
+                frame:ClearAllPoints()
+                frame:SetPoint(defaultAnchor, UIParent, defaultAnchor, defaultX, defaultY)
+
+                -- === Save the new default position with LibWindow ===
+                if LibWindow and LibWindow.SavePosition then
+                    print("|cFF00FF00BoxxyAuras:|r Saving position for " .. frameType)
+                    LibWindow.SavePosition(frame)
+                end
+                -- === End save position ===
+
+                -- Apply Default Scale Manually
+                BoxxyAuras.FrameHandler.SetFrameScale(frame, 1.0) -- Assuming default scale is 1.0
+
+                -- Re-apply settings to fix width/layout based on defaults
+                BoxxyAuras.FrameHandler.ApplySettings(frameType)
+
+            elseif not frame then
+                print("|cFFFF0000BoxxyAuras Warning:|r Frame object not found for " .. frameType)
             end
         end
 
-        -- Re-initialize frames to apply the reset defaults
-        BoxxyAuras.FrameHandler.InitializeFrames()
-        print("|cFF00FF00BoxxyAuras:|r Frame positions reset. You may need to /reload for all changes to take effect.")
+        -- Re-initialize frames to apply the reset defaults -- <<< REMOVE THIS
+        -- BoxxyAuras.FrameHandler.InitializeFrames() 
+        print("|cFF00FF00BoxxyAuras:|r Frame positions and scale reset. Layout updated.")
 
     else
         print("BoxxyAuras: Unknown command '/ba " .. command .. "'. Use '/ba options', '/ba lock', or '/ba reset'.")
@@ -979,98 +1047,134 @@ end
 -- <<< NEW: Global OnUpdate frame for hover state management >>>
 local hoverCheckFrame = CreateFrame("Frame")
 hoverCheckFrame:SetScript("OnUpdate", function(self, elapsed)
-    local currentHovered = BoxxyAuras.HoveredFrame
 
-    -- <<< ADDED: Skip checks if currently resizing the hovered frame >>>
-    if currentHovered and currentHovered.isResizing then
-        -- Keep hover visuals active and prevent leave logic/debounce while actively resizing
-        if not BoxxyAuras.Config.FramesLocked then
-            BoxxyAuras.UIUtils.ColorBGSlicedFrame(currentHovered, "backdrop", BoxxyAuras.Config.MainFrameBGColorHover)
-        end
-        -- Also cancel any pending leave debounce if we start resizing
-        if currentHovered.leaveDebounceEndTime then
-            currentHovered.leaveDebounceEndTime = nil
-        end
-        return -- Skip the rest of the checks
-    end
-    -- <<< END ADDED CHECK >>>
+    local currentLockState = BoxxyAuras:GetCurrentProfileSettings().lockFrames
 
-    -- First, process any frame waiting for its debounce timer to finish for AURA cleanup
-    if currentHovered and currentHovered.leaveDebounceEndTime and GetTime() >= currentHovered.leaveDebounceEndTime then
+    -- === Check for Unlock Transition ===
+    if BoxxyAuras.WasLocked == true and currentLockState == false then
         if BoxxyAuras.DEBUG then
-            print("BoxxyAuras: Debounce timer finished for frame " .. currentHovered:GetName() ..
-                      ". Clearing HoveredFrame and updating auras.")
+            print("Detected Unlock Transition: Force restoring frame visuals.")
         end
-
-        -- Timer finished for aura cleanup
-        local previouslyHovered = currentHovered -- Store reference before clearing
-        BoxxyAuras.HoveredFrame = nil -- Clear global reference *only now*
-        previouslyHovered.leaveDebounceEndTime = nil -- Clear the timer flag
-
-        BoxxyAuras.UpdateAuras() -- Force update to remove expired icons
-
-        -- Hide handles now that hover is truly over
-        if previouslyHovered.handles then
-            if previouslyHovered.handles.left then
-                previouslyHovered.handles.left:Hide()
-            end
-            if previouslyHovered.handles.right then
-                previouslyHovered.handles.right:Hide()
+        for frameType, frame in pairs(BoxxyAuras.Frames or {}) do
+            if frame then
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "backdrop", BoxxyAuras.Config.MainFrameBGColorNormal)
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", BoxxyAuras.Config.BorderColor)
             end
         end
+    end
+    -- === End Unlock Check ===
 
-        currentHovered = nil -- Update local variable since we just left
+    -- === Process Expired Debounce Timer ===
+    if BoxxyAuras.DebounceEndTime and GetTime() >= BoxxyAuras.DebounceEndTime then
+        if BoxxyAuras.DEBUG then
+            print("Debounce timer expired for: " ..
+                      (BoxxyAuras.DebounceTargetFrame and BoxxyAuras.DebounceTargetFrame:GetName() or "nil"))
+        end
+        BoxxyAuras.HoveredFrame = nil -- Clear the actual hover state
+        BoxxyAuras.DebounceTargetFrame = nil -- Clear debounce target
+        BoxxyAuras.DebounceEndTime = nil -- Clear debounce time
+        BoxxyAuras.UpdateAuras() -- Trigger aura update AFTER clearing hover
+    end
+    -- === End Debounce Check ===
+
+    local currentActualHovered = BoxxyAuras.HoveredFrame -- Which frame are we truly considering hovered?
+    local frameMouseIsCurrentlyIn = nil
+
+    -- Check geometric hover state
+    for frameType, frame in pairs(BoxxyAuras.Frames or {}) do
+        if frame:IsVisible() and BoxxyAuras.IsMouseWithinFrame(frame) then
+            frameMouseIsCurrentlyIn = frame
+            break
+        end
     end
 
-    -- Next, check the current hover state based on mouse position for VISUALS
-    if currentHovered and currentHovered:IsVisible() then
-        -- Check if cursor is still inside the frame
-        local isInside = BoxxyAuras.IsMouseWithinFrame(currentHovered)
+    -- === Handle Hover State Logic ===
 
-        if not isInside then
-            -- Cursor is OUTSIDE the frame
-            -- Reset background color *immediately* if not locked
-            if not BoxxyAuras.Config.FramesLocked then
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(currentHovered, "backdrop",
-                    BoxxyAuras.Config.MainFrameBGColorNormal)
+    -- CASE 1: Mouse is actually in a frame now
+    if frameMouseIsCurrentlyIn then
+        if frameMouseIsCurrentlyIn ~= currentActualHovered then
+            -- Entered a new frame (or re-entered one during debounce)
+            if BoxxyAuras.DEBUG then
+                print("Entered frame: " .. frameMouseIsCurrentlyIn:GetName())
             end
 
-            -- Check if we haven't already started the debounce timer for AURA cleanup
-            if not currentHovered.leaveDebounceEndTime then
+            -- If we were debouncing a leave from another frame, cancel it
+            if BoxxyAuras.DebounceTargetFrame and BoxxyAuras.DebounceTargetFrame ~= frameMouseIsCurrentlyIn then
                 if BoxxyAuras.DEBUG then
-                    print("BoxxyAuras: Mouse left hovered frame " .. currentHovered:GetName() ..
-                              ", starting 1s debounce for aura cleanup.")
+                    print("  Cancelling debounce for: " .. BoxxyAuras.DebounceTargetFrame:GetName())
                 end
-                -- Start the debounce timer
-                currentHovered.leaveDebounceEndTime = GetTime() + 1.0
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(BoxxyAuras.DebounceTargetFrame, "backdrop",
+                    BoxxyAuras.Config.MainFrameBGColorNormal)
+                BoxxyAuras.DebounceTargetFrame = nil
+                BoxxyAuras.DebounceEndTime = nil
             end
-        else
-            -- Cursor is INSIDE the frame
-            -- Ensure hover visuals are applied
-            if not BoxxyAuras.Config.FramesLocked then
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(currentHovered, "backdrop",
+
+            -- Set the new hovered frame and apply visuals
+            BoxxyAuras.HoveredFrame = frameMouseIsCurrentlyIn
+            if not BoxxyAuras:GetCurrentProfileSettings().lockFrames then
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(BoxxyAuras.HoveredFrame, "backdrop",
                     BoxxyAuras.Config.MainFrameBGColorHover)
             end
-
-            -- If a debounce timer was previously started (mouse left then quickly re-entered), clear it
-            if currentHovered.leaveDebounceEndTime then
+            BoxxyAuras.UpdateAuras() -- Update auras for the newly hovered frame
+        else
+            -- Mouse is still within the same frame we already considered hovered.
+            -- If a debounce was running for this frame (e.g., mouse left & quickly re-entered), cancel it.
+            if BoxxyAuras.DebounceEndTime and BoxxyAuras.DebounceTargetFrame == frameMouseIsCurrentlyIn then
                 if BoxxyAuras.DEBUG then
-                    print("BoxxyAuras: Mouse re-entered frame " .. currentHovered:GetName() ..
-                              " during debounce, cancelling aura cleanup timer.")
+                    print("Re-entered during debounce, cancelling timer for: " .. frameMouseIsCurrentlyIn:GetName())
                 end
-                currentHovered.leaveDebounceEndTime = nil
+                BoxxyAuras.DebounceTargetFrame = nil
+                BoxxyAuras.DebounceEndTime = nil
+                -- Re-apply hover visuals ensure they weren't reset
+                if not BoxxyAuras:GetCurrentProfileSettings().lockFrames then
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(BoxxyAuras.HoveredFrame, "backdrop",
+                        BoxxyAuras.Config.MainFrameBGColorHover)
+                end
             end
         end
+
+        -- CASE 2: Mouse is NOT in any frame currently
     else
-        -- If HoveredFrame was somehow set but isn't visible, clear it immediately
-        if BoxxyAuras.HoveredFrame then
-            if BoxxyAuras.DEBUG then
-                print("BoxxyAuras: Clearing invisible/invalid HoveredFrame: " .. BoxxyAuras.HoveredFrame:GetName())
+        if currentActualHovered then
+            -- We were previously hovering a frame, but the mouse is now outside it.
+            -- Start debounce timer ONLY if one isn't already running for this frame.
+            if not BoxxyAuras.DebounceEndTime then
+                if BoxxyAuras.DEBUG then
+                    print("Mouse left frame: " .. currentActualHovered:GetName() .. ", starting debounce.")
+                end
+                BoxxyAuras.DebounceTargetFrame = currentActualHovered
+                BoxxyAuras.DebounceEndTime = GetTime() + 1.0
+                -- Reset background color immediately
+                if not BoxxyAuras:GetCurrentProfileSettings().lockFrames then
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(currentActualHovered, "backdrop",
+                        BoxxyAuras.Config.MainFrameBGColorNormal)
+                end
+                -- DO NOT clear HoveredFrame here, wait for timer.
+                -- DO NOT call UpdateAuras here.
             end
-            if BoxxyAuras.HoveredFrame.leaveDebounceEndTime then -- Clear timer just in case
-                BoxxyAuras.HoveredFrame.leaveDebounceEndTime = nil
-            end
-            BoxxyAuras.HoveredFrame = nil
         end
     end
+    -- === End Hover State Logic ===
+
+    -- <<< Original resize check logic >>>
+    local currentHovered = BoxxyAuras.HoveredFrame -- Use the potentially updated value
+    if currentHovered and currentHovered.isResizing then
+        -- Keep hover visuals active while resizing
+        if not BoxxyAuras:GetCurrentProfileSettings().lockFrames then
+            BoxxyAuras.UIUtils.ColorBGSlicedFrame(currentHovered, "backdrop", BoxxyAuras.Config.MainFrameBGColorHover)
+        end
+        -- If we start resizing while debouncing a leave, cancel the debounce
+        if BoxxyAuras.DebounceEndTime and BoxxyAuras.DebounceTargetFrame == currentHovered then
+            if BoxxyAuras.DEBUG then
+                print("Started resizing during leave debounce, cancelling timer for: " .. currentHovered:GetName())
+            end
+            BoxxyAuras.DebounceTargetFrame = nil
+            BoxxyAuras.DebounceEndTime = nil
+        end
+        return -- Skip the rest of the checks during resize
+    end
+    -- <<< END Original resize check logic >>>
+
+    -- Update previous lock state for next tick
+    BoxxyAuras.WasLocked = currentLockState
 end)

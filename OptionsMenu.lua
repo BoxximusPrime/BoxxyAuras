@@ -1106,7 +1106,7 @@ function BoxxyAuras.Options:ApplyIconSizeChange(frameType)
     end
 
     -- Re-layout icons with the new sizes
-    BoxxyAuras.FrameHandler.UpdateAurasInFrame(frame)
+    BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType)
 
     -- Force update tracked auras to refresh their data
     local trackedAuras = BoxxyAuras.GetTrackedAuras and BoxxyAuras.GetTrackedAuras(frameType) or {}

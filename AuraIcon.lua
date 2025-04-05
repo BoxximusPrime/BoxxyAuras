@@ -40,10 +40,6 @@ function AuraIcon.New(parentFrame, index, baseName)
     local totalHeight = iconSize + textHeight + (padding * 2)
     local totalWidth = iconSize + (padding * 2)
 
-    if BoxxyAuras.DEBUG then
-        print("Creating icon for " .. (frameType or "unknown") .. " frame with size " .. iconSize)
-    end
-
     -- Create instance and frame
     local instance = setmetatable({}, AuraIcon)
     instance.currentSize = iconSize -- Store initial size
@@ -238,11 +234,6 @@ function AuraIcon.New(parentFrame, index, baseName)
     instance.tooltipUpdateTimer = 0
     frame:Hide()
 
-    if BoxxyAuras.DEBUG then
-        print("AuraIcon.New: Created icon " .. baseName .. index .. ", has Resize: " ..
-                  (instance.Resize ~= nil and "YES" or "NO"))
-    end
-
     return instance
 end
 
@@ -378,10 +369,6 @@ function AuraIcon.Update(self, auraData, index, auraType)
         if currentSettings and settingsKey and currentSettings[settingsKey] then
             local iconSize = currentSettings[settingsKey].iconSize or BoxxyAuras.Config.IconSize
             self:Resize(iconSize)
-
-            if BoxxyAuras.DEBUG then
-                print("BoxxyAuras: Update resizing " .. frameType .. " icon to " .. iconSize)
-            end
         end
     end
 
@@ -595,9 +582,6 @@ function AuraIcon:Resize(newIconSize)
 
     -- Prevent unnecessary resizing
     if self.currentSize and self.currentSize == newIconSize then
-        if BoxxyAuras.DEBUG then
-            print("BoxxyAuras: Skipping resize, already at size " .. newIconSize)
-        end
         return
     end
 

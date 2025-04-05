@@ -8,38 +8,11 @@ BoxxyAurasDB = BoxxyAurasDB or {}
 local LibWindow = LibStub("LibWindow-1.1")
 
 -- Define constants and shared variables needed by frame functions
-local handleSize = 12 -- Increased handle size SIGNIFICANTLY for testing
-
--- Forward declarations needed by other files or early setup
--- These ensure the functions exist in the table even if their implementation is cleared below
-function BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-end
-function BoxxyAuras.FrameHandler.CalculateFrameWidth(numIcons, iconTextureSize)
-end
-function BoxxyAuras.FrameHandler.UpdateEdgeHandleDimensions(frame, frameW, frameH)
-end
-function BoxxyAuras.FrameHandler.SetupDisplayFrame(frame, frameName)
-end
-function BoxxyAuras.FrameHandler.PollFrameHoverState(frame, frameDesc)
-end
-function BoxxyAuras.FrameHandler.ApplyLockState(isLocked)
-end
-function BoxxyAuras.FrameHandler.ApplySettings(frameType, resetPosition_IGNORED)
-end
-function BoxxyAuras.FrameHandler.InitializeFrames()
-end
-function BoxxyAuras.FrameHandler.TriggerLayout(frameType)
-end
-function BoxxyAuras.FrameHandler.SetFrameScale(frame, scale)
-end
+local HandleWidth = 12 -- Increased handle size SIGNIFICANTLY for testing
 
 -- =========================================
 --       LOCAL HELPER FUNCTIONS (RESIZE - User Provided Version)
 -- =========================================
-
--- No CalculateIconsWideFromWidth needed with this approach
-
--- Removed standalone OnFrameResizeUpdate
 
 local function HandleOnMouseDown(self, button)
     if BoxxyAuras.DEBUG then
@@ -64,15 +37,6 @@ local function HandleOnMouseDown(self, button)
             parentFrame.resizeEdgeOffset = cursorX - (left + parentFrame:GetWidth())
         end
         parentFrame.resizeHandle = self
-
-        -- Try using cursor constants
-        if self.resizeSide == "LEFT" then
-            -- SetCursor("INTERFACE\\CURSOR\\UI-Cursor-SizeLeft") 
-            SetCursor("UI_CURSOR_SIZELEFT")
-        elseif self.resizeSide == "RIGHT" then
-            -- SetCursor("INTERFACE\\CURSOR\\UI-Cursor-SizeRight")
-            SetCursor("UI_CURSOR_SIZERIGHT")
-        end
 
         -- Inline OnUpdate logic from user snippet
         parentFrame:SetScript("OnUpdate", function(self, elapsed)
@@ -148,12 +112,7 @@ local function HandleOnMouseDown(self, button)
                         end
                         self:ClearAllPoints()
                         self:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", newLeft, self.resizeStartTop)
-                        BoxxyAuras.FrameHandler.UpdateAurasInFrame(self)
-
-                        if BoxxyAuras.DEBUG then
-                            print("Resized " .. frameType .. " frame to fit " .. numIcons .. " icons. New width: " ..
-                                      calculatedWidth)
-                        end
+                        BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, numIcons)
                     end
                 end
             end
@@ -211,7 +170,7 @@ local function HandleOnMouseUp(self, button)
             end
 
             -- === Final Layout Update ===
-            BoxxyAuras.FrameHandler.UpdateAurasInFrame(parentFrame)
+            BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType)
             -- === End Final Layout ===
 
             LibWindow.SavePosition(parentFrame) -- Save final position
@@ -237,11 +196,12 @@ local function HandleOnMouseUp(self, button)
             parentFrame.resizeEdgeOffset = nil
             parentFrame.resizeHandle = nil
 
-            -- Final alpha check for handle (redundant with OnLeave but safe)
+            -- Re-add final alpha check for handle
             if self:IsMouseOver() then
-                self:SetBackdropColor(1.0, 1.0, 1.0, 0.8)
+                self:SetBackdropColor(1.0, 1.0, 1.0, 0.8) -- Keep lit if mouse still over
             else
-                self:SetBackdropColor(1.0, 1.0, 1.0, 0)
+                -- self:SetBackdropColor(1.0, 1.0, 1.0, 0.15) -- OLD: Dim if mouse left during drag
+                self:SetBackdropColor(1.0, 1.0, 1.0, 0) -- NEW: Make transparent
             end
         end
     end
@@ -327,54 +287,36 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
         self:StopMovingOrSizing()
         LibWindow.SavePosition(self)
     end)
-    frame:SetScript("OnEnter", function(self)
-        -- If we are entering a different frame than the one currently hovered (if any)
-        if BoxxyAuras.HoveredFrame and BoxxyAuras.HoveredFrame ~= self then
-            -- Immediately trigger leave logic for the previous frame
-            if BoxxyAuras.DEBUG then
-                print(
-                    "BoxxyAuras: Instantly leaving frame " .. BoxxyAuras.HoveredFrame:GetName() .. " due to entering " ..
-                        self:GetName())
-            end
-            -- Clear its debounce timer
-            BoxxyAuras.HoveredFrame.leaveDebounceEndTime = nil
-            -- Reset its background
-            if not BoxxyAuras.Config.FramesLocked then
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(BoxxyAuras.HoveredFrame, "backdrop",
-                    BoxxyAuras.Config.MainFrameBGColorNormal)
-            end
-            -- Hide its handles
-            if BoxxyAuras.HoveredFrame.handles then
-                if BoxxyAuras.HoveredFrame.handles.left then
-                    BoxxyAuras.HoveredFrame.handles.left:Hide()
-                end
-                if BoxxyAuras.HoveredFrame.handles.right then
-                    BoxxyAuras.HoveredFrame.handles.right:Hide()
-                end
-            end
-            -- Clear the global reference immediately so UpdateAuras cleans it up next cycle
-            BoxxyAuras.HoveredFrame = nil
-            -- (Optional: Trigger UpdateAuras() here if immediate cleanup is desired)
-            -- BoxxyAuras.UpdateAuras() 
-        end
-
-        -- Set the new hovered frame
-        BoxxyAuras.HoveredFrame = self
-        -- Clear any pending leave debounce timer for this frame
-        self.leaveDebounceEndTime = nil
-
-        -- Apply hover visuals
-        if not BoxxyAuras.Config.FramesLocked then
-            BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", BoxxyAuras.Config.MainFrameBGColorHover)
-        end
-    end)
 
     -- Register helper methods.
     function frame:Lock(button)
-        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", {0, 0, 0, 0})
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", {
+            r = 0,
+            g = 0,
+            b = 0,
+            a = 0
+        })
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", {
+            r = 0,
+            g = 0,
+            b = 0,
+            a = 0
+        }) -- Hide border
+        if self.titleLabel then
+            self.titleLabel:Hide()
+        end -- Hide title
+        self:EnableMouse(false) -- Disable mouse interaction
     end
     function frame:Unlock()
+        if BoxxyAuras.DEBUG then
+            print("Executing frame:Unlock() for " .. self:GetName())
+        end
         BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", BoxxyAuras.Config.MainFrameBGColorNormal)
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", BoxxyAuras.Config.BorderColor) -- Restore border
+        if self.titleLabel then
+            self.titleLabel:Show()
+        end -- Show title
+        self:EnableMouse(true) -- Re-enable mouse interaction
     end
     function frame:SetFrameScale(scale)
         self:SetScale(scale)
@@ -387,12 +329,7 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
 end
 
 function CreateHandles(frame)
-    if BoxxyAuras.DEBUG then
-        print("Creating handles for frame: " .. (frame:GetName() or "unnamed"))
-    end
-
-    local parentH = frame:GetHeight()
-    local handleH = parentH * 1.35
+    local FrameHeight = frame:GetHeight()
 
     -- Store resizing state (keep this part)
     frame.isResizing = false
@@ -403,7 +340,13 @@ function CreateHandles(frame)
 
     -- Create handles
     local leftHandle = CreateFrame("Frame", frame:GetName() .. "LeftHandle", frame, "BackdropTemplate")
-    leftHandle:SetSize(handleSize, handleH)
+
+    if BoxxyAuras.DEBUG then
+        print(string.format("CreateHandles (%s) - parentH: %.2f, FrameHeight: %.2f, handleSize: %d", frame:GetName(),
+            FrameHeight, FrameHeight, HandleWidth or -1))
+    end
+
+    leftHandle:SetSize(HandleWidth, FrameHeight)
     leftHandle:SetPoint("LEFT", frame, "LEFT", 0, 0) -- Corrected anchor
     leftHandle:SetFrameLevel(frame:GetFrameLevel() + 10) -- Add back frame level
     leftHandle:SetFrameStrata("HIGH") -- Add back strata
@@ -418,28 +361,47 @@ function CreateHandles(frame)
             bottom = 0
         }
     })
-    leftHandle:SetBackdropColor(1.0, 1.0, 1.0, 0) -- Start transparent
+    leftHandle:SetBackdropColor(1.0, 1.0, 1.0, 0) -- NEW: Start transparent
     leftHandle:EnableMouse(true)
     leftHandle.resizeSide = "LEFT" -- Add back resize side
     leftHandle:SetScript("OnMouseDown", HandleOnMouseDown) -- Add back mouse down
     leftHandle:SetScript("OnMouseUp", HandleOnMouseUp) -- Add back mouse up
     leftHandle:SetScript("OnEnter", function(self)
-        if not self:GetParent().isResizing then -- Don't show if parent is already resizing
-            if BoxxyAuras.DEBUG then
-                print("OnEnter Handle: " .. self:GetName())
-            end
+        local parent = self:GetParent()
+        local parentName = parent:GetName()
+        local isLocked = BoxxyAuras:GetCurrentProfileSettings().lockFrames
+        if BoxxyAuras.DEBUG then
+            print(string.format("%s OnEnter: Parent (%s) isLocked=%s", self:GetName(), parentName, tostring(isLocked)))
+        end
+        if not isLocked and not parent.isResizing then
             self:SetBackdropColor(1.0, 1.0, 1.0, 0.8)
+            if BoxxyAuras.DEBUG then
+                print(string.format("  -> %s Setting Alpha: 0.8", self:GetName()))
+            end
+        else
+            if BoxxyAuras.DEBUG then
+                print(string.format("  -> %s Not Changing Alpha (Locked or Parent Resizing)", self:GetName()))
+            end
         end
     end)
     leftHandle:SetScript("OnLeave", function(self)
-        if not self:GetParent().isResizing then -- Don't hide if parent is resizing
-            if BoxxyAuras.DEBUG then
-                print("OnLeave Handle: " .. self:GetName())
-            end
+        local parent = self:GetParent()
+        local parentName = parent:GetName()
+        local isLocked = BoxxyAuras:GetCurrentProfileSettings().lockFrames
+        if BoxxyAuras.DEBUG then
+            print(string.format("%s OnLeave: Parent (%s) isLocked=%s", self:GetName(), parentName, tostring(isLocked)))
+        end
+        if not isLocked and not parent.isResizing then
             self:SetBackdropColor(1.0, 1.0, 1.0, 0)
+            if BoxxyAuras.DEBUG then
+                print(string.format("  -> %s Setting Alpha: 0", self:GetName()))
+            end
+        else
+            if BoxxyAuras.DEBUG then
+                print(string.format("  -> %s Not Changing Alpha (Locked or Parent Resizing)", self:GetName()))
+            end
         end
     end)
-    -- leftHandle:Hide() -- Ensure Hide is removed/commented
 
     -- Store handle reference
     if not frame.handles then
@@ -449,7 +411,13 @@ function CreateHandles(frame)
 
     -- Create right handle 
     local rightHandle = CreateFrame("Frame", frame:GetName() .. "RightHandle", frame, "BackdropTemplate")
-    rightHandle:SetSize(handleSize, handleH)
+
+    if BoxxyAuras.DEBUG then
+        print(string.format("CreateHandles (%s) - parentH: %.2f, FrameHeight: %.2f, handleSize: %d", frame:GetName(),
+            FrameHeight, FrameHeight, HandleWidth or -1))
+    end
+
+    rightHandle:SetSize(HandleWidth, FrameHeight)
     rightHandle:SetPoint("RIGHT", frame, "RIGHT", 0, 0) -- Corrected anchor
     rightHandle:SetFrameLevel(frame:GetFrameLevel() + 10) -- Add back frame level
     rightHandle:SetFrameStrata("HIGH") -- Add back strata
@@ -464,28 +432,47 @@ function CreateHandles(frame)
             bottom = 0
         }
     })
-    rightHandle:SetBackdropColor(1.0, 1.0, 1.0, 0) -- Start transparent
+    rightHandle:SetBackdropColor(1.0, 1.0, 1.0, 0) -- NEW: Start transparent
     rightHandle:EnableMouse(true)
     rightHandle.resizeSide = "RIGHT" -- Add back resize side
     rightHandle:SetScript("OnMouseDown", HandleOnMouseDown) -- Add back mouse down
     rightHandle:SetScript("OnMouseUp", HandleOnMouseUp) -- Add back mouse up
     rightHandle:SetScript("OnEnter", function(self)
-        if not self:GetParent().isResizing then -- Don't show if parent is already resizing
-            if BoxxyAuras.DEBUG then
-                print("OnEnter Handle: " .. self:GetName())
-            end
+        local parent = self:GetParent()
+        local parentName = parent:GetName()
+        local isLocked = BoxxyAuras:GetCurrentProfileSettings().lockFrames
+        if BoxxyAuras.DEBUG then
+            print(string.format("%s OnEnter: Parent (%s) isLocked=%s", self:GetName(), parentName, tostring(isLocked)))
+        end
+        if not isLocked and not parent.isResizing then
             self:SetBackdropColor(1.0, 1.0, 1.0, 0.8)
+            if BoxxyAuras.DEBUG then
+                print(string.format("  -> %s Setting Alpha: 0.8", self:GetName()))
+            end
+        else
+            if BoxxyAuras.DEBUG then
+                print(string.format("  -> %s Not Changing Alpha (Locked or Parent Resizing)", self:GetName()))
+            end
         end
     end)
     rightHandle:SetScript("OnLeave", function(self)
-        if not self:GetParent().isResizing then -- Don't hide if parent is resizing
-            if BoxxyAuras.DEBUG then
-                print("OnLeave Handle: " .. self:GetName())
-            end
+        local parent = self:GetParent()
+        local parentName = parent:GetName()
+        local isLocked = BoxxyAuras:GetCurrentProfileSettings().lockFrames
+        if BoxxyAuras.DEBUG then
+            print(string.format("%s OnLeave: Parent (%s) isLocked=%s", self:GetName(), parentName, tostring(isLocked)))
+        end
+        if not isLocked and not parent.isResizing then
             self:SetBackdropColor(1.0, 1.0, 1.0, 0)
+            if BoxxyAuras.DEBUG then
+                print(string.format("  -> %s Setting Alpha: 0", self:GetName()))
+            end
+        else
+            if BoxxyAuras.DEBUG then
+                print(string.format("  -> %s Not Changing Alpha (Locked or Parent Resizing)", self:GetName()))
+            end
         end
     end)
-    -- rightHandle:Hide() -- Ensure Hide is removed/commented
 
     -- Store handle reference
     frame.handles.right = rightHandle
@@ -502,19 +489,15 @@ function BoxxyAuras.FrameHandler.UpdateFrame(frame)
     end
 
     if not frameType then
-        if BoxxyAuras.DEBUG then
-            print("BoxxyAuras ERROR: Could not determine frame type in UpdateFrame for frame: " ..
-                      (frame:GetName() or "unnamed"))
-        end
+        BoxxyAuras.DebugLogError("Could not determine frame type in UpdateFrame for frame: " ..
+                                     (frame:GetName() or "unnamed"))
         return
     end
 
     -- Get settings key
     local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
     if not settingsKey then
-        if BoxxyAuras.DEBUG then
-            print("BoxxyAuras ERROR: No settings key for frame type: " .. frameType)
-        end
+        BoxxyAuras.DebugLogError("No settings key for frame type: " .. frameType)
         return
     end
 
@@ -538,30 +521,19 @@ end
 
 -- Update all frames
 function BoxxyAuras.FrameHandler.UpdateAllFramesAuras()
-    for _, frame in pairs(BoxxyAuras.Frames or {}) do
-        BoxxyAuras.FrameHandler.UpdateAurasInFrame(frame)
+    for frameType, _ in pairs(BoxxyAuras.Frames or {}) do
+        BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType)
     end
 end
 
 -- Layout auras in the frame
-function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frame)
+function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, overrideNumIconsWide)
 
-    print("Updating Auras in Frame: " .. frame:GetName())
-
-    -- Find the frame type by looking up the frame in the Frames table
-    local frameType = nil
-    for fType, f in pairs(BoxxyAuras.Frames or {}) do
-        if f == frame then
-            frameType = fType
-            break
-        end
-    end
-
-    if not frameType then
-        if BoxxyAuras.DEBUG then
-            print("BoxxyAuras ERROR: Could not determine frame type in UpdateAurasInFrame for frame: " ..
-                      (frame:GetName() or "unnamed"))
-        end
+    -- Get the frame object using frameType
+    local frame = BoxxyAuras.Frames and BoxxyAuras.Frames[frameType]
+    if not frame then
+        BoxxyAuras.DebugLogError("UpdateAurasInFrame called with invalid frameType: " .. tostring(frameType))
+        throw("UpdateAurasInFrame called with invalid frameType: " .. tostring(frameType))
         return
     end
 
@@ -573,9 +545,7 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frame)
     local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
 
     if not currentSettings or not settingsKey or not currentSettings[settingsKey] then
-        if BoxxyAuras.DEBUG then
-            print("BoxxyAuras ERROR: Missing settings for frame type: " .. frameType)
-        end
+        BoxxyAuras.DebugLogError("Missing settings for frame type: " .. frameType)
         return
     end
 
@@ -592,8 +562,9 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frame)
         alignment = frameSettings.customTextAlign or "LEFT"
     end
 
-    -- Get icons per row directly from settings
-    local iconsPerRow = math.max(1, frameSettings.numIconsWide or 1) -- Use stored value
+    -- Get icons per row: Use override if provided, otherwise use settings
+    local iconsPerRow = overrideNumIconsWide or frameSettings.numIconsWide or 1 -- Use override first
+    iconsPerRow = math.max(1, iconsPerRow) -- Ensure at least 1
 
     local iconSpacing = BoxxyAuras.Config.IconSpacing or 6
     local framePadding = BoxxyAuras.Config.FramePadding or 6
@@ -630,14 +601,13 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frame)
         -- === Update Handle Dimensions ===
         if frame.handles then
             local parentH = frame:GetHeight()
-            local handleH = parentH * 1.35 -- Recalculate desired handle height
             if frame.handles.left then
-                frame.handles.left:SetHeight(handleH)
+                frame.handles.left:SetSize(HandleWidth, parentH) -- NEW: Set both dimensions
                 frame.handles.left:ClearAllPoints() -- Re-anchor to ensure vertical centering
                 frame.handles.left:SetPoint("LEFT", frame, "LEFT", 0, 0)
             end
             if frame.handles.right then
-                frame.handles.right:SetHeight(handleH)
+                frame.handles.right:SetSize(HandleWidth, parentH) -- NEW: Set both dimensions
                 frame.handles.right:ClearAllPoints() -- Re-anchor to ensure vertical centering
                 frame.handles.right:SetPoint("RIGHT", frame, "RIGHT", 0, 0)
             end
@@ -696,8 +666,8 @@ BoxxyAuras.FrameHandler.TriggerLayout = function(frameType)
     local frame = BoxxyAuras.Frames[frameType]
     if frame then
         BoxxyAuras.FrameHandler.UpdateAurasInFrame(frame)
-    elseif BoxxyAuras.DEBUG then
-        print("BoxxyAuras DEBUG: TriggerLayout called for unknown frame type: " .. tostring(frameType))
+    else
+        BoxxyAuras.DebugLogError("TriggerLayout called for unknown frame type: " .. tostring(frameType))
     end
 end
 
@@ -775,7 +745,7 @@ function BoxxyAuras.FrameHandler.ApplySettings(frameType, resetPosition_IGNORED)
     end
 
     -- Layout auras in the frame
-    BoxxyAuras.FrameHandler.UpdateAurasInFrame(frame)
+    BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType)
 end
 
 -- Add back the stub functions that were removed
@@ -786,13 +756,26 @@ function BoxxyAuras.FrameHandler.PollFrameHoverState(frame, frameDesc)
 end
 
 function BoxxyAuras.FrameHandler.ApplyLockState(isLocked)
-    -- To be implemented: Lock/unlock all frames
+    if BoxxyAuras.DEBUG then
+        print(string.format("ApplyLockState called with isLocked = %s", tostring(isLocked)))
+    end
+    -- Lock/unlock all frames
     for frameType, frame in pairs(BoxxyAuras.Frames or {}) do
         if frame and frame.Lock and frame.Unlock then
             if isLocked then
-                frame:Lock()
+                frame:Lock() -- Calls frame:EnableMouse(false) among other things
             else
-                frame:Unlock()
+                frame:Unlock() -- Calls frame:EnableMouse(true) among other things
+            end
+
+            -- Explicitly lock/unlock handles as well
+            if frame.handles then
+                if frame.handles.left then
+                    frame.handles.left:EnableMouse(not isLocked)
+                end
+                if frame.handles.right then
+                    frame.handles.right:EnableMouse(not isLocked)
+                end
             end
         end
     end
@@ -808,9 +791,6 @@ end
 
 -- Force resize all icons in all frames to match current settings
 function BoxxyAuras.FrameHandler.ForceResizeAllIcons()
-    if BoxxyAuras.DEBUG then
-        print("BoxxyAuras: Forcing resize of all icons to match current settings")
-    end
 
     -- Loop through each frame type
     for frameType, frame in pairs(BoxxyAuras.Frames or {}) do
@@ -821,10 +801,6 @@ function BoxxyAuras.FrameHandler.ForceResizeAllIcons()
         if currentSettings and settingsKey and currentSettings[settingsKey] then
             local iconSize = currentSettings[settingsKey].iconSize or BoxxyAuras.Config.IconSize
 
-            if BoxxyAuras.DEBUG then
-                print("BoxxyAuras: Resizing " .. frameType .. " icons to size " .. iconSize)
-            end
-
             -- Get the icons for this frame type
             local iconArray = BoxxyAuras.iconArrays and BoxxyAuras.iconArrays[frameType]
 
@@ -832,20 +808,13 @@ function BoxxyAuras.FrameHandler.ForceResizeAllIcons()
             if iconArray then
                 for i, icon in pairs(iconArray) do
                     if icon and icon.Resize then
-                        if BoxxyAuras.DEBUG then
-                            print("BoxxyAuras: Resizing " .. frameType .. " icon " .. i)
-                        end
                         icon:Resize(iconSize)
                     elseif icon and icon.frame then
-                        if BoxxyAuras.DEBUG then
-                            print("BoxxyAuras WARNING: Icon " .. i .. " doesn't have Resize method!")
-                        end
+                        BoxxyAuras.DebugLogError("Icon " .. i .. " doesn't have Resize method!")
                     end
                 end
             else
-                if BoxxyAuras.DEBUG then
-                    print("BoxxyAuras: No icons found for " .. frameType)
-                end
+                BoxxyAuras.DebugLogError("No icons found for " .. frameType)
             end
         end
     end
