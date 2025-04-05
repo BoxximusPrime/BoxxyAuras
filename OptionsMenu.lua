@@ -134,6 +134,21 @@ local scrollFrame = CreateFrame("ScrollFrame", "BoxxyAurasOptionsScrollFrame", o
 scrollFrame:SetPoint("TOPLEFT", 10, -50)
 scrollFrame:SetPoint("BOTTOMRIGHT", -30, 10)
 
+-- <<< ADDED: Adjust Mouse Wheel Scroll Speed >>>
+local SCROLL_STEP_REDUCTION_FACTOR = 0.7 -- Adjust this value (e.g., 0.5 for half speed)
+scrollFrame:SetScript("OnMouseWheel", function(self, delta)
+    local scrollBar = _G[self:GetName() .. "ScrollBar"];
+    local currentStep = SCROLL_FRAME_SCROLL_STEP or 16 -- Use default Blizzard step or fallback
+    local newStep = math.max(1, math.floor(currentStep * SCROLL_STEP_REDUCTION_FACTOR)) -- Reduce step, ensure at least 1
+
+    if (delta > 0) then
+        scrollBar:SetValue(scrollBar:GetValue() - newStep);
+    else
+        scrollBar:SetValue(scrollBar:GetValue() + newStep);
+    end
+end);
+-- <<< END Scroll Speed Adjustment >>>
+
 local contentFrame = CreateFrame("Frame", "BoxxyAurasOptionsContentFrame", scrollFrame)
 contentFrame:SetSize(scrollFrame:GetWidth(), 700) -- <<< Increased height significantly >>>
 scrollFrame:SetScrollChild(contentFrame)
@@ -859,110 +874,8 @@ end
 --[[------------------------------------------------------------
 -- Apply / Update / Handler Functions (Moved UP)
 --------------------------------------------------------------]]
-function BoxxyAuras.Options:ApplyLockState(lockState)
-    -- << MODIFIED: Get frame references from BoxxyAuras.Frames >>
-    local buffFrame = BoxxyAuras.Frames and BoxxyAuras.Frames.Buff
-    local debuffFrame = BoxxyAuras.Frames and BoxxyAuras.Frames.Debuff
-    local customFrame = BoxxyAuras.Frames and BoxxyAuras.Frames.Custom
 
-    -- Safety check
-    if not buffFrame or not debuffFrame or not customFrame then
-        print("|cffFF0000BoxxyAuras Options Error:|r Could not get frame references in ApplyLockState.")
-        return
-    end
-
-    local function ApplyToFrame(frame, baseName)
-        if not frame then
-            return
-        end
-
-        -- 1. Set Movable
-        frame:SetMovable(not lockState)
-        frame.isLocked = lockState
-
-        -- 2. Handles
-        if frame.handles then
-            for name, handle in pairs(frame.handles) do
-                handle:EnableMouse(not lockState)
-                if lockState then
-                    handle:Hide()
-                else
-                    handle:Show()
-                end
-            end
-        end
-
-        -- 3. Title Label
-        local titleLabelName = baseName .. "TitleLabel"
-        local titleLabel = _G[titleLabelName]
-        if titleLabel then
-            if lockState then
-                titleLabel:Hide()
-            else
-                titleLabel:Show()
-            end
-        end
-
-        -- 4. Background & Border Visibility/Color
-        if lockState then
-            -- Hide background textures
-            if frame.backdropTextures then
-                for _, texture in ipairs(frame.backdropTextures) do
-                    if texture then
-                        texture:Hide()
-                    end
-                end
-            end
-            -- Hide border textures
-            if frame.borderTextures then
-                for _, texture in ipairs(frame.borderTextures) do
-                    if texture then
-                        texture:Hide()
-                    end
-                end
-            end
-        else
-            -- Show and color background textures
-            if frame.backdropTextures and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
-                for _, texture in ipairs(frame.backdropTextures) do
-                    if texture then
-                        texture:Show()
-                    end -- Ensure textures are shown
-                end
-                -- Apply color from config
-                local normalBgColor = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorNormal) or {
-                    r = 0.1,
-                    g = 0.1,
-                    b = 0.1,
-                    a = 0.85
-                }
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "backdrop", normalBgColor.r, normalBgColor.g,
-                    normalBgColor.b, normalBgColor.a) -- Use full config color including alpha
-            end
-            -- Show and color border textures
-            if frame.borderTextures and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
-                for _, texture in ipairs(frame.borderTextures) do
-                    if texture then
-                        texture:Show()
-                    end -- Ensure textures are shown
-                end
-                -- Apply color from config
-                local normalBorderColor = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or {
-                    r = 0.4,
-                    g = 0.4,
-                    b = 0.4,
-                    a = 0.8
-                }
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", normalBorderColor.r, normalBorderColor.g,
-                    normalBorderColor.b, normalBorderColor.a) -- Use full config color including alpha
-            end
-        end
-    end
-
-    ApplyToFrame(buffFrame, "BuffFrame")
-    ApplyToFrame(debuffFrame, "DebuffFrame")
-    ApplyToFrame(customFrame, "CustomFrame")
-end
+-- Function definition removed --
 
 function BoxxyAuras.Options:ApplyScale(scaleValue)
     if not scaleValue then
@@ -1602,7 +1515,7 @@ function BoxxyAuras.Options:Load()
     end
 
     self:ApplyScale(currentSettings.optionsScale or 1.0)
-    self:ApplyLockState(currentSettings.lockFrames or false)
+    -- Removed call to self:ApplyLockState
 
 end
 

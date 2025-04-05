@@ -1,7 +1,7 @@
 -- <<< Standardize Initialization >>>
 local addonNameString, privateTable = ... -- Get addon name (optional)
-_G.BoxxyAuras = _G.BoxxyAuras or {}      -- Ensure global table exists
-local BoxxyAuras = _G.BoxxyAuras        -- Create local alias
+_G.BoxxyAuras = _G.BoxxyAuras or {} -- Ensure global table exists
+local BoxxyAuras = _G.BoxxyAuras -- Create local alias
 
 -- Remove the previous debug print for definition
 BoxxyAuras.CustomOptions = {} -- Table to hold custom options elements
@@ -14,7 +14,9 @@ local function GetCurrentProfileSettings()
     else
         -- Fallback or error if the main function isn't loaded yet or missing
         -- print("|cffFF0000BoxxyAuras CustomOptions Error:|r Cannot get profile settings helper function!")
-        return { customAuraNames = {} } -- Return a safe default structure
+        return {
+            customAuraNames = {}
+        } -- Return a safe default structure
     end
 end
 
@@ -78,14 +80,15 @@ end)
 --[[------------------------------------------------------------
 -- Content: Scroll Frame, Edit Box, Save Button
 --------------------------------------------------------------]]
-local scrollFrame = CreateFrame("ScrollFrame", "BoxxyAurasCustomOptionsScrollFrame", customOptionsFrame, "UIPanelScrollFrameTemplate")
+local scrollFrame = CreateFrame("ScrollFrame", "BoxxyAurasCustomOptionsScrollFrame", customOptionsFrame,
+    "UIPanelScrollFrameTemplate")
 scrollFrame:SetPoint("TOPLEFT", instructionLabel, "BOTTOMLEFT", -5, -5) -- Position below new label
-scrollFrame:SetPoint("BOTTOMRIGHT", -30, 50) 
+scrollFrame:SetPoint("BOTTOMRIGHT", -30, 50)
 
 -- Edit Box for Aura Names
 local editBox = CreateFrame("EditBox", "BoxxyAurasCustomAuraEditBox", scrollFrame) -- Removed template for manual setup
 editBox:SetPoint("TOPLEFT")
-editBox:SetWidth(scrollFrame:GetWidth()) 
+editBox:SetWidth(scrollFrame:GetWidth())
 editBox:SetHeight(600) -- Height for ~6-7 lines
 editBox:SetMultiLine(true)
 editBox:SetAutoFocus(false)
@@ -96,7 +99,9 @@ if editBox.SetFont then
 else
     editBox:SetFontObject(ChatFontNormal)
 end
-editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+editBox:SetScript("OnEscapePressed", function(self)
+    self:ClearFocus()
+end)
 editBox:SetScript("OnTextChanged", function(self)
     local currentText = self:GetText()
     -- Compare current text with the stored initial text
@@ -123,7 +128,8 @@ BoxxyAuras.CustomOptions.EditBox = editBox
 BoxxyAuras.CustomOptions.initialText = "" -- Add field to store initial text
 
 -- Save Button
-local saveButton = CreateFrame("Button", "BoxxyAurasCustomOptionsSaveButton", customOptionsFrame, "BAURASButtonTemplate") 
+local saveButton =
+    CreateFrame("Button", "BoxxyAurasCustomOptionsSaveButton", customOptionsFrame, "BAURASButtonTemplate")
 saveButton:SetPoint("BOTTOMLEFT", customOptionsFrame, "BOTTOMLEFT", 10, 10)
 saveButton:SetPoint("BOTTOMRIGHT", customOptionsFrame, "BOTTOMRIGHT", -10, 10)
 saveButton:SetHeight(25)
@@ -173,14 +179,16 @@ end
 
 -- Function to parse EditBox text and save to DB
 function BoxxyAuras.CustomOptions:SaveCustomAuras()
-     -- <<< Get settings from the CURRENTLY ACTIVE profile >>>
+    -- <<< Get settings from the CURRENTLY ACTIVE profile >>>
     local currentSettings = GetCurrentProfileSettings()
 
     if not currentSettings then
         -- print("|cffFF0000BoxxyAuras Custom Options:|r Cannot save, could not get profile settings.")
         return
     end
-    if not self.EditBox then return end
+    if not self.EditBox then
+        return
+    end
 
     local text = self.EditBox:GetText()
     local newCustomNames = {}
@@ -235,6 +243,3 @@ function BoxxyAuras.CustomOptions:Toggle()
     end
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end
-
--- <<< Add Debug Print at End of File >>>
-print("BoxxyAuras Debug: CustomAuras.lua finished loading.")

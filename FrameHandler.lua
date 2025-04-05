@@ -306,17 +306,43 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
             self.titleLabel:Hide()
         end -- Hide title
         self:EnableMouse(false) -- Disable mouse interaction
+        -- Also disable handles
+        if self.handles then
+            if self.handles.left then
+                self.handles.left:EnableMouse(false)
+            end
+            if self.handles.right then
+                self.handles.right:EnableMouse(false)
+            end
+        end
     end
     function frame:Unlock()
         if BoxxyAuras.DEBUG then
             print("Executing frame:Unlock() for " .. self:GetName())
         end
-        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", BoxxyAuras.Config.MainFrameBGColorNormal)
-        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", BoxxyAuras.Config.BorderColor) -- Restore border
+        -- Try explicitly showing frame elements before coloring
+        self:Show()
         if self.titleLabel then
             self.titleLabel:Show()
-        end -- Show title
+        end
+        -- Assuming backdrop/border are children or managed textures
+        -- No direct way to :Show() them typically, ColorBGSlicedFrame handles visuals
+
+        -- Apply colors
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", BoxxyAuras.Config.MainFrameBGColorNormal)
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", BoxxyAuras.Config.BorderColor) -- Restore border
+
+        -- Re-enable mouse last
         self:EnableMouse(true) -- Re-enable mouse interaction
+        -- Also re-enable handles
+        if self.handles then
+            if self.handles.left then
+                self.handles.left:EnableMouse(true)
+            end
+            if self.handles.right then
+                self.handles.right:EnableMouse(true)
+            end
+        end
     end
     function frame:SetFrameScale(scale)
         self:SetScale(scale)
@@ -763,20 +789,12 @@ function BoxxyAuras.FrameHandler.ApplyLockState(isLocked)
     for frameType, frame in pairs(BoxxyAuras.Frames or {}) do
         if frame and frame.Lock and frame.Unlock then
             if isLocked then
-                frame:Lock() -- Calls frame:EnableMouse(false) among other things
+                frame:Lock() -- Calls frame:EnableMouse(false) AND handles mouse now
             else
-                frame:Unlock() -- Calls frame:EnableMouse(true) among other things
+                frame:Unlock() -- Calls frame:EnableMouse(true) AND handles mouse now
             end
 
-            -- Explicitly lock/unlock handles as well
-            if frame.handles then
-                if frame.handles.left then
-                    frame.handles.left:EnableMouse(not isLocked)
-                end
-                if frame.handles.right then
-                    frame.handles.right:EnableMouse(not isLocked)
-                end
-            end
+            -- Removed explicit handle locking/unlocking from here
         end
     end
 end

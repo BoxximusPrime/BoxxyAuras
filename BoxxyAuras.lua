@@ -888,9 +888,12 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         -- Handle Damage Events for Shake Effect
         if destName and destName == UnitName("player") and
             (subevent == "SPELL_DAMAGE" or subevent == "SPELL_PERIODIC_DAMAGE") then
-            if spellId and sourceGUID and amount and amount > 0 and #trackedDebuffs > 0 then
+            -- Use correct tracking table and check it exists
+            if spellId and sourceGUID and amount and amount > 0 and BoxxyAuras.auraTracking and
+                BoxxyAuras.auraTracking["Debuff"] and #BoxxyAuras.auraTracking["Debuff"] > 0 then
                 local targetAuraInstanceID = nil
-                for _, trackedDebuff in ipairs(trackedDebuffs) do
+                -- Iterate over the correct tracking table
+                for _, trackedDebuff in ipairs(BoxxyAuras.auraTracking["Debuff"]) do
                     -- Match based on spellId AND sourceGUID if available
                     if trackedDebuff and trackedDebuff.spellId == spellId then
                         if trackedDebuff.sourceGUID and trackedDebuff.sourceGUID == sourceGUID then
@@ -905,32 +908,36 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                 end
 
                 if targetAuraInstanceID then
-                    for _, auraIcon in ipairs(BoxxyAuras.debuffIcons) do
-                        if auraIcon and auraIcon.auraInstanceID == targetAuraInstanceID then
-                            if auraIcon.Shake then
-                                local shakeScale = 1.0
-                                local maxHealth = UnitHealthMax("player")
-                                if maxHealth and maxHealth > 0 then
-                                    local damagePercent = amount / maxHealth
-                                    local minScale = BoxxyAuras.Config.MinShakeScale or 0.5
-                                    local maxScale = BoxxyAuras.Config.MaxShakeScale or 2.0
-                                    local minPercent = BoxxyAuras.Config.MinDamagePercentForShake or 0.01
-                                    local maxPercent = BoxxyAuras.Config.MaxDamagePercentForShake or 0.10
-                                    if minPercent >= maxPercent then
-                                        maxPercent = minPercent + 0.01
+                    -- Iterate over the correct icon array
+                    if BoxxyAuras.iconArrays and BoxxyAuras.iconArrays["Debuff"] then
+                        for _, auraIcon in ipairs(BoxxyAuras.iconArrays["Debuff"]) do
+                            if auraIcon and auraIcon.auraInstanceID == targetAuraInstanceID then
+                                if auraIcon.Shake then
+                                    local shakeScale = 1.0
+                                    local maxHealth = UnitHealthMax("player")
+                                    if maxHealth and maxHealth > 0 then
+                                        local damagePercent = amount / maxHealth
+                                        local minScale = BoxxyAuras.Config.MinShakeScale or 0.5
+                                        local maxScale = BoxxyAuras.Config.MaxShakeScale or 2.0
+                                        local minPercent = BoxxyAuras.Config.MinDamagePercentForShake or 0.01
+                                        local maxPercent = BoxxyAuras.Config.MaxDamagePercentForShake or 0.10
+                                        if minPercent >= maxPercent then
+                                            maxPercent = minPercent + 0.01
+                                        end
+                                        if damagePercent <= minPercent then
+                                            shakeScale = minScale
+                                        elseif damagePercent >= maxPercent then
+                                            shakeScale = maxScale
+                                        else
+                                            local percentInRange =
+                                                (damagePercent - minPercent) / (maxPercent - minPercent)
+                                            shakeScale = minScale + (maxScale - minScale) * percentInRange
+                                        end
                                     end
-                                    if damagePercent <= minPercent then
-                                        shakeScale = minScale
-                                    elseif damagePercent >= maxPercent then
-                                        shakeScale = maxScale
-                                    else
-                                        local percentInRange = (damagePercent - minPercent) / (maxPercent - minPercent)
-                                        shakeScale = minScale + (maxScale - minScale) * percentInRange
-                                    end
+                                    auraIcon:Shake(shakeScale)
                                 end
-                                auraIcon:Shake(shakeScale)
+                                break
                             end
-                            break
                         end
                     end
                 end
@@ -1088,55 +1095,95 @@ hoverCheckFrame:SetScript("OnUpdate", function(self, elapsed)
         end
     end
 
-    -- === Handle Hover State Logic ===
+    -- === Handle Hover State Logic (REVISED) ===
 
-    -- CASE 1: Mouse is actually in a frame now
+    -- CASE 1: Mouse is geometrically in a frame now
     if frameMouseIsCurrentlyIn then
-        if frameMouseIsCurrentlyIn ~= currentActualHovered then
-            -- Entered a new frame (or re-entered one during debounce)
-            if BoxxyAuras.DEBUG then
-                print("Entered frame: " .. frameMouseIsCurrentlyIn:GetName())
-            end
-
-            -- If we were debouncing a leave from another frame, cancel it
-            if BoxxyAuras.DebounceTargetFrame and BoxxyAuras.DebounceTargetFrame ~= frameMouseIsCurrentlyIn then
-                if BoxxyAuras.DEBUG then
-                    print("  Cancelling debounce for: " .. BoxxyAuras.DebounceTargetFrame:GetName())
+        -- FIRST, check if the frame we are in is locked
+        if currentLockState then
+            -- Frame is locked. Treat as if mouse is NOT hovering for visual/state purposes.
+            -- If we were previously hovering a *different* (potentially unlocked) frame, handle leaving it.
+            if currentActualHovered and currentActualHovered ~= frameMouseIsCurrentlyIn then
+                if not BoxxyAuras.DebounceEndTime then -- Start debounce for the frame we just left
+                    if BoxxyAuras.DEBUG then
+                        print("Mouse left frame: " .. currentActualHovered:GetName() ..
+                                  " (entering locked frame), starting debounce.")
+                    end
+                    BoxxyAuras.DebounceTargetFrame = currentActualHovered
+                    BoxxyAuras.DebounceEndTime = GetTime() + 1.0
+                    -- Reset background color of the frame we left (it must have been unlocked)
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(currentActualHovered, "backdrop",
+                        BoxxyAuras.Config.MainFrameBGColorNormal)
                 end
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(BoxxyAuras.DebounceTargetFrame, "backdrop",
-                    BoxxyAuras.Config.MainFrameBGColorNormal)
+            end
+            -- Ensure HoveredFrame is nil because we are in a locked frame
+            if BoxxyAuras.HoveredFrame then
+                if BoxxyAuras.DEBUG then
+                    print("Clearing HoveredFrame as mouse is in a locked frame: " .. frameMouseIsCurrentlyIn:GetName())
+                end
+                BoxxyAuras.HoveredFrame = nil
+                -- Don't call UpdateAuras here, let debounce expiry handle it if needed
+            end
+            -- Also cancel any pending debounce if mouse enters a locked frame
+            if BoxxyAuras.DebounceEndTime then
+                if BoxxyAuras.DEBUG then
+                    print("Cancelling debounce timer as mouse entered a locked frame.")
+                end
+                -- Clear target frame color back to normal if it exists and wasn't the frame we just entered
+                if BoxxyAuras.DebounceTargetFrame and BoxxyAuras.DebounceTargetFrame ~= frameMouseIsCurrentlyIn then
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(BoxxyAuras.DebounceTargetFrame, "backdrop",
+                        BoxxyAuras.Config.MainFrameBGColorNormal)
+                end
                 BoxxyAuras.DebounceTargetFrame = nil
                 BoxxyAuras.DebounceEndTime = nil
             end
+        else
+            -- Frame is UNLOCKED. Proceed with normal hover logic.
+            if frameMouseIsCurrentlyIn ~= currentActualHovered then
+                -- Entered a new UNLOCKED frame (or re-entered one during debounce)
+                if BoxxyAuras.DEBUG then
+                    print("Entered unlocked frame: " .. frameMouseIsCurrentlyIn:GetName())
+                end
 
-            -- Set the new hovered frame and apply visuals
-            BoxxyAuras.HoveredFrame = frameMouseIsCurrentlyIn
-            if not BoxxyAuras:GetCurrentProfileSettings().lockFrames then
+                -- If we were debouncing leave from another frame, cancel it
+                if BoxxyAuras.DebounceTargetFrame and BoxxyAuras.DebounceTargetFrame ~= frameMouseIsCurrentlyIn then
+                    if BoxxyAuras.DEBUG then
+                        print("  Cancelling debounce for: " .. BoxxyAuras.DebounceTargetFrame:GetName())
+                    end
+                    -- Set normal color for the frame we cancelled debounce on
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(BoxxyAuras.DebounceTargetFrame, "backdrop",
+                        BoxxyAuras.Config.MainFrameBGColorNormal)
+                    BoxxyAuras.DebounceTargetFrame = nil
+                    BoxxyAuras.DebounceEndTime = nil
+                end
+
+                -- Set the new hovered frame and apply visuals (already know it's unlocked)
+                BoxxyAuras.HoveredFrame = frameMouseIsCurrentlyIn
                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(BoxxyAuras.HoveredFrame, "backdrop",
                     BoxxyAuras.Config.MainFrameBGColorHover)
-            end
-            BoxxyAuras.UpdateAuras() -- Update auras for the newly hovered frame
-        else
-            -- Mouse is still within the same frame we already considered hovered.
-            -- If a debounce was running for this frame (e.g., mouse left & quickly re-entered), cancel it.
-            if BoxxyAuras.DebounceEndTime and BoxxyAuras.DebounceTargetFrame == frameMouseIsCurrentlyIn then
-                if BoxxyAuras.DEBUG then
-                    print("Re-entered during debounce, cancelling timer for: " .. frameMouseIsCurrentlyIn:GetName())
-                end
-                BoxxyAuras.DebounceTargetFrame = nil
-                BoxxyAuras.DebounceEndTime = nil
-                -- Re-apply hover visuals ensure they weren't reset
-                if not BoxxyAuras:GetCurrentProfileSettings().lockFrames then
+                BoxxyAuras.UpdateAuras() -- Update auras for the newly hovered frame
+            else
+                -- Mouse is still within the same UNLOCKED frame we already considered hovered.
+                -- If a debounce was running for this frame, cancel it.
+                if BoxxyAuras.DebounceEndTime and BoxxyAuras.DebounceTargetFrame == frameMouseIsCurrentlyIn then
+                    if BoxxyAuras.DEBUG then
+                        print("Re-entered unlocked frame during debounce, cancelling timer for: " ..
+                                  frameMouseIsCurrentlyIn:GetName())
+                    end
+                    BoxxyAuras.DebounceTargetFrame = nil
+                    BoxxyAuras.DebounceEndTime = nil
+                    -- Re-apply hover visuals (already know it's unlocked)
                     BoxxyAuras.UIUtils.ColorBGSlicedFrame(BoxxyAuras.HoveredFrame, "backdrop",
                         BoxxyAuras.Config.MainFrameBGColorHover)
                 end
+                -- If no debounce was running, do nothing, visuals are already correct.
             end
         end
 
-        -- CASE 2: Mouse is NOT in any frame currently
+        -- CASE 2: Mouse is NOT geometrically in any frame currently
     else
         if currentActualHovered then
-            -- We were previously hovering a frame, but the mouse is now outside it.
+            -- We were previously hovering a frame, but the mouse is now outside all frames.
             -- Start debounce timer ONLY if one isn't already running for this frame.
             if not BoxxyAuras.DebounceEndTime then
                 if BoxxyAuras.DEBUG then
@@ -1144,34 +1191,43 @@ hoverCheckFrame:SetScript("OnUpdate", function(self, elapsed)
                 end
                 BoxxyAuras.DebounceTargetFrame = currentActualHovered
                 BoxxyAuras.DebounceEndTime = GetTime() + 1.0
-                -- Reset background color immediately
-                if not BoxxyAuras:GetCurrentProfileSettings().lockFrames then
+                -- Reset background color immediately IF THE FRAME WASN'T LOCKED
+                if not currentLockState then -- Check the *current* lock state
                     BoxxyAuras.UIUtils.ColorBGSlicedFrame(currentActualHovered, "backdrop",
                         BoxxyAuras.Config.MainFrameBGColorNormal)
                 end
                 -- DO NOT clear HoveredFrame here, wait for timer.
-                -- DO NOT call UpdateAuras here.
             end
+            -- else: Mouse is outside, wasn't hovering before, do nothing.
         end
     end
     -- === End Hover State Logic ===
 
     -- <<< Original resize check logic >>>
-    local currentHovered = BoxxyAuras.HoveredFrame -- Use the potentially updated value
-    if currentHovered and currentHovered.isResizing then
-        -- Keep hover visuals active while resizing
-        if not BoxxyAuras:GetCurrentProfileSettings().lockFrames then
-            BoxxyAuras.UIUtils.ColorBGSlicedFrame(currentHovered, "backdrop", BoxxyAuras.Config.MainFrameBGColorHover)
+    -- Use the potentially updated value of frameMouseIsCurrentlyIn for resize check
+    local frameBeingResized = nil
+    if frameMouseIsCurrentlyIn and frameMouseIsCurrentlyIn.isResizing then
+        frameBeingResized = frameMouseIsCurrentlyIn
+    elseif currentActualHovered and currentActualHovered.isResizing then
+        -- Fallback if mouse moved off while resizing
+        frameBeingResized = currentActualHovered
+    end
+
+    if frameBeingResized then
+        -- Keep hover visuals active while resizing, ONLY IF UNLOCKED
+        if not currentLockState then
+            BoxxyAuras.UIUtils
+                .ColorBGSlicedFrame(frameBeingResized, "backdrop", BoxxyAuras.Config.MainFrameBGColorHover)
         end
         -- If we start resizing while debouncing a leave, cancel the debounce
-        if BoxxyAuras.DebounceEndTime and BoxxyAuras.DebounceTargetFrame == currentHovered then
+        if BoxxyAuras.DebounceEndTime and BoxxyAuras.DebounceTargetFrame == frameBeingResized then
             if BoxxyAuras.DEBUG then
-                print("Started resizing during leave debounce, cancelling timer for: " .. currentHovered:GetName())
+                print("Started resizing during leave debounce, cancelling timer for: " .. frameBeingResized:GetName())
             end
             BoxxyAuras.DebounceTargetFrame = nil
             BoxxyAuras.DebounceEndTime = nil
         end
-        return -- Skip the rest of the checks during resize
+        -- Skip the rest of the checks during resize? No, we still need WasLocked update.
     end
     -- <<< END Original resize check logic >>>
 
