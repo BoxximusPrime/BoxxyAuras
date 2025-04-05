@@ -1,6 +1,6 @@
 local addonNameString, privateTable = ... -- Use different names for the local vars from ...
-_G.BoxxyAuras = _G.BoxxyAuras or {}      -- Explicitly create/assign the GLOBAL table
-local BoxxyAuras = _G.BoxxyAuras        -- Create a convenient local alias to the global table
+_G.BoxxyAuras = _G.BoxxyAuras or {} -- Explicitly create/assign the GLOBAL table
+local BoxxyAuras = _G.BoxxyAuras -- Create a convenient local alias to the global table
 BoxxyAuras.Options = {} -- Table to hold options elements
 
 -- <<< NEW: Local reference to the profile settings helper >>>
@@ -16,9 +16,18 @@ local function GetCurrentProfileSettings()
             lockFrames = false,
             hideBlizzardAuras = true,
             optionsScale = 1.0,
-            buffFrameSettings = { buffTextAlign = "CENTER", iconSize = 24 },
-            debuffFrameSettings = { debuffTextAlign = "CENTER", iconSize = 24 },
-            customFrameSettings = { customTextAlign = "CENTER", iconSize = 24 }
+            buffFrameSettings = {
+                buffTextAlign = "CENTER",
+                iconSize = 24
+            },
+            debuffFrameSettings = {
+                debuffTextAlign = "CENTER",
+                iconSize = 24
+            },
+            customFrameSettings = {
+                customTextAlign = "CENTER",
+                iconSize = 24
+            }
         }
     end
 end
@@ -44,9 +53,10 @@ optionsFrame:SetScript("OnShow", function(self)
         BoxxyAuras.Options:InitializeProfileDropdown()
     end
     -- Update UI elements based on the loaded state (Load is called by Toggle before Show)
-    if BoxxyAuras.Options.UpdateProfileUI then BoxxyAuras.Options:UpdateProfileUI() end
+    if BoxxyAuras.Options.UpdateProfileUI then
+        BoxxyAuras.Options:UpdateProfileUI()
+    end
 end)
-
 
 BoxxyAuras.Options.Frame = optionsFrame
 
@@ -100,7 +110,6 @@ closeBtn:SetScript("OnClick", function(self)
     -- <<< END ADDED SECTION >>>
 end)
 
-
 --[[------------------------------------------------------------
 -- Helper Function for Group Styling
 --------------------------------------------------------------]]
@@ -120,7 +129,8 @@ end
 --[[------------------------------------------------------------
 -- Scroll Frame & Content
 --------------------------------------------------------------]]
-local scrollFrame = CreateFrame("ScrollFrame", "BoxxyAurasOptionsScrollFrame", optionsFrame, "UIPanelScrollFrameTemplate")
+local scrollFrame = CreateFrame("ScrollFrame", "BoxxyAurasOptionsScrollFrame", optionsFrame,
+    "UIPanelScrollFrameTemplate")
 scrollFrame:SetPoint("TOPLEFT", 10, -50)
 scrollFrame:SetPoint("BOTTOMRIGHT", -30, 10)
 
@@ -234,7 +244,9 @@ profileNameEditBox:SetHeight(20)
 profileNameEditBox:SetAutoFocus(false)
 profileNameEditBox:SetMaxLetters(32) -- Reasonable limit for profile names
 profileNameEditBox:SetTextInsets(5, 5, 0, 0)
-profileNameEditBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+profileNameEditBox:SetScript("OnEscapePressed", function(self)
+    self:ClearFocus()
+end)
 profileNameEditBox:SetScript("OnEnterPressed", function(self)
     local name = self:GetText()
     if name and name ~= "" then
@@ -253,7 +265,8 @@ local buttonYOffset = -5
 
 local createButton = CreateFrame("Button", "BoxxyAurasCreateProfileButton", profileGroup, "BAURASButtonTemplate")
 createButton:SetPoint("TOPLEFT", profileNameEditBox, "BOTTOMLEFT", -3, buttonYOffset) -- << Anchor directly to edit box
-createButton:SetWidth(buttonWidth); createButton:SetHeight(20)
+createButton:SetWidth(buttonWidth);
+createButton:SetHeight(20)
 createButton:SetText("Create")
 createButton:SetScript("OnClick", function()
     local name = BoxxyAuras.Options.ProfileNameEditBox:GetText()
@@ -269,7 +282,8 @@ BoxxyAuras.Options.CreateProfileButton = createButton
 
 local copyButton = CreateFrame("Button", "BoxxyAurasCopyProfileButton", profileGroup, "BAURASButtonTemplate")
 copyButton:SetPoint("LEFT", createButton, "RIGHT", 3, 0) -- Position next to Create
-copyButton:SetWidth(buttonWidth); copyButton:SetHeight(20)
+copyButton:SetWidth(buttonWidth);
+copyButton:SetHeight(20)
 copyButton:SetText("Copy")
 copyButton:SetScript("OnClick", function()
     local name = BoxxyAuras.Options.ProfileNameEditBox:GetText()
@@ -279,24 +293,27 @@ copyButton:SetScript("OnClick", function()
     else
         -- print("BoxxyAuras Profiles: Please enter a name for the copied profile.")
     end
-     PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+    PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
 end)
 BoxxyAuras.Options.CopyProfileButton = copyButton
 
 local deleteButton = CreateFrame("Button", "BoxxyAurasDeleteProfileButton", profileGroup, "BAURASButtonTemplate")
 deleteButton:SetPoint("LEFT", copyButton, "RIGHT", 3, 0) -- Position next to Copy
-deleteButton:SetWidth(buttonWidth); deleteButton:SetHeight(20)
+deleteButton:SetWidth(buttonWidth);
+deleteButton:SetHeight(20)
 deleteButton:SetText("Delete")
 deleteButton:SetScript("OnClick", function(self)
     -- <<< ADD Enabled Check >>>
-    if not self:IsEnabled() then return end 
+    if not self:IsEnabled() then
+        return
+    end
 
     local selectedProfile = BoxxyAurasDB and BoxxyAurasDB.activeProfile
     if selectedProfile then
         -- << ADD Confirmation Dialog >>
         StaticPopup_Show("BOXXYAURAS_DELETE_PROFILE_CONFIRM", selectedProfile)
     end
-     PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+    PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
 end)
 BoxxyAuras.Options.DeleteProfileButton = deleteButton
 lastInGroup = createButton -- Anchor next group below the button row
@@ -307,7 +324,6 @@ profileGroup:SetHeight(155) -- << Set a fixed height sufficient for contents >>
 -- Update lastElement for next group positioning
 lastElement = profileGroup
 verticalSpacing = -5 -- Space between groups (Profile -> General)
-
 
 --[[------------------------------------------------------------
 -- Group 1: General Settings
@@ -321,12 +337,15 @@ lastInGroup = generalGroup -- Anchor first element to top of group
 groupVSpacing = internalElementVSpacing -- << Standardized spacing
 
 -- Option: Lock Frames Checkbox
-local lockFramesCheck = CreateFrame("CheckButton", "BoxxyAurasLockFramesCheckButton", generalGroup, "BAURASCheckBoxTemplate") -- Parent to generalGroup
+local lockFramesCheck = CreateFrame("CheckButton", "BoxxyAurasLockFramesCheckButton", generalGroup,
+    "BAURASCheckBoxTemplate") -- Parent to generalGroup
 lockFramesCheck:SetPoint("TOPLEFT", lastInGroup, "TOPLEFT", groupPadding + 5, groupVSpacing)
 lockFramesCheck:SetText("Lock Frames")
 lockFramesCheck:SetScript("OnClick", function(self)
     local currentSettings = GetCurrentProfileSettings()
-    if not currentSettings then return end
+    if not currentSettings then
+        return
+    end
 
     local currentSavedState = currentSettings.lockFrames
     local newState = not currentSavedState
@@ -334,7 +353,7 @@ lockFramesCheck:SetScript("OnClick", function(self)
 
     -- <<< MODIFIED: Directly call the FrameHandler function >>>
     if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.ApplyLockState then
-         BoxxyAuras.FrameHandler.ApplyLockState(newState)
+        BoxxyAuras.FrameHandler.ApplyLockState(newState)
     else
         -- BoxxyAuras.DebugLogError("LockFramesCheck OnClick: BoxxyAuras.FrameHandler.ApplyLockState function not found!")
     end
@@ -348,12 +367,15 @@ lastInGroup = lockFramesCheck
 groupVSpacing = internalElementVSpacing -- << Standardized spacing
 
 -- Option: Hide Blizzard Auras Checkbox
-local hideBlizzardCheck = CreateFrame("CheckButton", "BoxxyAurasHideBlizzardCheckButton", generalGroup, "BAURASCheckBoxTemplate") -- Parent to generalGroup
+local hideBlizzardCheck = CreateFrame("CheckButton", "BoxxyAurasHideBlizzardCheckButton", generalGroup,
+    "BAURASCheckBoxTemplate") -- Parent to generalGroup
 hideBlizzardCheck:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", 0, groupVSpacing) -- Position below previous
 hideBlizzardCheck:SetText("Hide Default Blizzard Auras")
 hideBlizzardCheck:SetScript("OnClick", function(self)
     local currentSettings = GetCurrentProfileSettings()
-    if not currentSettings then return end
+    if not currentSettings then
+        return
+    end
 
     local currentSavedState = currentSettings.hideBlizzardAuras
     local newState = not currentSavedState
@@ -412,27 +434,36 @@ lastInGroup = buffAlignLabel
 groupVSpacing = -8 -- Keep smaller space after header
 
 -- Buff Alignment Checkboxes (Left, Center, Right) - Revised Anchoring
-local buffAlignLeftCheck = CreateFrame("CheckButton", "BoxxyAurasBuffAlignLeftCheck", buffSubGroup, "BAURASCheckBoxTemplate")
+local buffAlignLeftCheck = CreateFrame("CheckButton", "BoxxyAurasBuffAlignLeftCheck", buffSubGroup,
+    "BAURASCheckBoxTemplate")
 buffAlignLeftCheck:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", 0, groupVSpacing)
 buffAlignLeftCheck:SetText("Left")
 BoxxyAuras.Options.BuffAlignLeftCheck = buffAlignLeftCheck
 
-local buffAlignCenterCheck = CreateFrame("CheckButton", "BoxxyAurasBuffAlignCenterCheck", buffSubGroup, "BAURASCheckBoxTemplate")
+local buffAlignCenterCheck = CreateFrame("CheckButton", "BoxxyAurasBuffAlignCenterCheck", buffSubGroup,
+    "BAURASCheckBoxTemplate")
 -- <<< Anchor Center relative to Left with fixed spacing >>>
 buffAlignCenterCheck:SetPoint("TOPLEFT", buffAlignLeftCheck, "TOPRIGHT", checkboxSpacing, 0)
 buffAlignCenterCheck:SetText("Center")
 BoxxyAuras.Options.BuffAlignCenterCheck = buffAlignCenterCheck
 
-local buffAlignRightCheck = CreateFrame("CheckButton", "BoxxyAurasBuffAlignRightCheck", buffSubGroup, "BAURASCheckBoxTemplate")
+local buffAlignRightCheck = CreateFrame("CheckButton", "BoxxyAurasBuffAlignRightCheck", buffSubGroup,
+    "BAURASCheckBoxTemplate")
 -- <<< Anchor Right relative to Center with fixed spacing >>>
 buffAlignRightCheck:SetPoint("TOPLEFT", buffAlignCenterCheck, "TOPRIGHT", checkboxSpacing, 0)
 buffAlignRightCheck:SetText("Right")
 BoxxyAuras.Options.BuffAlignRightCheck = buffAlignRightCheck
 
 -- Function to handle mutual exclusivity and saving for BUFFS (Defined later)
-buffAlignLeftCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleBuffAlignmentClick(self, "LEFT") end)
-buffAlignCenterCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleBuffAlignmentClick(self, "CENTER") end)
-buffAlignRightCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleBuffAlignmentClick(self, "RIGHT") end)
+buffAlignLeftCheck:SetScript("OnClick", function(self)
+    BoxxyAuras.Options:HandleBuffAlignmentClick(self, "LEFT")
+end)
+buffAlignCenterCheck:SetScript("OnClick", function(self)
+    BoxxyAuras.Options:HandleBuffAlignmentClick(self, "CENTER")
+end)
+buffAlignRightCheck:SetScript("OnClick", function(self)
+    BoxxyAuras.Options:HandleBuffAlignmentClick(self, "RIGHT")
+end)
 lastInGroup = buffAlignLeftCheck -- Anchor next section below the row
 groupVSpacing = internalElementVSpacing -- << Standardized spacing
 
@@ -443,25 +474,39 @@ buffSizeLabel:SetText("Buff Icon Size")
 BoxxyAuras.Options.BuffSizeLabel = buffSizeLabel
 local buffSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsBuffSizeSlider", buffSubGroup, "BAURASSlider")
 buffSizeSlider:SetPoint("TOPLEFT", buffSizeLabel, "BOTTOMLEFT", 5, -10)
-buffSizeSlider:SetMinMaxValues(12, 64); buffSizeSlider:SetValueStep(1); buffSizeSlider:SetObeyStepOnDrag(true); buffSizeSlider:SetWidth(160)
-if buffSizeSlider.KeyLabel then buffSizeSlider.KeyLabel:Show() end; if buffSizeSlider.KeyLabel2 then buffSizeSlider.KeyLabel2:Show() end
+buffSizeSlider:SetMinMaxValues(12, 64);
+buffSizeSlider:SetValueStep(1);
+buffSizeSlider:SetObeyStepOnDrag(true);
+buffSizeSlider:SetWidth(160)
+if buffSizeSlider.KeyLabel then
+    buffSizeSlider.KeyLabel:Show()
+end
+if buffSizeSlider.KeyLabel2 then
+    buffSizeSlider.KeyLabel2:Show()
+end
 buffSizeSlider:SetScript("OnValueChanged", function(self, value)
-    if self.KeyLabel then self.KeyLabel:SetText(string.format("%dpx", math.floor(value + 0.5))) end
-    local min, max = self:GetMinMaxValues(); local range = max - min
-    if range > 0 and self.VirtualThumb then self.VirtualThumb:SetPoint("CENTER", self, "LEFT", (value - min) / range * self:GetWidth(), 0) end
+    if self.KeyLabel then
+        self.KeyLabel:SetText(string.format("%dpx", math.floor(value + 0.5)))
+    end
+    local min, max = self:GetMinMaxValues();
+    local range = max - min
+    if range > 0 and self.VirtualThumb then
+        self.VirtualThumb:SetPoint("CENTER", self, "LEFT", (value - min) / range * self:GetWidth(), 0)
+    end
 end)
 buffSizeSlider:SetScript("OnMouseUp", function(self)
 
-    local value = math.floor(self:GetValue() + 0.5); self:SetValue(value)
+    local value = math.floor(self:GetValue() + 0.5);
+    self:SetValue(value)
     local currentSettings = GetCurrentProfileSettings()
-    if not currentSettings then 
+    if not currentSettings then
         BoxxyAuras.DebugLogError("BuffSizeSlider OnMouseUp: currentSettings is nil.")
-        return 
+        return
     end
-    
+
     if currentSettings.buffFrameSettings then
         currentSettings.buffFrameSettings.iconSize = value
-        BoxxyAuras.Options:ApplyIconSizeChange("Buff") 
+        BoxxyAuras.Options:ApplyIconSizeChange("Buff")
     end
     PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
 end)
@@ -495,27 +540,36 @@ lastInGroup = debuffAlignLabel
 groupVSpacing = -8 -- Keep smaller space after header
 
 -- Debuff Alignment Checkboxes - Revised Anchoring
-local debuffAlignLeftCheck = CreateFrame("CheckButton", "BoxxyAurasDebuffAlignLeftCheck", debuffSubGroup, "BAURASCheckBoxTemplate")
+local debuffAlignLeftCheck = CreateFrame("CheckButton", "BoxxyAurasDebuffAlignLeftCheck", debuffSubGroup,
+    "BAURASCheckBoxTemplate")
 debuffAlignLeftCheck:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", 0, groupVSpacing)
 debuffAlignLeftCheck:SetText("Left")
 BoxxyAuras.Options.DebuffAlignLeftCheck = debuffAlignLeftCheck
 
-local debuffAlignCenterCheck = CreateFrame("CheckButton", "BoxxyAurasDebuffAlignCenterCheck", debuffSubGroup, "BAURASCheckBoxTemplate")
+local debuffAlignCenterCheck = CreateFrame("CheckButton", "BoxxyAurasDebuffAlignCenterCheck", debuffSubGroup,
+    "BAURASCheckBoxTemplate")
 -- <<< Anchor Center relative to Left with fixed spacing >>>
 debuffAlignCenterCheck:SetPoint("TOPLEFT", debuffAlignLeftCheck, "TOPRIGHT", checkboxSpacing, 0)
 debuffAlignCenterCheck:SetText("Center")
 BoxxyAuras.Options.DebuffAlignCenterCheck = debuffAlignCenterCheck
 
-local debuffAlignRightCheck = CreateFrame("CheckButton", "BoxxyAurasDebuffAlignRightCheck", debuffSubGroup, "BAURASCheckBoxTemplate")
+local debuffAlignRightCheck = CreateFrame("CheckButton", "BoxxyAurasDebuffAlignRightCheck", debuffSubGroup,
+    "BAURASCheckBoxTemplate")
 -- <<< Anchor Right relative to Center with fixed spacing >>>
 debuffAlignRightCheck:SetPoint("TOPLEFT", debuffAlignCenterCheck, "TOPRIGHT", checkboxSpacing, 0)
 debuffAlignRightCheck:SetText("Right")
 BoxxyAuras.Options.DebuffAlignRightCheck = debuffAlignRightCheck
 
 -- Function to handle mutual exclusivity and saving for DEBUFFS (Defined later)
-debuffAlignLeftCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleDebuffAlignmentClick(self, "LEFT") end)
-debuffAlignCenterCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleDebuffAlignmentClick(self, "CENTER") end)
-debuffAlignRightCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleDebuffAlignmentClick(self, "RIGHT") end)
+debuffAlignLeftCheck:SetScript("OnClick", function(self)
+    BoxxyAuras.Options:HandleDebuffAlignmentClick(self, "LEFT")
+end)
+debuffAlignCenterCheck:SetScript("OnClick", function(self)
+    BoxxyAuras.Options:HandleDebuffAlignmentClick(self, "CENTER")
+end)
+debuffAlignRightCheck:SetScript("OnClick", function(self)
+    BoxxyAuras.Options:HandleDebuffAlignmentClick(self, "RIGHT")
+end)
 lastInGroup = debuffAlignLeftCheck
 groupVSpacing = internalElementVSpacing -- << Standardized spacing
 
@@ -526,21 +580,35 @@ debuffSizeLabel:SetText("Debuff Icon Size")
 BoxxyAuras.Options.DebuffSizeLabel = debuffSizeLabel
 local debuffSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsDebuffSizeSlider", debuffSubGroup, "BAURASSlider")
 debuffSizeSlider:SetPoint("TOPLEFT", debuffSizeLabel, "BOTTOMLEFT", 5, -10)
-debuffSizeSlider:SetMinMaxValues(12, 64); debuffSizeSlider:SetValueStep(1); debuffSizeSlider:SetObeyStepOnDrag(true); debuffSizeSlider:SetWidth(160)
-if debuffSizeSlider.KeyLabel then debuffSizeSlider.KeyLabel:Show() end; if debuffSizeSlider.KeyLabel2 then debuffSizeSlider.KeyLabel2:Show() end
+debuffSizeSlider:SetMinMaxValues(12, 64);
+debuffSizeSlider:SetValueStep(1);
+debuffSizeSlider:SetObeyStepOnDrag(true);
+debuffSizeSlider:SetWidth(160)
+if debuffSizeSlider.KeyLabel then
+    debuffSizeSlider.KeyLabel:Show()
+end
+if debuffSizeSlider.KeyLabel2 then
+    debuffSizeSlider.KeyLabel2:Show()
+end
 debuffSizeSlider:SetScript("OnValueChanged", function(self, value)
-    if self.KeyLabel then self.KeyLabel:SetText(string.format("%dpx", math.floor(value + 0.5))) end
-    local min, max = self:GetMinMaxValues(); local range = max - min
-    if range > 0 and self.VirtualThumb then self.VirtualThumb:SetPoint("CENTER", self, "LEFT", (value - min) / range * self:GetWidth(), 0) end
+    if self.KeyLabel then
+        self.KeyLabel:SetText(string.format("%dpx", math.floor(value + 0.5)))
+    end
+    local min, max = self:GetMinMaxValues();
+    local range = max - min
+    if range > 0 and self.VirtualThumb then
+        self.VirtualThumb:SetPoint("CENTER", self, "LEFT", (value - min) / range * self:GetWidth(), 0)
+    end
 end)
 debuffSizeSlider:SetScript("OnMouseUp", function(self)
-    local value = math.floor(self:GetValue() + 0.5); self:SetValue(value)
+    local value = math.floor(self:GetValue() + 0.5);
+    self:SetValue(value)
     local currentSettings = GetCurrentProfileSettings()
-    if not currentSettings then 
+    if not currentSettings then
         BoxxyAuras.DebugLogError("DebuffSizeSlider OnMouseUp: currentSettings is nil.")
-        return 
+        return
     end
-    
+
     if currentSettings.debuffFrameSettings then
         currentSettings.debuffFrameSettings.iconSize = value
         BoxxyAuras.Options:ApplyIconSizeChange("Debuff") -- <<< Use "Debuff" >>>
@@ -577,27 +645,36 @@ lastInGroup = customAlignLabel
 groupVSpacing = -8 -- Keep smaller space after header
 
 -- Custom Alignment Checkboxes - Revised Anchoring
-local customAlignLeftCheck = CreateFrame("CheckButton", "BoxxyAurasCustomAlignLeftCheck", customSubGroup, "BAURASCheckBoxTemplate")
+local customAlignLeftCheck = CreateFrame("CheckButton", "BoxxyAurasCustomAlignLeftCheck", customSubGroup,
+    "BAURASCheckBoxTemplate")
 customAlignLeftCheck:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", 0, groupVSpacing)
 customAlignLeftCheck:SetText("Left")
 BoxxyAuras.Options.CustomAlignLeftCheck = customAlignLeftCheck
 
-local customAlignCenterCheck = CreateFrame("CheckButton", "BoxxyAurasCustomAlignCenterCheck", customSubGroup, "BAURASCheckBoxTemplate")
+local customAlignCenterCheck = CreateFrame("CheckButton", "BoxxyAurasCustomAlignCenterCheck", customSubGroup,
+    "BAURASCheckBoxTemplate")
 -- <<< Anchor Center relative to Left with fixed spacing >>>
 customAlignCenterCheck:SetPoint("TOPLEFT", customAlignLeftCheck, "TOPRIGHT", checkboxSpacing, 0)
 customAlignCenterCheck:SetText("Center")
 BoxxyAuras.Options.CustomAlignCenterCheck = customAlignCenterCheck
 
-local customAlignRightCheck = CreateFrame("CheckButton", "BoxxyAurasCustomAlignRightCheck", customSubGroup, "BAURASCheckBoxTemplate")
+local customAlignRightCheck = CreateFrame("CheckButton", "BoxxyAurasCustomAlignRightCheck", customSubGroup,
+    "BAURASCheckBoxTemplate")
 -- <<< Anchor Right relative to Center with fixed spacing >>>
 customAlignRightCheck:SetPoint("TOPLEFT", customAlignCenterCheck, "TOPRIGHT", checkboxSpacing, 0)
 customAlignRightCheck:SetText("Right")
 BoxxyAuras.Options.CustomAlignRightCheck = customAlignRightCheck
 
 -- Function to handle mutual exclusivity and saving for CUSTOM (Defined later)
-customAlignLeftCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleCustomAlignmentClick(self, "LEFT") end)
-customAlignCenterCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleCustomAlignmentClick(self, "CENTER") end)
-customAlignRightCheck:SetScript("OnClick", function(self) BoxxyAuras.Options:HandleCustomAlignmentClick(self, "RIGHT") end)
+customAlignLeftCheck:SetScript("OnClick", function(self)
+    BoxxyAuras.Options:HandleCustomAlignmentClick(self, "LEFT")
+end)
+customAlignCenterCheck:SetScript("OnClick", function(self)
+    BoxxyAuras.Options:HandleCustomAlignmentClick(self, "CENTER")
+end)
+customAlignRightCheck:SetScript("OnClick", function(self)
+    BoxxyAuras.Options:HandleCustomAlignmentClick(self, "RIGHT")
+end)
 lastInGroup = customAlignLeftCheck
 groupVSpacing = internalElementVSpacing -- << Standardized spacing
 
@@ -608,21 +685,35 @@ customSizeLabel:SetText("Custom Icon Size")
 BoxxyAuras.Options.CustomSizeLabel = customSizeLabel
 local customSizeSlider = CreateFrame("Slider", "BoxxyAurasOptionsCustomSizeSlider", customSubGroup, "BAURASSlider")
 customSizeSlider:SetPoint("TOPLEFT", customSizeLabel, "BOTTOMLEFT", 5, -10)
-customSizeSlider:SetMinMaxValues(12, 64); customSizeSlider:SetValueStep(1); customSizeSlider:SetObeyStepOnDrag(true); customSizeSlider:SetWidth(160)
-if customSizeSlider.KeyLabel then customSizeSlider.KeyLabel:Show() end; if customSizeSlider.KeyLabel2 then customSizeSlider.KeyLabel2:Show() end
+customSizeSlider:SetMinMaxValues(12, 64);
+customSizeSlider:SetValueStep(1);
+customSizeSlider:SetObeyStepOnDrag(true);
+customSizeSlider:SetWidth(160)
+if customSizeSlider.KeyLabel then
+    customSizeSlider.KeyLabel:Show()
+end
+if customSizeSlider.KeyLabel2 then
+    customSizeSlider.KeyLabel2:Show()
+end
 customSizeSlider:SetScript("OnValueChanged", function(self, value)
-    if self.KeyLabel then self.KeyLabel:SetText(string.format("%dpx", math.floor(value + 0.5))) end
-    local min, max = self:GetMinMaxValues(); local range = max - min
-    if range > 0 and self.VirtualThumb then self.VirtualThumb:SetPoint("CENTER", self, "LEFT", (value - min) / range * self:GetWidth(), 0) end
+    if self.KeyLabel then
+        self.KeyLabel:SetText(string.format("%dpx", math.floor(value + 0.5)))
+    end
+    local min, max = self:GetMinMaxValues();
+    local range = max - min
+    if range > 0 and self.VirtualThumb then
+        self.VirtualThumb:SetPoint("CENTER", self, "LEFT", (value - min) / range * self:GetWidth(), 0)
+    end
 end)
 customSizeSlider:SetScript("OnMouseUp", function(self)
-    local value = math.floor(self:GetValue() + 0.5); self:SetValue(value)
+    local value = math.floor(self:GetValue() + 0.5);
+    self:SetValue(value)
     local currentSettings = GetCurrentProfileSettings()
-    if not currentSettings then 
+    if not currentSettings then
         BoxxyAuras.DebugLogError("CustomSizeSlider OnMouseUp: currentSettings is nil.")
-        return 
+        return
     end
-    
+
     if currentSettings.customFrameSettings then
         currentSettings.customFrameSettings.iconSize = value
         BoxxyAuras.Options:ApplyIconSizeChange("Custom") -- <<< Use "Custom" >>>
@@ -633,7 +724,8 @@ BoxxyAuras.Options.CustomSizeSlider = customSizeSlider
 lastInGroup = customSizeSlider
 
 -- Button to Open Custom Aura Options
-local openCustomOptionsButton = CreateFrame("Button", "BoxxyAurasOpenCustomOptionsButton", customSubGroup, "BAURASButtonTemplate") -- Parent = customSubGroup
+local openCustomOptionsButton = CreateFrame("Button", "BoxxyAurasOpenCustomOptionsButton", customSubGroup,
+    "BAURASButtonTemplate") -- Parent = customSubGroup
 openCustomOptionsButton:SetPoint("TOPLEFT", lastInGroup, "BOTTOMLEFT", -5, -35) -- Position below slider (adjusted spacing)
 openCustomOptionsButton:SetWidth(customSubGroup:GetWidth() - (groupPadding * 2) - 10) -- Fit within sub-group padding
 openCustomOptionsButton:SetHeight(25)
@@ -647,10 +739,11 @@ openCustomOptionsButton:SetScript("OnClick", function()
         print("|cffFF0000BoxxyAuras Error:|r CustomOptions table or Toggle function is missing when button clicked!")
         print(string.format("  _G.BoxxyAuras.CustomOptions type: %s", type(_G.BoxxyAuras.CustomOptions)))
         if _G.BoxxyAuras.CustomOptions then
-             print(string.format("  _G.BoxxyAuras.CustomOptions.Toggle type: %s", type(_G.BoxxyAuras.CustomOptions.Toggle)))
+            print(string.format("  _G.BoxxyAuras.CustomOptions.Toggle type: %s",
+                type(_G.BoxxyAuras.CustomOptions.Toggle)))
         end
     end
-    
+
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end)
 BoxxyAuras.Options.OpenCustomOptionsButton = openCustomOptionsButton
@@ -690,28 +783,48 @@ scaleSliderLabel:SetText("Global Scale")
 BoxxyAuras.Options.ScaleSliderLabel = scaleSliderLabel
 local scaleSlider = CreateFrame("Slider", "BoxxyAurasOptionsScaleSlider", scaleGroup, "BAURASSlider")
 scaleSlider:SetPoint("TOPLEFT", scaleSliderLabel, "BOTTOMLEFT", 5, -10)
-scaleSlider:SetMinMaxValues(0.5, 2.0); scaleSlider:SetValueStep(0.05); scaleSlider:SetObeyStepOnDrag(true); scaleSlider:SetWidth(160)
-if scaleSlider.KeyLabel then scaleSlider.KeyLabel:Show() end; if scaleSlider.KeyLabel2 then scaleSlider.KeyLabel2:Show() end
+scaleSlider:SetMinMaxValues(0.5, 2.0);
+scaleSlider:SetValueStep(0.05);
+scaleSlider:SetObeyStepOnDrag(true);
+scaleSlider:SetWidth(160)
+if scaleSlider.KeyLabel then
+    scaleSlider.KeyLabel:Show()
+end
+if scaleSlider.KeyLabel2 then
+    scaleSlider.KeyLabel2:Show()
+end
 scaleSlider:SetScript("OnValueChanged", function(self, value)
-    if self.KeyLabel then self.KeyLabel:SetText(string.format("%.2f", value)) end
-    local min, max = self:GetMinMaxValues(); local range = max - min
-    if range > 0 and self.VirtualThumb then self.VirtualThumb:SetPoint("CENTER", self, "LEFT", (value - min) / range * self:GetWidth(), 0) end
+    if self.KeyLabel then
+        self.KeyLabel:SetText(string.format("%.2f", value))
+    end
+    local min, max = self:GetMinMaxValues();
+    local range = max - min
+    if range > 0 and self.VirtualThumb then
+        self.VirtualThumb:SetPoint("CENTER", self, "LEFT", (value - min) / range * self:GetWidth(), 0)
+    end
 end)
 scaleSlider:SetScript("OnMouseUp", function(self)
-    local value = self:GetValue(); local step = self:GetValueStep(); value = math.floor((value / step) + 0.5) * step; self:SetValue(value)
+    local value = self:GetValue();
+    local step = self:GetValueStep();
+    value = math.floor((value / step) + 0.5) * step;
+    self:SetValue(value)
     local currentSettings = GetCurrentProfileSettings()
-    if not currentSettings then return end
+    if not currentSettings then
+        return
+    end
     currentSettings.optionsScale = value
-    
-    -- <<< Trigger ApplySettings for aura frames to re-apply scale & position >>>
-    if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.ApplySettings then
-        BoxxyAuras.FrameHandler.ApplySettings("Buff")
-        BoxxyAuras.FrameHandler.ApplySettings("Debuff")
-        BoxxyAuras.FrameHandler.ApplySettings("Custom")
+
+    -- Apply scale to frames using the SetFrameScale helper
+    if BoxxyAuras.Frames then
+        for frameType, frame in pairs(BoxxyAuras.Frames) do
+            if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.SetFrameScale then
+                BoxxyAuras.FrameHandler.SetFrameScale(frame, value)
+            end
+        end
     end
 
-    -- <<< Explicitly scale options windows >>>
-    BoxxyAuras.Options:ApplyScale(value) 
+    -- Explicitly scale options windows
+    BoxxyAuras.Options:ApplyScale(value)
 
     PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
 end)
@@ -759,7 +872,9 @@ function BoxxyAuras.Options:ApplyLockState(lockState)
     end
 
     local function ApplyToFrame(frame, baseName)
-        if not frame then return end
+        if not frame then
+            return
+        end
 
         -- 1. Set Movable
         frame:SetMovable(not lockState)
@@ -769,7 +884,11 @@ function BoxxyAuras.Options:ApplyLockState(lockState)
         if frame.handles then
             for name, handle in pairs(frame.handles) do
                 handle:EnableMouse(not lockState)
-                if lockState then handle:Hide() else handle:Show() end
+                if lockState then
+                    handle:Hide()
+                else
+                    handle:Show()
+                end
             end
         end
 
@@ -777,7 +896,11 @@ function BoxxyAuras.Options:ApplyLockState(lockState)
         local titleLabelName = baseName .. "TitleLabel"
         local titleLabel = _G[titleLabelName]
         if titleLabel then
-            if lockState then titleLabel:Hide() else titleLabel:Show() end
+            if lockState then
+                titleLabel:Hide()
+            else
+                titleLabel:Show()
+            end
         end
 
         -- 4. Background & Border Visibility/Color
@@ -785,33 +908,53 @@ function BoxxyAuras.Options:ApplyLockState(lockState)
             -- Hide background textures
             if frame.backdropTextures then
                 for _, texture in ipairs(frame.backdropTextures) do
-                    if texture then texture:Hide() end
+                    if texture then
+                        texture:Hide()
+                    end
                 end
             end
             -- Hide border textures
             if frame.borderTextures then
-                 for _, texture in ipairs(frame.borderTextures) do
-                    if texture then texture:Hide() end
+                for _, texture in ipairs(frame.borderTextures) do
+                    if texture then
+                        texture:Hide()
+                    end
                 end
             end
         else
             -- Show and color background textures
             if frame.backdropTextures and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
                 for _, texture in ipairs(frame.backdropTextures) do
-                    if texture then texture:Show() end -- Ensure textures are shown
+                    if texture then
+                        texture:Show()
+                    end -- Ensure textures are shown
                 end
                 -- Apply color from config
-                local normalBgColor = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorNormal) or { r = 0.1, g = 0.1, b = 0.1, a = 0.85 }
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "backdrop", normalBgColor.r, normalBgColor.g, normalBgColor.b, normalBgColor.a) -- Use full config color including alpha
+                local normalBgColor = (BoxxyAuras.Config and BoxxyAuras.Config.MainFrameBGColorNormal) or {
+                    r = 0.1,
+                    g = 0.1,
+                    b = 0.1,
+                    a = 0.85
+                }
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "backdrop", normalBgColor.r, normalBgColor.g,
+                    normalBgColor.b, normalBgColor.a) -- Use full config color including alpha
             end
             -- Show and color border textures
             if frame.borderTextures and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
-                 for _, texture in ipairs(frame.borderTextures) do
-                     if texture then texture:Show() end -- Ensure textures are shown
+                for _, texture in ipairs(frame.borderTextures) do
+                    if texture then
+                        texture:Show()
+                    end -- Ensure textures are shown
                 end
                 -- Apply color from config
-                local normalBorderColor = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or { r = 0.4, g = 0.4, b = 0.4, a = 0.8 }
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", normalBorderColor.r, normalBorderColor.g, normalBorderColor.b, normalBorderColor.a) -- Use full config color including alpha
+                local normalBorderColor = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or {
+                    r = 0.4,
+                    g = 0.4,
+                    b = 0.4,
+                    a = 0.8
+                }
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", normalBorderColor.r, normalBorderColor.g,
+                    normalBorderColor.b, normalBorderColor.a) -- Use full config color including alpha
             end
         end
     end
@@ -822,13 +965,21 @@ function BoxxyAuras.Options:ApplyLockState(lockState)
 end
 
 function BoxxyAuras.Options:ApplyScale(scaleValue)
-    if not scaleValue then return end
-    local optionsFrm = self.Frame -- This one is local to Options
-    local customOptionsFrm = BoxxyAuras.CustomOptions and BoxxyAuras.CustomOptions.Frame -- This one is local to CustomOptions
+    if not scaleValue then
+        return
+    end
 
-    -- Scale the Options Windows ONLY
-    if optionsFrm then optionsFrm:SetScale(scaleValue) end
-    if customOptionsFrm then customOptionsFrm:SetScale(scaleValue) end
+    -- Only scale the Options Windows, NOT the aura frames
+    -- (The aura frames are scaled separately in the OnMouseUp handler)
+    local optionsFrm = self.Frame
+    local customOptionsFrm = BoxxyAuras.CustomOptions and BoxxyAuras.CustomOptions.Frame
+
+    if optionsFrm then
+        optionsFrm:SetScale(scaleValue)
+    end
+    if customOptionsFrm then
+        customOptionsFrm:SetScale(scaleValue)
+    end
 end
 
 function BoxxyAuras.Options:ApplyTextAlign()
@@ -840,60 +991,148 @@ function BoxxyAuras.Options:ApplyTextAlign()
 end
 
 function BoxxyAuras.Options:ApplyIconSizeChange(frameType)
+    -- Debug output to track function calls
+    if BoxxyAuras.DEBUG then
+        print("ApplyIconSizeChange called for frameType: " .. tostring(frameType))
+    end
+
     local settingsKey = nil
-    if frameType == "Buff" then settingsKey = "buffFrameSettings"
-    elseif frameType == "Debuff" then settingsKey = "debuffFrameSettings"
-    elseif frameType == "Custom" then settingsKey = "customFrameSettings"
-    else return end
+    if frameType == "Buff" then
+        settingsKey = "buffFrameSettings"
+    elseif frameType == "Debuff" then
+        settingsKey = "debuffFrameSettings"
+    elseif frameType == "Custom" then
+        settingsKey = "customFrameSettings"
+    else
+        if BoxxyAuras.DEBUG then
+            print("ERROR: Invalid frameType: " .. tostring(frameType))
+        end
+        return
+    end
 
     local currentSettings = GetCurrentProfileSettings()
-    if not currentSettings or not currentSettings[settingsKey] then return end
-
-    -- Icon size is already saved by the slider's OnMouseUp.
-    -- We no longer need to read iconSize, numIconsWide, or currentSavedWidth here.
-
-    if BoxxyAuras.FrameHandler and
-       BoxxyAuras.FrameHandler.CalculateFrameWidth and -- Keep check for existence
-       BoxxyAuras.FrameHandler.ApplySettings and
-       BoxxyAuras.FrameHandler.LayoutAuras then
-
-        -- Remove all width calculation/adjustment logic from here.
-        -- ApplySettings in FrameHandler will now *always* calculate width based on
-        -- the newly saved iconSize and the existing numIconsWide from the profile.
-
-        -- Apply settings (will use the new iconSize and existing numIconsWide to calculate width)
-        BoxxyAuras.FrameHandler.ApplySettings(frameType)
-
-        -- Re-layout icons (will use the newly calculated frame dimensions)
-        BoxxyAuras.FrameHandler.LayoutAuras(frameType)
-
-        -- Force update on existing visible icons for size change
-        local trackedAuras = BoxxyAuras.GetTrackedAuras and BoxxyAuras.GetTrackedAuras(frameType) or {}
-        local visualIcons = nil
-        local filter = "HELPFUL"
-        if frameType == "Buff" then visualIcons = BoxxyAuras.buffIcons; filter = "HELPFUL"
-        elseif frameType == "Debuff" then visualIcons = BoxxyAuras.debuffIcons; filter = "HARMFUL"
-        elseif frameType == "Custom" then visualIcons = BoxxyAuras.customIcons; filter = "CUSTOM"
+    if not currentSettings or not currentSettings[settingsKey] then
+        if BoxxyAuras.DEBUG then
+            print("ERROR: No settings found for " .. settingsKey)
         end
+        return
+    end
 
-        if visualIcons and trackedAuras then
-            for i, auraData in ipairs(trackedAuras) do
-                local auraIcon = visualIcons[i]
-                local iconStatus = "MISSING"
-                if auraIcon and auraIcon.frame and auraIcon.Update then
-                    iconStatus = string.format("FOUND, IsShown: %s, Has Update: %s", tostring(auraIcon.frame:IsShown()), tostring(auraIcon.Update ~= nil))
-                elseif auraIcon and auraIcon.frame then
-                     iconStatus = "FOUND, Missing Update method"
-                elseif auraIcon then
-                     iconStatus = "FOUND, Missing frame"
+    -- Get the new icon size
+    local newIconSize = currentSettings[settingsKey].iconSize
+    if not newIconSize then
+        if BoxxyAuras.DEBUG then
+            print("ERROR: No iconSize found in settings")
+        end
+        return
+    end
+
+    -- Debug output to help troubleshoot
+    if BoxxyAuras.DEBUG then
+        print("BoxxyAuras: Applying icon size change to " .. frameType .. " icons. New size: " .. newIconSize)
+    end
+
+    -- Apply settings (will use the new iconSize and existing numIconsWide to calculate width)
+    BoxxyAuras.FrameHandler.ApplySettings(frameType)
+
+    -- Get the frame for this frame type
+    local frame = BoxxyAuras.Frames and BoxxyAuras.Frames[frameType]
+
+    if not frame then
+        if BoxxyAuras.DEBUG then
+            print("BoxxyAuras ERROR: No frame found for type: " .. frameType)
+        end
+        return
+    end
+
+    -- Determine icon array and aura filter
+    local iconArray = BoxxyAuras.iconArrays and BoxxyAuras.iconArrays[frameType]
+    local filter = "HELPFUL"
+    if frameType == "Debuff" then
+        filter = "HARMFUL"
+    elseif frameType == "Custom" then
+        filter = "CUSTOM"
+    end
+
+    -- Apply the new size to each icon
+    if iconArray then
+        for i, icon in pairs(iconArray) do
+            -- First try the Resize method
+            if icon and icon.Resize then
+                if BoxxyAuras.DEBUG then
+                    print("BoxxyAuras: Resizing icon " .. i .. " using Resize() method")
                 end
-                
-                if auraIcon and auraIcon.frame and auraIcon.frame:IsShown() and auraIcon.Update then
-                    auraIcon:Update(auraData, i, filter)
+                icon:Resize(newIconSize)
+
+                -- If Resize doesn't exist, try direct manipulation
+            elseif icon and icon.frame and icon.textureWidget then
+                if BoxxyAuras.DEBUG then
+                    print("BoxxyAuras: Resizing icon " .. i .. " using direct manipulation")
+                end
+
+                -- Read current config values needed for calculation
+                local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 8
+                local padding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
+
+                -- Calculate new dimensions
+                local newTotalIconHeight = newIconSize + textHeight + (padding * 2)
+                local newTotalIconWidth = newIconSize + (padding * 2)
+
+                -- Resize frame and texture
+                icon.frame:SetSize(newTotalIconWidth, newTotalIconHeight)
+                icon.textureWidget:SetSize(newIconSize, newIconSize)
+
+                -- Also resize overlays if they exist
+                if icon.frame.wipeOverlay then
+                    icon.frame.wipeOverlay:SetSize(newIconSize, newIconSize)
+                end
+                if icon.frame.shakeOverlay then
+                    icon.frame.shakeOverlay:SetSize(newIconSize, newIconSize)
+                end
+
+                -- Re-anchor text elements to ensure proper layout
+                if icon.frame.durationText then
+                    icon.frame.durationText:ClearAllPoints()
+                    icon.frame.durationText:SetPoint("TOPLEFT", icon.textureWidget, "BOTTOMLEFT", -padding, -padding)
+                    icon.frame.durationText:SetPoint("TOPRIGHT", icon.textureWidget, "BOTTOMRIGHT", padding, -padding)
+                    icon.frame.durationText:SetPoint("BOTTOM", icon.frame, "BOTTOM", 0, padding)
                 end
             end
         end
+    else
+        if BoxxyAuras.DEBUG then
+            print("BoxxyAuras: No icons array found for " .. frameType)
+        end
     end
+
+    -- Re-layout icons with the new sizes
+    BoxxyAuras.FrameHandler.UpdateAurasInFrame(frame)
+
+    -- Force update tracked auras to refresh their data
+    local trackedAuras = BoxxyAuras.GetTrackedAuras and BoxxyAuras.GetTrackedAuras(frameType) or {}
+
+    if iconArray and trackedAuras then
+        for i, auraData in ipairs(trackedAuras) do
+            local auraIcon = iconArray[i]
+            if auraIcon and auraIcon.frame and auraIcon.frame:IsShown() and auraIcon.Update then
+                auraIcon:Update(auraData, i, filter)
+            end
+        end
+    end
+
+    -- At the end of ApplyIconSizeChange function, right before the final end
+    -- If we've tried resizing but still need to force a refresh, add this debug command
+    if BoxxyAuras.DEBUG then
+        print("BoxxyAuras: If auras are still not resizing correctly, try:")
+        print("  /run BoxxyAuras.UpdateAuras(true) -- to force full refresh")
+        print("  /run BoxxyAuras.FrameHandler.ForceResizeAllIcons() -- to force resize all icons")
+    end
+
+    -- Force resize all icons to ensure consistent sizing
+    BoxxyAuras.FrameHandler.ForceResizeAllIcons()
+
+    -- Also update all frames to ensure consistent layout
+    BoxxyAuras.FrameHandler.UpdateAllFramesAuras()
 end
 
 --[[------------------------------------------------------------
@@ -913,17 +1152,28 @@ function BoxxyAuras.Options:InitializeProfileDropdown()
 
         local profileNames = {}
         if BoxxyAurasDB and BoxxyAurasDB.profiles then
-            for name, _ in pairs(BoxxyAurasDB.profiles) do table.insert(profileNames, name) end
+            for name, _ in pairs(BoxxyAurasDB.profiles) do
+                table.insert(profileNames, name)
+            end
             table.sort(profileNames)
         end
-        if #profileNames == 0 then table.insert(profileNames, "Default") end -- Ensure Default always exists
+        if #profileNames == 0 then
+            table.insert(profileNames, "Default")
+        end -- Ensure Default always exists
         local defaultExists = false
-        for _, name in ipairs(profileNames) do if name == "Default" then defaultExists = true; break; end end
-        if not defaultExists then table.insert(profileNames, 1, "Default") end -- Add Default if missing
+        for _, name in ipairs(profileNames) do
+            if name == "Default" then
+                defaultExists = true;
+                break
+            end
+        end
+        if not defaultExists then
+            table.insert(profileNames, 1, "Default")
+        end -- Add Default if missing
 
         -- <<< Get ACTIVE profile name for THIS character >>>
         local currentCharacterActiveProfile = "Default"
-        if BoxxyAuras.GetActiveProfileName then 
+        if BoxxyAuras.GetActiveProfileName then
             currentCharacterActiveProfile = BoxxyAuras:GetActiveProfileName()
         end
 
@@ -949,7 +1199,7 @@ function BoxxyAuras.Options:UpdateProfileUI()
 
     -- <<< Get ACTIVE profile name for THIS character >>>
     local activeProfile = "Default"
-    if BoxxyAuras.GetActiveProfileName then 
+    if BoxxyAuras.GetActiveProfileName then
         activeProfile = BoxxyAuras:GetActiveProfileName()
     end
 
@@ -966,7 +1216,7 @@ function BoxxyAuras.Options:UpdateProfileUI()
         self.DeleteProfileButton:SetEnabled(canDelete)
         self.DeleteProfileButton:SetAlpha(canDelete and 1 or 0.5)
     end
-     -- Enable/disable copy button if a profile is selected for THIS character
+    -- Enable/disable copy button if a profile is selected for THIS character
     if self.CopyProfileButton then
         local canCopy = (activeProfile ~= nil) -- Can always copy if a profile is active
         self.CopyProfileButton:SetEnabled(canCopy)
@@ -976,16 +1226,20 @@ end
 
 -- << Function called when a profile is selected from the dropdown >>
 function BoxxyAuras.Options.SelectProfile(self, profileName)
-    if not profileName then return end
-    
+    if not profileName then
+        return
+    end
+
     local characterKey = BoxxyAuras:GetCharacterKey()
-    if not characterKey then 
+    if not characterKey then
         print("|cffFF0000BoxxyAuras Error:|r Could not get character key to select profile.")
-        return 
+        return
     end
 
     -- Ensure map exists
-    if not BoxxyAurasDB.characterProfileMap then BoxxyAurasDB.characterProfileMap = {} end
+    if not BoxxyAurasDB.characterProfileMap then
+        BoxxyAurasDB.characterProfileMap = {}
+    end
 
     local currentCharacterActiveProfile = BoxxyAurasDB.characterProfileMap[characterKey] or "Default"
 
@@ -996,12 +1250,19 @@ function BoxxyAuras.Options.SelectProfile(self, profileName)
 
         -- Reload options UI, re-initialize frames, re-initialize auras (existing logic)
         if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.InitializeFrames then
-             BoxxyAuras.FrameHandler.InitializeFrames()
+            BoxxyAuras.FrameHandler.InitializeFrames()
         end
-        if BoxxyAuras.InitializeAuras then InitializeAuras()
-        elseif BoxxyAuras.UpdateAuras then BoxxyAuras.UpdateAuras() end
-        if BoxxyAuras.Options.UpdateProfileUI then BoxxyAuras.Options:UpdateProfileUI() end
-        if BoxxyAuras.Options.Load then BoxxyAuras.Options:Load() end
+        if BoxxyAuras.InitializeAuras then
+            InitializeAuras()
+        elseif BoxxyAuras.UpdateAuras then
+            BoxxyAuras.UpdateAuras()
+        end
+        if BoxxyAuras.Options.UpdateProfileUI then
+            BoxxyAuras.Options:UpdateProfileUI()
+        end
+        if BoxxyAuras.Options.Load then
+            BoxxyAuras.Options:Load()
+        end
 
         PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
     end
@@ -1023,12 +1284,12 @@ function BoxxyAuras.Options:CreateProfile(profileName)
     if BoxxyAuras.GetDefaultProfileSettings then
         BoxxyAurasDB.profiles[profileName] = CopyTable(BoxxyAuras:GetDefaultProfileSettings())
     else
-         print("|cffFF0000BoxxyAuras Profiles Error:|r Cannot get default settings to create profile.")
-         BoxxyAurasDB.profiles[profileName] = {} 
+        print("|cffFF0000BoxxyAuras Profiles Error:|r Cannot get default settings to create profile.")
+        BoxxyAurasDB.profiles[profileName] = {}
     end
 
     -- <<< Automatically switch THIS CHARACTER to the new profile >>>
-    BoxxyAuras.Options.SelectProfile(nil, profileName) 
+    BoxxyAuras.Options.SelectProfile(nil, profileName)
 end
 
 -- << Copy Profile >>
@@ -1038,17 +1299,19 @@ function BoxxyAuras.Options:CopyProfile(newProfileName)
         return
     end
 
-    local currentActiveKey = "Default" 
-    if BoxxyAuras.GetActiveProfileName then currentActiveKey = BoxxyAuras:GetActiveProfileName() end
-    
+    local currentActiveKey = "Default"
+    if BoxxyAuras.GetActiveProfileName then
+        currentActiveKey = BoxxyAuras:GetActiveProfileName()
+    end
+
     if BoxxyAurasDB.profiles[newProfileName] then
         -- <<< Store pending data in temporary variables >>>
         self.pendingOverwriteTarget = newProfileName
         self.pendingOverwriteSource = currentActiveKey
-        
+
         -- Show confirmation dialog (no longer need to pass data via args)
-        StaticPopup_Show("BOXXYAURAS_OVERWRITE_PROFILE_CONFIRM") 
-        return 
+        StaticPopup_Show("BOXXYAURAS_OVERWRITE_PROFILE_CONFIRM")
+        return
     end
 
     -- Original logic if profile does NOT exist
@@ -1058,7 +1321,8 @@ function BoxxyAuras.Options:CopyProfile(newProfileName)
         return
     end
 
-    print(string.format("BoxxyAuras: Copying current profile ('%s') to new profile '%s'", currentActiveKey, newProfileName))
+    print(string.format("BoxxyAuras: Copying current profile ('%s') to new profile '%s'", currentActiveKey,
+        newProfileName))
     BoxxyAurasDB.profiles[newProfileName] = CopyTable(sourceProfile)
 
     BoxxyAuras.Options.SelectProfile(nil, newProfileName) -- Switch to the newly created profile
@@ -1070,15 +1334,16 @@ function BoxxyAuras.Options:CopyProfileConfirmed(data)
     local targetName = data.targetName
     local sourceKey = data.sourceKey -- The key of the profile that was active when copy was initiated
 
-    if not targetName or not sourceKey then 
+    if not targetName or not sourceKey then
         print("|cffFF0000BoxxyAuras Profiles Error:|r Missing data for CopyProfileConfirmed.")
-        return 
+        return
     end
 
     -- Get the settings of the currently active profile (which was the source)
-    local sourceProfile = GetCurrentProfileSettings() 
+    local sourceProfile = GetCurrentProfileSettings()
     if not sourceProfile then
-        print("|cffFF0000BoxxyAuras Profiles Error:|r Could not get settings for source profile ('"..sourceKey.."') to overwrite.")
+        print("|cffFF0000BoxxyAuras Profiles Error:|r Could not get settings for source profile ('" .. sourceKey ..
+                  "') to overwrite.")
         return
     end
 
@@ -1086,7 +1351,7 @@ function BoxxyAuras.Options:CopyProfileConfirmed(data)
     BoxxyAurasDB.profiles[targetName] = CopyTable(sourceProfile)
 
     -- Switch this character to the newly overwritten profile
-    BoxxyAuras.Options.SelectProfile(nil, targetName) 
+    BoxxyAuras.Options.SelectProfile(nil, targetName)
     PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
 end
 
@@ -1094,7 +1359,7 @@ end
 function BoxxyAuras.Options:DeleteProfileConfirmed()
     -- <<< Get the profile name this character is currently using >>>
     local profileToDelete = "Default"
-    if BoxxyAuras.GetActiveProfileName then 
+    if BoxxyAuras.GetActiveProfileName then
         profileToDelete = BoxxyAuras:GetActiveProfileName()
     end
 
@@ -1118,9 +1383,10 @@ function BoxxyAuras.Options:DeleteProfileConfirmed()
             end
         end
     end
-    
+
     -- If the current character wasn't using the deleted profile, just update the UI
-    if (BoxxyAurasDB.characterProfileMap and BoxxyAurasDB.characterProfileMap[BoxxyAuras:GetCharacterKey()] or "Default") ~= "Default" then
+    if (BoxxyAurasDB.characterProfileMap and BoxxyAurasDB.characterProfileMap[BoxxyAuras:GetCharacterKey()] or "Default") ~=
+        "Default" then
         self:UpdateProfileUI() -- Refresh dropdown if current char wasn't switched
         self:Load() -- Reload options based on current char's profile (which didn't change)
     end
@@ -1135,13 +1401,23 @@ end
 function BoxxyAuras.Options:HandleBuffAlignmentClick(clickedButton, alignmentValue)
     -- <<< Get current profile settings >>>
     local currentSettings = GetCurrentProfileSettings()
-    if not currentSettings then return end -- Safety check
-    if not currentSettings.buffFrameSettings then currentSettings.buffFrameSettings = {} end -- Ensure table exists
+    if not currentSettings then
+        return
+    end -- Safety check
+    if not currentSettings.buffFrameSettings then
+        currentSettings.buffFrameSettings = {}
+    end -- Ensure table exists
 
     clickedButton:SetChecked(true)
-    if clickedButton ~= self.BuffAlignLeftCheck then self.BuffAlignLeftCheck:SetChecked(false) end
-    if clickedButton ~= self.BuffAlignCenterCheck then self.BuffAlignCenterCheck:SetChecked(false) end
-    if clickedButton ~= self.BuffAlignRightCheck then self.BuffAlignRightCheck:SetChecked(false) end
+    if clickedButton ~= self.BuffAlignLeftCheck then
+        self.BuffAlignLeftCheck:SetChecked(false)
+    end
+    if clickedButton ~= self.BuffAlignCenterCheck then
+        self.BuffAlignCenterCheck:SetChecked(false)
+    end
+    if clickedButton ~= self.BuffAlignRightCheck then
+        self.BuffAlignRightCheck:SetChecked(false)
+    end
     -- <<< Save to PROFILE >>>
     currentSettings.buffFrameSettings.buffTextAlign = alignmentValue
     self:ApplyTextAlign() -- Trigger layout update (will read from profile)
@@ -1151,14 +1427,24 @@ end
 function BoxxyAuras.Options:HandleDebuffAlignmentClick(clickedButton, alignmentValue)
     -- <<< Get current profile settings >>>
     local currentSettings = GetCurrentProfileSettings()
-    if not currentSettings then return end -- Safety check
-    if not currentSettings.debuffFrameSettings then currentSettings.debuffFrameSettings = {} end -- Ensure table exists
+    if not currentSettings then
+        return
+    end -- Safety check
+    if not currentSettings.debuffFrameSettings then
+        currentSettings.debuffFrameSettings = {}
+    end -- Ensure table exists
 
     clickedButton:SetChecked(true)
-    if clickedButton ~= self.DebuffAlignLeftCheck then self.DebuffAlignLeftCheck:SetChecked(false) end
-    if clickedButton ~= self.DebuffAlignCenterCheck then self.DebuffAlignCenterCheck:SetChecked(false) end
-    if clickedButton ~= self.DebuffAlignRightCheck then self.DebuffAlignRightCheck:SetChecked(false) end
-     -- <<< Save to PROFILE >>>
+    if clickedButton ~= self.DebuffAlignLeftCheck then
+        self.DebuffAlignLeftCheck:SetChecked(false)
+    end
+    if clickedButton ~= self.DebuffAlignCenterCheck then
+        self.DebuffAlignCenterCheck:SetChecked(false)
+    end
+    if clickedButton ~= self.DebuffAlignRightCheck then
+        self.DebuffAlignRightCheck:SetChecked(false)
+    end
+    -- <<< Save to PROFILE >>>
     currentSettings.debuffFrameSettings.debuffTextAlign = alignmentValue
     self:ApplyTextAlign() -- Trigger layout update (will read from profile)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
@@ -1167,19 +1453,28 @@ end
 function BoxxyAuras.Options:HandleCustomAlignmentClick(clickedButton, alignmentValue)
     -- <<< Get current profile settings >>>
     local currentSettings = GetCurrentProfileSettings()
-    if not currentSettings then return end -- Safety check
-    if not currentSettings.customFrameSettings then currentSettings.customFrameSettings = {} end -- Ensure table exists
+    if not currentSettings then
+        return
+    end -- Safety check
+    if not currentSettings.customFrameSettings then
+        currentSettings.customFrameSettings = {}
+    end -- Ensure table exists
 
     clickedButton:SetChecked(true)
-    if clickedButton ~= self.CustomAlignLeftCheck then self.CustomAlignLeftCheck:SetChecked(false) end
-    if clickedButton ~= self.CustomAlignCenterCheck then self.CustomAlignCenterCheck:SetChecked(false) end
-    if clickedButton ~= self.CustomAlignRightCheck then self.CustomAlignRightCheck:SetChecked(false) end
+    if clickedButton ~= self.CustomAlignLeftCheck then
+        self.CustomAlignLeftCheck:SetChecked(false)
+    end
+    if clickedButton ~= self.CustomAlignCenterCheck then
+        self.CustomAlignCenterCheck:SetChecked(false)
+    end
+    if clickedButton ~= self.CustomAlignRightCheck then
+        self.CustomAlignRightCheck:SetChecked(false)
+    end
     -- <<< Save to PROFILE >>>
     currentSettings.customFrameSettings.customTextAlign = alignmentValue
     self:ApplyTextAlign() -- Trigger layout update (will read from profile)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end
-
 
 --[[------------------------------------------------------------
 -- Main Load/Toggle Functions
@@ -1191,25 +1486,41 @@ function BoxxyAuras.Options:Load()
         return
     end
 
-    if self.LockFramesCheck then self.LockFramesCheck:SetChecked(currentSettings.lockFrames) end
-    if self.HideBlizzardCheck then self.HideBlizzardCheck:SetChecked(currentSettings.hideBlizzardAuras) end
+    if self.LockFramesCheck then
+        self.LockFramesCheck:SetChecked(currentSettings.lockFrames)
+    end
+    if self.HideBlizzardCheck then
+        self.HideBlizzardCheck:SetChecked(currentSettings.hideBlizzardAuras)
+    end
 
     -- Buff Settings
     if currentSettings.buffFrameSettings then
         local buffSettings = currentSettings.buffFrameSettings
         local buffAlign = buffSettings.buffTextAlign or "CENTER"
-        if self.BuffAlignLeftCheck then self.BuffAlignLeftCheck:SetChecked(buffAlign == "LEFT") end
-        if self.BuffAlignCenterCheck then self.BuffAlignCenterCheck:SetChecked(buffAlign == "CENTER") end
-        if self.BuffAlignRightCheck then self.BuffAlignRightCheck:SetChecked(buffAlign == "RIGHT") end
+        if self.BuffAlignLeftCheck then
+            self.BuffAlignLeftCheck:SetChecked(buffAlign == "LEFT")
+        end
+        if self.BuffAlignCenterCheck then
+            self.BuffAlignCenterCheck:SetChecked(buffAlign == "CENTER")
+        end
+        if self.BuffAlignRightCheck then
+            self.BuffAlignRightCheck:SetChecked(buffAlign == "RIGHT")
+        end
 
         local buffSize = buffSettings.iconSize or 24
         if self.BuffSizeSlider then
             self.BuffSizeSlider:SetValue(buffSize)
-            if self.BuffSizeSlider.KeyLabel then self.BuffSizeSlider.KeyLabel:SetText(string.format("%dpx", buffSize)) end
-            local min, max = self.BuffSizeSlider:GetMinMaxValues(); local range = max - min
-            if range > 0 and self.BuffSizeSlider.VirtualThumb then self.BuffSizeSlider.VirtualThumb:SetPoint("CENTER", self.BuffSizeSlider, "LEFT", (buffSize - min) / range * self.BuffSizeSlider:GetWidth(), 0) end
+            if self.BuffSizeSlider.KeyLabel then
+                self.BuffSizeSlider.KeyLabel:SetText(string.format("%dpx", buffSize))
+            end
+            local min, max = self.BuffSizeSlider:GetMinMaxValues();
+            local range = max - min
+            if range > 0 and self.BuffSizeSlider.VirtualThumb then
+                self.BuffSizeSlider.VirtualThumb:SetPoint("CENTER", self.BuffSizeSlider, "LEFT",
+                    (buffSize - min) / range * self.BuffSizeSlider:GetWidth(), 0)
+            end
         end
-        
+
         -- Removed loading for BuffIconsWideSlider
     end
 
@@ -1217,18 +1528,30 @@ function BoxxyAuras.Options:Load()
     if currentSettings.debuffFrameSettings then
         local debuffSettings = currentSettings.debuffFrameSettings
         local debuffAlign = debuffSettings.debuffTextAlign or "CENTER"
-        if self.DebuffAlignLeftCheck then self.DebuffAlignLeftCheck:SetChecked(debuffAlign == "LEFT") end
-        if self.DebuffAlignCenterCheck then self.DebuffAlignCenterCheck:SetChecked(debuffAlign == "CENTER") end
-        if self.DebuffAlignRightCheck then self.DebuffAlignRightCheck:SetChecked(debuffAlign == "RIGHT") end
+        if self.DebuffAlignLeftCheck then
+            self.DebuffAlignLeftCheck:SetChecked(debuffAlign == "LEFT")
+        end
+        if self.DebuffAlignCenterCheck then
+            self.DebuffAlignCenterCheck:SetChecked(debuffAlign == "CENTER")
+        end
+        if self.DebuffAlignRightCheck then
+            self.DebuffAlignRightCheck:SetChecked(debuffAlign == "RIGHT")
+        end
 
         local debuffSize = debuffSettings.iconSize or 24
         if self.DebuffSizeSlider then
             self.DebuffSizeSlider:SetValue(debuffSize)
-            if self.DebuffSizeSlider.KeyLabel then self.DebuffSizeSlider.KeyLabel:SetText(string.format("%dpx", debuffSize)) end
-            local min, max = self.DebuffSizeSlider:GetMinMaxValues(); local range = max - min
-            if range > 0 and self.DebuffSizeSlider.VirtualThumb then self.DebuffSizeSlider.VirtualThumb:SetPoint("CENTER", self.DebuffSizeSlider, "LEFT", (debuffSize - min) / range * self.DebuffSizeSlider:GetWidth(), 0) end
+            if self.DebuffSizeSlider.KeyLabel then
+                self.DebuffSizeSlider.KeyLabel:SetText(string.format("%dpx", debuffSize))
+            end
+            local min, max = self.DebuffSizeSlider:GetMinMaxValues();
+            local range = max - min
+            if range > 0 and self.DebuffSizeSlider.VirtualThumb then
+                self.DebuffSizeSlider.VirtualThumb:SetPoint("CENTER", self.DebuffSizeSlider, "LEFT",
+                    (debuffSize - min) / range * self.DebuffSizeSlider:GetWidth(), 0)
+            end
         end
-        
+
         -- Removed loading for DebuffIconsWideSlider
     end
 
@@ -1236,18 +1559,30 @@ function BoxxyAuras.Options:Load()
     if currentSettings.customFrameSettings then
         local customSettings = currentSettings.customFrameSettings
         local customAlign = customSettings.customTextAlign or "CENTER"
-        if self.CustomAlignLeftCheck then self.CustomAlignLeftCheck:SetChecked(customAlign == "LEFT") end
-        if self.CustomAlignCenterCheck then self.CustomAlignCenterCheck:SetChecked(customAlign == "CENTER") end
-        if self.CustomAlignRightCheck then self.CustomAlignRightCheck:SetChecked(customAlign == "RIGHT") end
+        if self.CustomAlignLeftCheck then
+            self.CustomAlignLeftCheck:SetChecked(customAlign == "LEFT")
+        end
+        if self.CustomAlignCenterCheck then
+            self.CustomAlignCenterCheck:SetChecked(customAlign == "CENTER")
+        end
+        if self.CustomAlignRightCheck then
+            self.CustomAlignRightCheck:SetChecked(customAlign == "RIGHT")
+        end
 
         local customSize = customSettings.iconSize or 24
         if self.CustomSizeSlider then
             self.CustomSizeSlider:SetValue(customSize)
-            if self.CustomSizeSlider.KeyLabel then self.CustomSizeSlider.KeyLabel:SetText(string.format("%dpx", customSize)) end
-            local min, max = self.CustomSizeSlider:GetMinMaxValues(); local range = max - min
-            if range > 0 and self.CustomSizeSlider.VirtualThumb then self.CustomSizeSlider.VirtualThumb:SetPoint("CENTER", self.CustomSizeSlider, "LEFT", (customSize - min) / range * self.CustomSizeSlider:GetWidth(), 0) end
+            if self.CustomSizeSlider.KeyLabel then
+                self.CustomSizeSlider.KeyLabel:SetText(string.format("%dpx", customSize))
+            end
+            local min, max = self.CustomSizeSlider:GetMinMaxValues();
+            local range = max - min
+            if range > 0 and self.CustomSizeSlider.VirtualThumb then
+                self.CustomSizeSlider.VirtualThumb:SetPoint("CENTER", self.CustomSizeSlider, "LEFT",
+                    (customSize - min) / range * self.CustomSizeSlider:GetWidth(), 0)
+            end
         end
-        
+
         -- Removed loading for CustomIconsWideSlider
     end
 
@@ -1255,9 +1590,15 @@ function BoxxyAuras.Options:Load()
     if self.ScaleSlider then
         local scaleVal = currentSettings.optionsScale or 1.0
         self.ScaleSlider:SetValue(scaleVal)
-        if self.ScaleSlider.KeyLabel then self.ScaleSlider.KeyLabel:SetText(string.format("%.2f", scaleVal)) end
-        local min, max = self.ScaleSlider:GetMinMaxValues(); local range = max - min
-        if range > 0 and self.ScaleSlider.VirtualThumb then self.ScaleSlider.VirtualThumb:SetPoint("CENTER", self.ScaleSlider, "LEFT", (scaleVal - min) / range * self.ScaleSlider:GetWidth(), 0) end
+        if self.ScaleSlider.KeyLabel then
+            self.ScaleSlider.KeyLabel:SetText(string.format("%.2f", scaleVal))
+        end
+        local min, max = self.ScaleSlider:GetMinMaxValues();
+        local range = max - min
+        if range > 0 and self.ScaleSlider.VirtualThumb then
+            self.ScaleSlider.VirtualThumb:SetPoint("CENTER", self.ScaleSlider, "LEFT",
+                (scaleVal - min) / range * self.ScaleSlider:GetWidth(), 0)
+        end
     end
 
     self:ApplyScale(currentSettings.optionsScale or 1.0)
@@ -1273,7 +1614,7 @@ function BoxxyAuras.Options:Toggle()
         -- Ensure the frame exists and is shown BEFORE loading data
         -- that might depend on UI elements initialized in OnShow.
         self.Frame:Show() -- Triggers OnShow which initializes dropdown structure
-        self:Load()      -- Load settings into the controls
+        self:Load() -- Load settings into the controls
         -- OnShow also calls UpdateProfileUI at the end to set dropdown text/buttons
     else
         print("BoxxyAuras Error: Options Frame not found for Toggle.")
@@ -1288,45 +1629,64 @@ SLASH_BOXXYAURASOPTIONS1 = "/boxxyauras"
 SLASH_BOXXYAURASOPTIONS2 = "/ba"
 SlashCmdList["BOXXYAURASOPTIONS"] = function(msg)
     local command = msg and string.lower(string.trim(msg)) or ""
-    BoxxyAuras.Options:Toggle()
+
+    if command == "reset" then
+        -- Reset all frame positions
+        if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.ApplySettings then
+            -- Reset each frame
+            BoxxyAuras.FrameHandler.ApplySettings("Buff", true)
+            BoxxyAuras.FrameHandler.ApplySettings("Debuff", true)
+            BoxxyAuras.FrameHandler.ApplySettings("Custom", true)
+
+            -- Notify the user
+            print("|cFF00FF00BoxxyAuras:|r Frames have been reset to default positions.")
+        else
+            print("|cFFFF0000BoxxyAuras:|r Error: Could not reset frames. FrameHandler functions not available.")
+        end
+    else
+        -- Default action is to toggle the options panel
+        BoxxyAuras.Options:Toggle()
+    end
 end
 
 -- << NEW: Confirmation Dialog for Deleting Profile >>
 StaticPopupDialogs["BOXXYAURAS_DELETE_PROFILE_CONFIRM"] = {
     text = "Are you sure you want to delete the profile |cffffd100%s|r?",
-    button1 = ACCEPT, 
-    button2 = CANCEL, 
+    button1 = ACCEPT,
+    button2 = CANCEL,
     OnAccept = function(self, data)
         if BoxxyAuras.Options.DeleteProfileConfirmed then
             BoxxyAuras.Options:DeleteProfileConfirmed()
         end
     end,
-    OnCancel = function(self, data) end,
+    OnCancel = function(self, data)
+    end,
     timeout = 0,
     whileDead = true,
     hideOnEscape = true,
-    preferredIndex = 3 
+    preferredIndex = 3
 }
 
 -- <<< NEW: Confirmation Dialog for Overwriting Profile >>>
 StaticPopupDialogs["BOXXYAURAS_OVERWRITE_PROFILE_CONFIRM"] = {
     -- <<< Remove %s placeholders from base text >>>
-    text = "Profile already exists. Overwrite it with the current settings?", 
+    text = "Profile already exists. Overwrite it with the current settings?",
     button1 = ACCEPT,
     button2 = CANCEL,
     -- Remove data fields, no longer trying to pass via popup system
-    hasEditBox = false, 
-    
+    hasEditBox = false,
+
     OnShow = function(self)
         -- <<< Format text here using temp vars >>>
         local targetName = BoxxyAuras.Options.pendingOverwriteTarget or "UnknownTarget"
         local sourceKey = BoxxyAuras.Options.pendingOverwriteSource or "UnknownSource"
         -- Define the format string here instead
-        local formatString = "Profile |cffffd100%s|r already exists. Overwrite it with the settings from profile |cffffd100%s|r?"
+        local formatString =
+            "Profile |cffffd100%s|r already exists. Overwrite it with the settings from profile |cffffd100%s|r?"
         self.text:SetFormattedText(formatString, targetName, sourceKey)
     end,
 
-    OnAccept = function(self, systemData) 
+    OnAccept = function(self, systemData)
         if BoxxyAuras.Options.CopyProfileConfirmed then
             -- <<< Get data from temporary variables >>>
             local targetName = BoxxyAuras.Options.pendingOverwriteTarget
@@ -1334,20 +1694,24 @@ StaticPopupDialogs["BOXXYAURAS_OVERWRITE_PROFILE_CONFIRM"] = {
             -- <<< Clear temporary variables >>>
             BoxxyAuras.Options.pendingOverwriteTarget = nil
             BoxxyAuras.Options.pendingOverwriteSource = nil
-            
+
             if type(targetName) ~= "string" or type(sourceKey) ~= "string" then
-                 print("|cffFF0000BoxxyAuras Profile Error:|r Failed to retrieve valid profile names from temporary Options variables.")
-                 print(string.format("  (targetName: %s, sourceKey: %s)", tostring(targetName), tostring(sourceKey)))
-                 return
+                print(
+                    "|cffFF0000BoxxyAuras Profile Error:|r Failed to retrieve valid profile names from temporary Options variables.")
+                print(string.format("  (targetName: %s, sourceKey: %s)", tostring(targetName), tostring(sourceKey)))
+                return
             end
 
-            local eventData = { targetName = targetName, sourceKey = sourceKey }
+            local eventData = {
+                targetName = targetName,
+                sourceKey = sourceKey
+            }
             BoxxyAuras.Options:CopyProfileConfirmed(eventData)
         else
-             print("|cffFF0000BoxxyAuras Profile Error:|r CopyProfileConfirmed function not found!")
+            print("|cffFF0000BoxxyAuras Profile Error:|r CopyProfileConfirmed function not found!")
         end
     end,
-    OnCancel = function(self, data) 
+    OnCancel = function(self, data)
         -- <<< Clear temporary variables on cancel too >>>
         BoxxyAuras.Options.pendingOverwriteTarget = nil
         BoxxyAuras.Options.pendingOverwriteSource = nil

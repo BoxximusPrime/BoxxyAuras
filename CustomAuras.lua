@@ -42,8 +42,6 @@ bg:SetFrameLevel(customOptionsFrame:GetFrameLevel());
 if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG then
     BoxxyAuras.UIUtils.DrawSlicedBG(bg, "OptionsWindowBG", "backdrop", 0)
     BoxxyAuras.UIUtils.ColorBGSlicedFrame(bg, "backdrop", 1, 1, 1, 0.95)
-else
-    -- print("|cffFF0000BoxxyAuras Custom Options Error:|r Could not draw background.")
 end
 
 -- Border
@@ -53,8 +51,6 @@ border:SetFrameLevel(customOptionsFrame:GetFrameLevel() + 1);
 if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG then
     BoxxyAuras.UIUtils.DrawSlicedBG(border, "EdgedBorder", "border", 0)
     BoxxyAuras.UIUtils.ColorBGSlicedFrame(border, "border", 0.4, 0.4, 0.4, 1)
-else
-    -- print("|cffFF0000BoxxyAuras Custom Options Error:|r Could not draw border.")
 end
 
 -- Title

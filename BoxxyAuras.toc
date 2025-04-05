@@ -5,6 +5,10 @@
 ## Notes: Displays player buffs and debuffs.
 ## SavedVariables: BoxxyAurasDB
 
+# Libraries - MUST LOAD FIRST
+Libs\LibStub\LibStub.lua
+Libs\LibWindow-1.1\LibWindow-1.1.lua
+
 # Load XML files first (including fonts)
 Art/Fonts.xml
 Art/UIElements.xml
