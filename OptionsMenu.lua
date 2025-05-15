@@ -135,7 +135,7 @@ scrollFrame:SetPoint("TOPLEFT", 10, -50)
 scrollFrame:SetPoint("BOTTOMRIGHT", -30, 10)
 
 -- <<< ADDED: Adjust Mouse Wheel Scroll Speed >>>
-local SCROLL_STEP_REDUCTION_FACTOR = 0.7 -- Adjust this value (e.g., 0.5 for half speed)
+local SCROLL_STEP_REDUCTION_FACTOR = 0.9 -- Adjust this value (e.g., 0.5 for half speed)
 scrollFrame:SetScript("OnMouseWheel", function(self, delta)
     local scrollBar = _G[self:GetName() .. "ScrollBar"];
     local currentStep = SCROLL_FRAME_SCROLL_STEP or 16 -- Use default Blizzard step or fallback

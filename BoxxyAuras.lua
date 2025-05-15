@@ -17,6 +17,9 @@ BoxxyAuras.DebounceEndTime = nil
 -- Previous Lock State Tracker
 BoxxyAuras.WasLocked = nil
 
+-- <<< NEW: Geometric Mouse Position Tracker >>>
+BoxxyAuras.MouseInFrameGeometry = nil
+
 local LibWindow = LibStub("LibWindow-1.1")
 
 -- Configuration Table
@@ -664,8 +667,8 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
                 trackedAura.forceExpired = nil
                 table.insert(newTrackedAuras, trackedAura)
             else
-                -- Check if the current frame is the one being hovered
-                if frame == BoxxyAuras.HoveredFrame then
+                -- Check if the current frame is the one being hovered (geometrically)
+                if frame == BoxxyAuras.MouseInFrameGeometry then -- <<< Use Geometric Check >>>
                     -- Keep the aura, mark as forceExpired
                     trackedAura.forceExpired = true
                     trackedAura.expirationTime = 0 -- Ensure it's treated as expired
@@ -1094,6 +1097,9 @@ hoverCheckFrame:SetScript("OnUpdate", function(self, elapsed)
             break
         end
     end
+
+    -- <<< SET Geometric Tracker REGARDLESS of lock state >>>
+    BoxxyAuras.MouseInFrameGeometry = frameMouseIsCurrentlyIn
 
     -- === Handle Hover State Logic (REVISED) ===
 

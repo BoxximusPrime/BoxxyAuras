@@ -559,7 +559,7 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, overrideNumIconsW
     local frame = BoxxyAuras.Frames and BoxxyAuras.Frames[frameType]
     if not frame then
         BoxxyAuras.DebugLogError("UpdateAurasInFrame called with invalid frameType: " .. tostring(frameType))
-        throw("UpdateAurasInFrame called with invalid frameType: " .. tostring(frameType))
+        error("UpdateAurasInFrame called with invalid frameType: " .. tostring(frameType))
         return
     end
 
@@ -691,7 +691,7 @@ end
 BoxxyAuras.FrameHandler.TriggerLayout = function(frameType)
     local frame = BoxxyAuras.Frames[frameType]
     if frame then
-        BoxxyAuras.FrameHandler.UpdateAurasInFrame(frame)
+        BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType)
     else
         BoxxyAuras.DebugLogError("TriggerLayout called for unknown frame type: " .. tostring(frameType))
     end
