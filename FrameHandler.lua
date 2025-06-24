@@ -290,29 +290,21 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
 
     -- Register helper methods.
     function frame:Lock(button)
-        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", {
-            r = 0,
-            g = 0,
-            b = 0,
-            a = 0
-        })
-        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", {
-            r = 0,
-            g = 0,
-            b = 0,
-            a = 0
-        }) -- Hide border
+        -- Set to a semi-transparent red for debugging hitbox visibility
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0, 0, 0, 0) 
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0, 0, 0, 0) -- Keep border hidden
         if self.titleLabel then
             self.titleLabel:Hide()
         end -- Hide title
-        self:EnableMouse(false) -- Disable mouse interaction
-        -- Also disable handles
+        -- self:EnableMouse(false) -- DO NOT disable mouse, we need it for hover detection
+
+        -- Also hide handles since they won't be usable
         if self.handles then
             if self.handles.left then
-                self.handles.left:EnableMouse(false)
+                self.handles.left:Hide()
             end
             if self.handles.right then
-                self.handles.right:EnableMouse(false)
+                self.handles.right:Hide()
             end
         end
     end
@@ -320,27 +312,24 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
         if BoxxyAuras.DEBUG then
             print("Executing frame:Unlock() for " .. self:GetName())
         end
-        -- Try explicitly showing frame elements before coloring
         self:Show()
         if self.titleLabel then
             self.titleLabel:Show()
         end
-        -- Assuming backdrop/border are children or managed textures
-        -- No direct way to :Show() them typically, ColorBGSlicedFrame handles visuals
 
         -- Apply colors
         BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", BoxxyAuras.Config.MainFrameBGColorNormal)
         BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", BoxxyAuras.Config.BorderColor) -- Restore border
 
-        -- Re-enable mouse last
-        self:EnableMouse(true) -- Re-enable mouse interaction
-        -- Also re-enable handles
+        -- self:EnableMouse(true) -- Mouse is always enabled now
+
+        -- Also show handles
         if self.handles then
             if self.handles.left then
-                self.handles.left:EnableMouse(true)
+                self.handles.left:Show()
             end
             if self.handles.right then
-                self.handles.right:EnableMouse(true)
+                self.handles.right:Show()
             end
         end
     end
@@ -789,9 +778,9 @@ function BoxxyAuras.FrameHandler.ApplyLockState(isLocked)
     for frameType, frame in pairs(BoxxyAuras.Frames or {}) do
         if frame and frame.Lock and frame.Unlock then
             if isLocked then
-                frame:Lock() -- Calls frame:EnableMouse(false) AND handles mouse now
+                frame:Lock()
             else
-                frame:Unlock() -- Calls frame:EnableMouse(true) AND handles mouse now
+                frame:Unlock()
             end
 
             -- Removed explicit handle locking/unlocking from here
@@ -839,5 +828,36 @@ function BoxxyAuras.FrameHandler.ForceResizeAllIcons()
 
     -- Update layout in all frames
     BoxxyAuras.FrameHandler.UpdateAllFramesAuras()
+end
+
+function BoxxyAuras.FrameHandler.IsMouseOverAnyIcon(frame)
+    if not frame or not frame:IsVisible() then
+        return false
+    end
+
+    local frameType
+    for fType, f in pairs(BoxxyAuras.Frames or {}) do
+        if f == frame then
+            frameType = fType
+            break
+        end
+    end
+
+    if not frameType then
+        return false
+    end
+
+    local icons = BoxxyAuras.iconArrays and BoxxyAuras.iconArrays[frameType]
+    if not icons or #icons == 0 then
+        return false
+    end
+
+    for _, icon in ipairs(icons) do
+        if icon and icon.frame and icon.frame:IsVisible() and icon.frame:IsMouseOver() then
+            return true
+        end
+    end
+
+    return false
 end
 

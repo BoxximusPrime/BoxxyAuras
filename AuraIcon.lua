@@ -32,17 +32,20 @@ function AuraIcon.New(parentFrame, index, baseName)
     local settingsKey = frameType and BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
     local currentSettings = settingsKey and BoxxyAuras:GetCurrentProfileSettings()
 
-    -- Get icon dimensions
+    -- Get icon dimensions and text size
     local iconSize = (currentSettings and currentSettings[settingsKey] and currentSettings[settingsKey].iconSize) or
                          BoxxyAuras.Config.IconSize
-    local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 8
+    local textSize = (currentSettings and currentSettings[settingsKey] and currentSettings[settingsKey].textSize) or 8
     local padding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
-    local totalHeight = iconSize + textHeight + (padding * 2)
+    -- Calculate text area height with some padding (text size + small buffer)
+    local textAreaHeight = textSize + 4
+    local totalHeight = iconSize + textAreaHeight + (padding * 2)
     local totalWidth = iconSize + (padding * 2)
 
     -- Create instance and frame
     local instance = setmetatable({}, AuraIcon)
     instance.currentSize = iconSize -- Store initial size
+    instance.currentTextSize = textSize -- Track current text size
 
     local frame = CreateFrame("Frame", baseName .. index, parentFrame, "BackdropTemplate")
     frame:SetFrameLevel(parentFrame:GetFrameLevel() + 5)
@@ -63,11 +66,24 @@ function AuraIcon.New(parentFrame, index, baseName)
     countTextBg:SetPoint("TOPLEFT", countText, "TOPLEFT", -2, 2)
     countTextBg:SetPoint("BOTTOMRIGHT", countText, "BOTTOMRIGHT", -2, -2)
 
+    -- Create text background first (so it's behind the text)
+    local durationTextBg = frame:CreateTexture(nil, "ARTWORK", nil, 1)
+    durationTextBg:SetColorTexture(0, 0, 0, 0.85)
+    durationTextBg:SetPoint("TOPLEFT", texture, "BOTTOMLEFT", 0, -padding)
+    durationTextBg:SetPoint("TOPRIGHT", texture, "BOTTOMRIGHT", 0, -padding)
+    durationTextBg:SetPoint("BOTTOM", frame, "BOTTOM", 0, padding)
+
     local durationText = frame:CreateFontString(nil, "OVERLAY", "BoxxyAuras_DurationTxt")
-    durationText:SetPoint("TOPLEFT", texture, "BOTTOMLEFT", -padding, -padding)
-    durationText:SetPoint("TOPRIGHT", texture, "BOTTOMRIGHT", padding, -padding)
+    durationText:SetPoint("TOPLEFT", texture, "BOTTOMLEFT", 0, -padding)
+    durationText:SetPoint("TOPRIGHT", texture, "BOTTOMRIGHT", 0, -padding)
     durationText:SetPoint("BOTTOM", frame, "BOTTOM", 0, padding)
     durationText:SetJustifyH("CENTER")
+
+    -- Apply text size from settings
+    local fontPath, _, fontFlags = durationText:GetFont()
+    if fontPath then
+        durationText:SetFont(fontPath, textSize, fontFlags)
+    end
 
     -- Create overlay textures
     local wipeOverlay = frame:CreateTexture(nil, "ARTWORK", nil, 2)
@@ -82,8 +98,41 @@ function AuraIcon.New(parentFrame, index, baseName)
     shakeOverlay:SetPoint("TOPLEFT", texture, "TOPLEFT")
     shakeOverlay:SetAlpha(0)
 
+    -- Get border size from settings
+    local borderSize = 0 -- Default border size
+    if currentSettings and settingsKey and currentSettings[settingsKey] and currentSettings[settingsKey].borderSize then
+        borderSize = currentSettings[settingsKey].borderSize
+    end
+
     -- Apply backdrop
     BoxxyAuras.UIUtils.DrawSlicedBG(frame, "ItemEntryBG", "backdrop", 0)
+    
+    -- Create border with thickness effect
+    if borderSize > 0 then
+        -- Create additional border frames for thickness
+        for i = 1, borderSize do
+            local borderFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+            borderFrame:SetAllPoints(frame)
+            borderFrame:SetFrameLevel(frame:GetFrameLevel() + i)
+            
+            -- Use WoW's native backdrop system for thick borders
+            borderFrame:SetBackdrop({
+                bgFile = nil,
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                edgeSize = i * 2, -- Scale edge size with border thickness
+                insets = { left = -i, right = -i, top = -i, bottom = -i }
+            })
+            borderFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
+            
+            -- Store reference for cleanup
+            if not frame.thickBorderFrames then
+                frame.thickBorderFrames = {}
+            end
+            table.insert(frame.thickBorderFrames, borderFrame)
+        end
+    end
+    
+    -- Always create the base border
     BoxxyAuras.UIUtils.DrawSlicedBG(frame, "ItemEntryBorder", "border", 0)
 
     local cfgBG = (BoxxyAuras.Config and BoxxyAuras.Config.BackgroundColor) or {
@@ -104,8 +153,19 @@ function AuraIcon.New(parentFrame, index, baseName)
     -- Set up event handlers
     frame:SetScript("OnEnter", function()
         AuraIcon.OnEnter(instance)
+
+        -- << NEW: When entering a child icon, explicitly cancel the parent's leave timer
+        local parentFrame = instance.parentDisplayFrame
+        if parentFrame and BoxxyAuras.FrameLeaveTimers[parentFrame] then
+            C_Timer.Cancel(BoxxyAuras.FrameLeaveTimers[parentFrame])
+            BoxxyAuras.FrameLeaveTimers[parentFrame] = nil
+        end
+        -- Also, ensure the global hover state is set to the parent
+        BoxxyAuras.HoveredFrame = parentFrame
     end)
     frame:SetScript("OnLeave", function()
+        -- OnLeave is now handled by the parent frame's OnUpdate logic,
+        -- but we still need to call the instance's OnLeave for the tooltip.
         AuraIcon.OnLeave(instance)
     end)
     frame:SetScript("OnMouseUp", function(_, button)
@@ -224,6 +284,7 @@ function AuraIcon.New(parentFrame, index, baseName)
     frame.countText = countText
     frame.countTextBg = countTextBg
     frame.durationText = durationText
+    frame.durationTextBg = durationTextBg
     frame.wipeOverlay = wipeOverlay
     frame.shakeOverlay = shakeOverlay
 
@@ -297,6 +358,7 @@ function AuraIcon.Update(self, auraData, index, auraType)
     self.auraInstanceID = auraData.auraInstanceID
     self.slot = auraData.slot
     self.auraKey = auraData.spellId
+    self.dispelName = auraData.dispelName -- Store dispel type for border color
 
     -- Set border color based on aura type
     if auraType == "HARMFUL" then
@@ -463,6 +525,90 @@ function AuraIcon.OnEnter(self)
     GameTooltip:Show()
 end
 
+-- Helper function to check if TipTac (or other addons) already added caster information
+function AuraIcon.HasCasterLineInTooltip()
+    if not GameTooltip:IsShown() or GameTooltip:NumLines() == 0 then
+        return false
+    end
+    
+    for i = 1, GameTooltip:NumLines() do
+        local line = _G["GameTooltipTextLeft" .. i]
+        if line then
+            local text = line:GetText() or ""
+            -- Check for various patterns that indicate caster information
+            -- TipTac uses "Caster:", some other addons might use different patterns
+            if string.find(text, "Caster:", 1, true) or 
+               string.find(text, "From:", 1, true) or
+               string.find(text, "Cast by:", 1, true) or
+               string.find(text, "Source:", 1, true) then
+                if BoxxyAuras.DEBUG then
+                    print(string.format("HasCasterLineInTooltip: Found caster line at position %d: '%s'", i, text))
+                end
+                return true
+            end
+        end
+    end
+    
+    if BoxxyAuras.DEBUG then
+        print("HasCasterLineInTooltip: No caster lines found")
+    end
+    return false
+end
+
+-- Helper function to add tooltip lines with proper wrapping and coloring for expired auras
+function AuraIcon.AddWrappedTooltipLine(leftText, rightText, isTitle)
+    if not leftText then return end
+    
+    local maxLineLength = 50 -- Reasonable character limit for wrapping
+    
+    -- Define proper tooltip colors
+    local titleColor = {r = 1, g = 0.82, b = 0}    -- Golden yellow for spell names
+    local normalColor = {r = 1, g = 1, b = 1}      -- White for descriptions
+    local rightColor = {r = 1, g = 1, b = 1}       -- White for right text
+    
+    -- If it's a title line (first line) or has right text, use double line
+    if isTitle or (rightText and rightText ~= "") then
+        local leftR, leftG, leftB = titleColor.r, titleColor.g, titleColor.b
+        if not isTitle then
+            leftR, leftG, leftB = normalColor.r, normalColor.g, normalColor.b
+        end
+        GameTooltip:AddDoubleLine(leftText, rightText or "", 
+            leftR, leftG, leftB, rightColor.r, rightColor.g, rightColor.b)
+        return
+    end
+    
+    -- Choose color based on line type
+    local lineColor = isTitle and titleColor or normalColor
+    
+    -- For long descriptions, break them into multiple lines
+    if string.len(leftText) > maxLineLength then
+        local words = {}
+        for word in string.gmatch(leftText, "%S+") do
+            table.insert(words, word)
+        end
+        
+        local currentLine = ""
+        for _, word in ipairs(words) do
+            local testLine = currentLine == "" and word or currentLine .. " " .. word
+            if string.len(testLine) > maxLineLength and currentLine ~= "" then
+                -- Add the current line and start a new one
+                GameTooltip:AddLine(currentLine, lineColor.r, lineColor.g, lineColor.b, true)
+                currentLine = word
+            else
+                currentLine = testLine
+            end
+        end
+        
+        -- Add any remaining text
+        if currentLine ~= "" then
+            GameTooltip:AddLine(currentLine, lineColor.r, lineColor.g, lineColor.b, true)
+        end
+    else
+        -- Short lines can be added normally
+        GameTooltip:AddLine(leftText, lineColor.r, lineColor.g, lineColor.b, true)
+    end
+end
+
 function AuraIcon.RefreshTooltipContent(self)
     if not self.frame then
         return
@@ -473,6 +619,11 @@ function AuraIcon.RefreshTooltipContent(self)
     local isPermanent = (self.duration or 0) == 0
 
     GameTooltip:ClearLines()
+    
+    if BoxxyAuras.DEBUG then
+        print(string.format("RefreshTooltipContent: aura=%s, remaining=%.1f, isPermanent=%s, expired=%s", 
+            tostring(self.name), remaining, tostring(isPermanent), tostring(remaining <= 0 and not isPermanent)))
+    end
 
     if isPermanent or remaining > 0 then
         local tooltipSet = false
@@ -481,16 +632,35 @@ function AuraIcon.RefreshTooltipContent(self)
         if self.auraType == "CUSTOM" then
             local cachedData = self.auraInstanceID and BoxxyAuras.AllAuras[self.auraInstanceID]
             if cachedData and cachedData.lines then
+                if BoxxyAuras.DEBUG then
+                    print(string.format("RefreshTooltipContent: Using cached data for custom aura, %d lines", #cachedData.lines))
+                end
+                -- Use text wrapping to control tooltip width
+                
                 for i, lineInfo in ipairs(cachedData.lines) do
                     if lineInfo.left then
-                        if i == 1 then
-                            GameTooltip:AddDoubleLine(lineInfo.left, lineInfo.right or nil)
-                        else
-                            GameTooltip:AddDoubleLine(lineInfo.left, lineInfo.right or nil, 1, 1, 1, 1, 1, 1)
-                        end
+                        AuraIcon.AddWrappedTooltipLine(lineInfo.left, lineInfo.right, i == 1)
                     end
                 end
+                
+                -- Add caster information if available (check if TipTac already added one)
+                local casterName = AuraIcon.GetCasterNameFromCurrentData(self)
+                if casterName then
+                    local tiptacCasterExists = AuraIcon.HasCasterLineInTooltip()
+                    if BoxxyAuras.DEBUG then
+                        print(string.format("Tooltip: Custom aura casterName='%s', tiptacExists=%s for instanceID=%s", 
+                            tostring(casterName), tostring(tiptacCasterExists), tostring(self.auraInstanceID)))
+                    end
+                    if not tiptacCasterExists then
+                        GameTooltip:AddLine("From: " .. casterName, 0.5, 0.8, 1.0, true)  -- Light blue color
+                    end
+                end
+                
                 tooltipSet = true
+            else
+                if BoxxyAuras.DEBUG then
+                    print("RefreshTooltipContent: No cached data for custom aura")
+                end
             end
         end
 
@@ -507,20 +677,84 @@ function AuraIcon.RefreshTooltipContent(self)
                     end
                 end
                 if currentIndex then
+                    if BoxxyAuras.DEBUG then
+                        print(string.format("RefreshTooltipContent: Using SetUnitAura with index %d", currentIndex))
+                    end
                     GameTooltip:SetUnitAura("player", currentIndex, filterToUse)
+                    
+                    -- Add caster information after WoW sets the tooltip
+                    local casterName = AuraIcon.GetCasterNameFromCurrentData(self)
+                    if casterName then
+                        -- Check if TipTac is loaded - only use delay if it is
+                        local isTipTacLoaded = (TipTac ~= nil)
+                        
+                        if isTipTacLoaded then
+                            -- Use a small delay to let TipTac modify the tooltip first
+                            C_Timer.After(0.01, function()
+                                if GameTooltip:IsOwned(self.frame) then
+                                    local tiptacCasterExists = AuraIcon.HasCasterLineInTooltip()
+                                    if BoxxyAuras.DEBUG then
+                                        print(string.format("Tooltip: Active aura (delayed) casterName='%s', tiptacExists=%s for instanceID=%s", 
+                                            tostring(casterName), tostring(tiptacCasterExists), tostring(self.auraInstanceID)))
+                                    end
+                                    if not tiptacCasterExists then
+                                        GameTooltip:AddLine("From: " .. casterName, 0.5, 0.8, 1.0, true)  -- Light blue color
+                                        GameTooltip:Show()  -- Force tooltip to recalculate size
+                                    end
+                                end
+                            end)
+                        else
+                            -- No TipTac, add immediately to avoid flashing
+                            local tiptacCasterExists = AuraIcon.HasCasterLineInTooltip()
+                            if BoxxyAuras.DEBUG then
+                                print(string.format("Tooltip: Active aura (immediate) casterName='%s', tiptacExists=%s for instanceID=%s", 
+                                    tostring(casterName), tostring(tiptacCasterExists), tostring(self.auraInstanceID)))
+                            end
+                            if not tiptacCasterExists then
+                                GameTooltip:AddLine("From: " .. casterName, 0.5, 0.8, 1.0, true)  -- Light blue color
+                                GameTooltip:Show()  -- Force tooltip to recalculate size
+                            end
+                        end
+                    end
+                    
                     tooltipSet = true
+                else
+                    if BoxxyAuras.DEBUG then
+                        print("RefreshTooltipContent: Aura not found by instance ID")
+                    end
                 end
             end
         end
 
         -- Fallback to spell ID
         if not tooltipSet and self.spellId then
+            if BoxxyAuras.DEBUG then
+                print(string.format("RefreshTooltipContent: Using SetSpellByID with spellId %s", tostring(self.spellId)))
+            end
             GameTooltip:SetSpellByID(self.spellId)
+            
+            -- Add caster information if available (check if TipTac already added one)
+            local casterName = AuraIcon.GetCasterNameFromCurrentData(self)
+            if casterName then
+                local tiptacCasterExists = AuraIcon.HasCasterLineInTooltip()
+                if BoxxyAuras.DEBUG then
+                    print(string.format("Tooltip: Fallback spell casterName='%s', tiptacExists=%s for instanceID=%s", 
+                        tostring(casterName), tostring(tiptacCasterExists), tostring(self.auraInstanceID)))
+                end
+                if not tiptacCasterExists then
+                    GameTooltip:AddLine("From: " .. casterName, 0.5, 0.8, 1.0, true)  -- Light blue color
+                    GameTooltip:Show()  -- Force tooltip to recalculate size
+                end
+            end
+            
             tooltipSet = true
         end
 
         -- Last resort
         if not tooltipSet then
+            if BoxxyAuras.DEBUG then
+                print("RefreshTooltipContent: Using fallback tooltip text")
+            end
             GameTooltip:AddLine(self.name or "Unknown Aura")
         end
 
@@ -528,21 +762,50 @@ function AuraIcon.RefreshTooltipContent(self)
         -- Show cached data for expired auras
         local cachedData = self.auraInstanceID and BoxxyAuras.AllAuras[self.auraInstanceID]
         if cachedData and cachedData.lines then
+            if BoxxyAuras.DEBUG then
+                print(string.format("RefreshTooltipContent: Using cached data for expired aura, %d lines, scrapedVia=%s, instanceID=%s", 
+                    #cachedData.lines, tostring(cachedData.scrapedVia), tostring(self.auraInstanceID)))
+            end
+            
+            -- Use text wrapping to control tooltip width
+            
             for i, lineInfo in ipairs(cachedData.lines) do
                 if lineInfo.left then
-                    if i == 1 then
-                        GameTooltip:AddDoubleLine(lineInfo.left, lineInfo.right or nil)
-                    else
-                        GameTooltip:AddDoubleLine(lineInfo.left, lineInfo.right or nil, 1, 1, 1, 1, 1, 1)
-                    end
+                    AuraIcon.AddWrappedTooltipLine(lineInfo.left, lineInfo.right, i == 1)
                 end
             end
+            
+            -- Add caster information if available (check if TipTac already added one)
+            local casterName = AuraIcon.GetCasterNameFromCurrentData(self)
+            if casterName then
+                local tiptacCasterExists = AuraIcon.HasCasterLineInTooltip()
+                if BoxxyAuras.DEBUG then
+                    print(string.format("Tooltip: Expired aura casterName='%s', tiptacExists=%s for instanceID=%s", 
+                        tostring(casterName), tostring(tiptacCasterExists), tostring(self.auraInstanceID)))
+                end
+                if not tiptacCasterExists then
+                    GameTooltip:AddLine("From: " .. casterName, 0.5, 0.8, 1.0, true)  -- Light blue color
+                    GameTooltip:Show()  -- Force tooltip to recalculate size
+                end
+            end
+            
             GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5, true)
         else
+            if BoxxyAuras.DEBUG then
+                print(string.format("RefreshTooltipContent: No cached data for expired aura (instanceID=%s)", tostring(self.auraInstanceID)))
+                -- Let's also debug what IS in the cache
+                print("Current cache contents:")
+                for id, data in pairs(BoxxyAuras.AllAuras or {}) do
+                    print(string.format("  - ID: %s, Name: %s, ScrapedVia: %s", tostring(id), tostring(data.name), tostring(data.scrapedVia)))
+                end
+            end
             GameTooltip:AddLine(self.name or "Unknown Expired Aura", 1, 1, 1, true)
             GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5, true)
         end
     else
+        if BoxxyAuras.DEBUG then
+            print("RefreshTooltipContent: Unknown aura state")
+        end
         GameTooltip:AddLine(self.name or "Unknown Aura State")
     end
 end
@@ -572,6 +835,101 @@ function AuraIcon:Shake(scale)
     end
 end
 
+function AuraIcon:UpdateBorderSize()
+    if not self.frame then
+        return
+    end
+
+    -- Find frame type and get border size setting
+    local frameType = nil
+    if self.parentDisplayFrame then
+        for fType, frame in pairs(BoxxyAuras.Frames or {}) do
+            if frame == self.parentDisplayFrame then
+                frameType = fType
+                break
+            end
+        end
+    end
+
+    local borderSize = 0 -- Default border size
+    if frameType then
+        local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
+        local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+        if currentSettings and settingsKey and currentSettings[settingsKey] and currentSettings[settingsKey].borderSize then
+            borderSize = currentSettings[settingsKey].borderSize
+        end
+    end
+
+    -- Redraw the border with the new size using thick border frames
+    if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG then
+        -- Clear existing thick border frames
+        if self.frame.thickBorderFrames then
+            for _, borderFrame in ipairs(self.frame.thickBorderFrames) do
+                if borderFrame then
+                    borderFrame:Hide()
+                    borderFrame:SetParent(nil)
+                end
+            end
+            self.frame.thickBorderFrames = nil
+        end
+        
+        -- Create new thick border frames
+        if borderSize > 0 then
+            for i = 1, borderSize do
+                local borderFrame = CreateFrame("Frame", nil, self.frame, "BackdropTemplate")
+                borderFrame:SetAllPoints(self.frame)
+                borderFrame:SetFrameLevel(self.frame:GetFrameLevel() + i)
+                
+                -- Use WoW's native backdrop system for thick borders
+                borderFrame:SetBackdrop({
+                    bgFile = nil,
+                    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                    edgeSize = i * 2, -- Scale edge size with border thickness
+                    insets = { left = -i, right = -i, top = -i, bottom = -i }
+                })
+                
+                -- Store reference for cleanup
+                if not self.frame.thickBorderFrames then
+                    self.frame.thickBorderFrames = {}
+                end
+                table.insert(self.frame.thickBorderFrames, borderFrame)
+            end
+        end
+        
+        -- Get the appropriate colors for both base border and thick borders
+        local r, g, b, a = 0.3, 0.3, 0.3, 0.8 -- Default colors
+        
+        if self.auraType == "HARMFUL" then
+            local dispelType = string.upper(self.dispelName or "NONE")
+            if dispelType == "NONE" then
+                r, g, b, a = 1.0, 0.1, 0.1, 0.9
+            else
+                local colorTable = DebuffTypeColor[dispelType]
+                if colorTable then
+                    r, g, b, a = colorTable[1], colorTable[2], colorTable[3], 0.9
+                else
+                    r, g, b, a = 1.0, 0.1, 0.1, 0.9
+                end
+            end
+        else
+            local cfgBorder = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or { r = 0.3, g = 0.3, b = 0.3, a = 0.8 }
+            r, g, b, a = cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a
+        end
+        
+        -- Apply color to base border
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", r, g, b, a)
+        
+        -- Apply color to thick border frames
+        if self.frame.thickBorderFrames then
+            for _, borderFrame in ipairs(self.frame.thickBorderFrames) do
+                if borderFrame then
+                    borderFrame:SetBackdropBorderColor(r, g, b, a)
+                end
+            end
+        end
+    end
+end
+
 function AuraIcon:Resize(newIconSize)
     if not self.frame or not self.textureWidget then
         if BoxxyAuras.DEBUG then
@@ -580,8 +938,8 @@ function AuraIcon:Resize(newIconSize)
         return
     end
 
-    -- Prevent unnecessary resizing
-    if self.currentSize and self.currentSize == newIconSize then
+    -- Prevent unnecessary resizing only when both icon and text sizes are unchanged
+    if self.currentSize and self.currentSize == newIconSize and self.currentTextSize and self.currentTextSize == textSize then
         return
     end
 
@@ -599,13 +957,34 @@ function AuraIcon:Resize(newIconSize)
                   newIconSize)
     end
 
-    local textHeight = (BoxxyAuras.Config and BoxxyAuras.Config.TextHeight) or 8
+    -- Get current text size from settings
+    local frameType = nil
+    if self.parentDisplayFrame then
+        for fType, frame in pairs(BoxxyAuras.Frames or {}) do
+            if frame == self.parentDisplayFrame then
+                frameType = fType
+                break
+            end
+        end
+    end
+    
+    local textSize = 8 -- default
+    if frameType then
+        local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
+        local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+        if currentSettings and settingsKey and currentSettings[settingsKey] then
+            textSize = currentSettings[settingsKey].textSize or 8
+        end
+    end
+    
     local padding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
-    local newHeight = newIconSize + textHeight + (padding * 2)
+    local textAreaHeight = textSize + 4
+    local newHeight = newIconSize + textAreaHeight + (padding * 2)
     local newWidth = newIconSize + (padding * 2)
 
     -- Store the new size
     self.currentSize = newIconSize
+    self.currentTextSize = textSize
 
     -- Resize frame and widgets
     self.frame:SetSize(newWidth, newHeight)
@@ -627,9 +1006,23 @@ function AuraIcon:Resize(newIconSize)
 
     if self.frame.durationText then
         self.frame.durationText:ClearAllPoints()
-        self.frame.durationText:SetPoint("TOPLEFT", self.textureWidget, "BOTTOMLEFT", -padding, -padding)
-        self.frame.durationText:SetPoint("TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", padding, -padding)
+        self.frame.durationText:SetPoint("TOPLEFT", self.textureWidget, "BOTTOMLEFT", 0, -padding)
+        self.frame.durationText:SetPoint("TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", 0, -padding)
         self.frame.durationText:SetPoint("BOTTOM", self.frame, "BOTTOM", 0, padding)
+
+        -- Update font size if it changed
+        local fontPath, _, fontFlags = self.frame.durationText:GetFont()
+        if fontPath then
+            self.frame.durationText:SetFont(fontPath, textSize, fontFlags)
+        end
+    end
+
+    -- Reposition text background to match text
+    if self.frame.durationTextBg then
+        self.frame.durationTextBg:ClearAllPoints()
+        self.frame.durationTextBg:SetPoint("TOPLEFT", self.textureWidget, "BOTTOMLEFT", 0, -padding)
+        self.frame.durationTextBg:SetPoint("TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", 0, -padding)
+        self.frame.durationTextBg:SetPoint("BOTTOM", self.frame, "BOTTOM", 0, padding)
     end
 
     -- Re-anchor overlay textures
@@ -642,6 +1035,36 @@ function AuraIcon:Resize(newIconSize)
         self.frame.shakeOverlay:ClearAllPoints()
         self.frame.shakeOverlay:SetPoint("TOPLEFT", self.textureWidget, "TOPLEFT")
     end
+end
+
+-- Helper function to get caster name from tracked aura data
+function AuraIcon.GetCasterNameFromCurrentData(self)
+    if not self or not self.auraInstanceID then
+        return nil
+    end
+    
+    -- Always try to get source info from our tracked data first
+    -- This is where we store the sourceGUID from combat log events
+    for frameType, auras in pairs(BoxxyAuras.auraTracking or {}) do
+        for _, aura in ipairs(auras or {}) do
+            if aura.auraInstanceID == self.auraInstanceID then
+                if BoxxyAuras.DEBUG then
+                    print(string.format("GetCasterNameFromCurrentData: Found tracked aura with sourceGUID='%s'", 
+                        tostring(aura.sourceGUID)))
+                end
+                return BoxxyAuras.UIUtils.GetCasterName(aura)
+            end
+        end
+    end
+    
+    if BoxxyAuras.DEBUG then
+        print(string.format("GetCasterNameFromCurrentData: No tracked data found for instanceID=%s", 
+            tostring(self.auraInstanceID)))
+    end
+    
+    -- Fallback: if no tracked data, we can't reliably determine caster
+    -- WoW's live APIs don't preserve original caster information
+    return nil
 end
 
 -- Assign to the global table

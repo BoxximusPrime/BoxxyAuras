@@ -4,6 +4,88 @@ local BoxxyAuras = _G.BoxxyAuras -- Create a convenient local alias to the globa
 
 BoxxyAuras.UIUtils = {}
 
+-- Create a hidden tooltip for scraping. This is crucial for capturing data added by other addons.
+local scraperTooltip = CreateFrame("GameTooltip", "BoxxyAurasScraperTooltip", UIParent, "GameTooltipTemplate")
+scraperTooltip:SetOwner(UIParent, "ANCHOR_NONE")
+scraperTooltip:Hide()
+
+-- Tooltip scraping queue to prevent race conditions
+BoxxyAuras.scrapingQueue = {}
+BoxxyAuras.isScrapingActive = false
+
+-- Queue management functions
+function BoxxyAuras.UIUtils.QueueTooltipScrape(spellId, targetAuraInstanceID, filter, retryCount)
+    -- Check if we already have this data cached
+    if BoxxyAuras.AllAuras[targetAuraInstanceID] and not BoxxyAuras.AllAuras[targetAuraInstanceID].isPlaceholder then
+        if BoxxyAuras.DEBUG then
+            print(string.format("QueueTooltipScrape: Already have cached data for instanceID=%s, skipping queue", tostring(targetAuraInstanceID)))
+        end
+        return
+    end
+    
+    -- Check if this aura is already in the queue
+    for _, queuedItem in ipairs(BoxxyAuras.scrapingQueue) do
+        if queuedItem.targetAuraInstanceID == targetAuraInstanceID then
+            if BoxxyAuras.DEBUG then
+                print(string.format("QueueTooltipScrape: instanceID=%s already queued, skipping", tostring(targetAuraInstanceID)))
+            end
+            return
+        end
+    end
+    
+    -- Add to queue
+    table.insert(BoxxyAuras.scrapingQueue, {
+        spellId = spellId,
+        targetAuraInstanceID = targetAuraInstanceID,
+        filter = filter,
+        retryCount = retryCount or 0,
+        timestamp = GetTime()
+    })
+    
+    if BoxxyAuras.DEBUG then
+        print(string.format("QueueTooltipScrape: Queued scrape for instanceID=%s (queue size: %d)", 
+            tostring(targetAuraInstanceID), #BoxxyAuras.scrapingQueue))
+    end
+    
+    -- Start processing if not already active
+    if not BoxxyAuras.isScrapingActive then
+        BoxxyAuras.UIUtils.ProcessNextScrapeInQueue()
+    end
+end
+
+function BoxxyAuras.UIUtils.ProcessNextScrapeInQueue()
+    if #BoxxyAuras.scrapingQueue == 0 then
+        BoxxyAuras.isScrapingActive = false
+        if BoxxyAuras.DEBUG then
+            print("ProcessNextScrapeInQueue: Queue empty, scraping stopped")
+        end
+        return
+    end
+    
+    BoxxyAuras.isScrapingActive = true
+    local queuedItem = table.remove(BoxxyAuras.scrapingQueue, 1) -- Take first item
+    
+    if BoxxyAuras.DEBUG then
+        print(string.format("ProcessNextScrapeInQueue: Processing instanceID=%s (queue remaining: %d)", 
+            tostring(queuedItem.targetAuraInstanceID), #BoxxyAuras.scrapingQueue))
+    end
+    
+    -- Execute the actual scraping
+    BoxxyAuras.UIUtils.ExecuteTooltipScrape(
+        queuedItem.spellId, 
+        queuedItem.targetAuraInstanceID, 
+        queuedItem.filter, 
+        queuedItem.retryCount
+    )
+end
+
+function BoxxyAuras.UIUtils.OnScrapeComplete()
+    -- Move to next item in queue after a small delay to ensure tooltip is clear
+    C_Timer.After(0.1, function()
+        BoxxyAuras.UIUtils.ProcessNextScrapeInQueue()
+    end)
+end
+
 -- Copied from WhoGotLoots/UIBuilder.lua
 BoxxyAuras.FrameTextures = {
     -- We might only need a few of these initially
@@ -315,103 +397,653 @@ function BoxxyAuras_SetupGeneralButton(button)
     end
 end
 
--- Tooltip Scraping Function (Using GetUnitAura, finds index via auraInstanceID)
-function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter)
-    -- Check if already scraped (key exists in AllAuras) - Use INSTANCE ID as key
-    if targetAuraInstanceID and BoxxyAuras.AllAuras[targetAuraInstanceID] then
-        return
+-- Main entry point - Queues tooltip scraping to prevent race conditions
+function BoxxyAuras.AttemptTooltipScrape(spellId, targetAuraInstanceID, filter, retryCount)
+    BoxxyAuras.UIUtils.QueueTooltipScrape(spellId, targetAuraInstanceID, filter, retryCount)
+end
+
+-- Main tooltip scraping function
+function BoxxyAuras.UIUtils.ExecuteTooltipScrape(spellId, instanceId, filter, retryCount)
+    retryCount = retryCount or 0
+    
+    if BoxxyAuras.DEBUG then
+        print(string.format("ExecuteTooltipScrape: spellId=%s, instanceID=%s, filter=%s, retry=%d", 
+            tostring(spellId), tostring(instanceId), tostring(filter), retryCount))
     end
-    -- Validate inputs 
-    if not spellId or not targetAuraInstanceID or not filter then
-        print(string.format("DEBUG Scrape Error: Invalid arguments. spellId: %s, instanceId: %s, filter: %s",
-            tostring(spellId), tostring(targetAuraInstanceID), tostring(filter)))
+
+    -- Stop if we already have complete data
+    if BoxxyAuras.AllAuras[instanceId] and not BoxxyAuras.AllAuras[instanceId].isPlaceholder then
+        if BoxxyAuras.DEBUG then
+            print("ExecuteTooltipScrape: Already have complete data, moving to next in queue")
+        end
+        BoxxyAuras.OnScrapeComplete()
         return
     end
 
-    -- <<< Simplify: Call appropriate function based on filter >>>
-    local tipData = nil
-    if filter == "HELPFUL" then
-        tipData = C_TooltipInfo.GetUnitBuffByAuraInstanceID("player", targetAuraInstanceID, filter)
-    elseif filter == "HARMFUL" then
-        tipData = C_TooltipInfo.GetUnitDebuffByAuraInstanceID("player", targetAuraInstanceID, filter)
+    -- Try C_TooltipInfo scraping
+    local success, spellName, tooltipLines = BoxxyAuras.UIUtils.TryTooltipInfoScrape(spellId, instanceId, filter)
+    
+    if success then
+        -- Cache the result
+        BoxxyAuras.AllAuras[instanceId] = {
+            name = spellName,
+            lines = tooltipLines,
+            scrapedVia = "C_TooltipInfo"
+        }
+        
+        if BoxxyAuras.DEBUG then
+            print("ExecuteTooltipScrape: C_TooltipInfo scrape successful, moving to next in queue")
+        end
+        BoxxyAuras.UIUtils.OnScrapeComplete()
+        return
+    end
+
+    -- If failed, retry with delay
+    if retryCount < 8 then
+        local delay = 0.1 + (retryCount * 0.1)
+        if BoxxyAuras.DEBUG then
+            print(string.format("ExecuteTooltipScrape: Failed, retrying in %.1f seconds (attempt %d/8)", delay, retryCount + 1))
+        end
+        
+        C_Timer.After(delay, function()
+            BoxxyAuras.UIUtils.ExecuteTooltipScrape(spellId, instanceId, filter, retryCount + 1)
+        end)
     else
-        -- Should not happen with current usage, but log if it does
-        print(string.format("DEBUG Scrape Error: Invalid filter '%s' passed to AttemptTooltipScrape for SpellID: %s",
-            tostring(filter), tostring(spellId)))
-        return
+        if BoxxyAuras.DEBUG then
+            print("ExecuteTooltipScrape: Max retries reached, giving up on this aura")
+        end
+        BoxxyAuras.UIUtils.OnScrapeComplete()
+    end
+end
+
+-- Helper function to get caster name from aura data
+function BoxxyAuras.UIUtils.GetCasterName(auraData)
+    if not auraData then
+        return nil
+    end
+    
+    if BoxxyAuras.DEBUG then
+        print(string.format("GetCasterName: sourceGUID='%s', sourceName='%s', isFromPlayerOrPlayerPet=%s", 
+            tostring(auraData.sourceGUID), tostring(auraData.sourceName), tostring(auraData.isFromPlayerOrPlayerPet)))
+    end
+    
+    -- If we have a sourceName from combat log, use it directly (most reliable)
+    if auraData.sourceName and auraData.sourceName ~= "" then
+        -- Check if it's the player
+        local playerName = UnitName("player")
+        if auraData.sourceName == playerName then
+            if BoxxyAuras.DEBUG then
+                print("GetCasterName: Identified as player via sourceName match")
+            end
+            return "You"
+        else
+            if BoxxyAuras.DEBUG then
+                print(string.format("GetCasterName: Using sourceName: '%s'", auraData.sourceName))
+            end
+            return auraData.sourceName
+        end
+    end
+    
+    -- If we have sourceGUID, try to get name from it
+    if auraData.sourceGUID then
+        -- Check if it's the player
+        local playerGUID = UnitGUID("player")
+        if auraData.sourceGUID == playerGUID then
+            if BoxxyAuras.DEBUG then
+                print("GetCasterName: Identified as player via GUID match")
+            end
+            return "You"
+        end
+        
+        -- Try to get name from GUID (this works for units in your group/raid)
+        local name = GetPlayerInfoByGUID(auraData.sourceGUID)
+        if name and name ~= "" then
+            if BoxxyAuras.DEBUG then
+                print(string.format("GetCasterName: Found name from GUID: '%s'", name))
+            end
+            return name
+        end
+        
+        -- Fallback: try to extract name from GUID if it's a player GUID
+        -- Player GUIDs have format: Player-[server]-[playerID]-[name hash]
+        -- Vehicle GUIDs have format: Vehicle-[server]-[playerID]-[name hash] when controlled by players
+        if string.find(auraData.sourceGUID, "Player-") or string.find(auraData.sourceGUID, "Vehicle-") then
+            if BoxxyAuras.DEBUG then
+                print("GetCasterName: Unknown player via GUID pattern (Player or Vehicle)")
+            end
+            -- We can't easily extract the name from GUID, but we know it's a player/vehicle
+            return "Unknown Player"
+        end
+    end
+    
+    -- Check if it came from player or player's pet based on spell data
+    if auraData.isFromPlayerOrPlayerPet then
+        if BoxxyAuras.DEBUG then
+            print("GetCasterName: Identified as player via isFromPlayerOrPlayerPet flag")
+        end
+        return "You"
+    end
+    
+    if BoxxyAuras.DEBUG then
+        print("GetCasterName: No caster information found")
+    end
+    
+    -- If no source information, return nil
+    return nil
+end
+
+-- Debug function - let's see what tooltip lines we actually capture
+function BoxxyAuras.UIUtils.DebugTooltipContent(source, spellId, instanceId)
+    if not BoxxyAuras.DEBUG then return end
+    
+    local tooltip = BoxxyAuras.BoxxyAurasScraperTooltip
+    if not tooltip then return end
+    
+    print(string.format("=== DEBUG TOOLTIP CONTENT (%s) - SpellID: %s, InstanceID: %s ===", 
+        source, tostring(spellId), tostring(instanceId)))
+    
+    for i = 1, tooltip:NumLines() do
+        local leftText = _G[tooltip:GetName() .. "TextLeft" .. i]
+        local rightText = _G[tooltip:GetName() .. "TextRight" .. i]
+        
+        if leftText then
+            local leftStr = leftText:GetText() or ""
+            local rightStr = rightText and rightText:GetText() or ""
+            
+            if leftStr ~= "" or rightStr ~= "" then
+                print(string.format("  Line %d: '%s' | '%s'", i, leftStr, rightStr))
+            end
+        end
+    end
+    print("=== END DEBUG TOOLTIP CONTENT ===")
+end
+
+-- Try scraping using C_TooltipInfo
+function BoxxyAuras.UIUtils.TryTooltipInfoScrape(spellId, instanceId, filter)
+    if not C_TooltipInfo then
+        return false, nil, nil
+    end
+    
+    -- Skip tooltip scraping for demo auras
+    if type(instanceId) == "string" and string.find(instanceId, "demo_", 1, true) then
+        return false, nil, nil
     end
 
+    local tipData = nil
+    
+    if filter == "HELPFUL" then
+        tipData = C_TooltipInfo.GetUnitBuffByAuraInstanceID("player", instanceId)
+    elseif filter == "HARMFUL" then
+        tipData = C_TooltipInfo.GetUnitDebuffByAuraInstanceID("player", instanceId)
+    end
+    
     if not tipData then
-        -- Error message is still relevant if the ByInstanceID call fails
-        print(string.format(
-            "DEBUG Scrape Error: GetUnit...ByAuraInstanceID failed unexpectedly for SpellID: %s (Filter: %s) via InstanceID %s",
-            tostring(spellId), tostring(filter), tostring(targetAuraInstanceID)))
-        return
+        return false, nil, nil
     end
 
-    -- <<< Keep Tooltip Line Processing and Caching >>>
-    -- Get tooltip lines
+    local spellName = nil
     local tooltipLines = {}
-    local spellNameFromTip = nil -- Variable to store name from tooltip
 
-    -- Use a flag to track if we have processed the first line
-    local firstLineProcessed = false
+    if BoxxyAuras.DEBUG then
+        print(string.format("TryTooltipInfoScrape: tipData=%s, name=%s, lines=%d", 
+            tostring(tipData ~= nil), tostring(tipData.name), tipData.lines and #tipData.lines or 0))
+    end
 
-    for i = 1, #tipData.lines do
-        local line = tipData.lines[i]
-        -- Only process lines with actual text
-        if line and line.leftText then
-            local left = line.leftText
-            local right = line.rightText
-            local skipLine = false
-
-            -- Check if "remaining" exists (case-insensitive)
-            if (left and string.find(left, "remaining", 1, true)) or
-                (right and string.find(right, "remaining", 1, true)) then
-                skipLine = true
-            end
-
-            -- Only process/store if the line isn't skipped
-            if not skipLine then
-                -- Capture the spell name from the first valid (non-skipped) line
-                if not firstLineProcessed and left then
-                    spellNameFromTip = left
-                    firstLineProcessed = true
+    -- Extract spell name and lines from tipData
+    if tipData.lines and #tipData.lines > 0 then
+        local firstLine = tipData.lines[1]
+        if firstLine and firstLine.leftText then
+            if not tipData.name or tipData.name == "" then
+                spellName = firstLine.leftText
+                if BoxxyAuras.DEBUG then
+                    print(string.format("TryTooltipInfoScrape: Extracted name from first line: '%s'", spellName))
                 end
+            else
+                spellName = tipData.name
+            end
 
-                -- Store line info in a sub-table
-                table.insert(tooltipLines, {
-                    left = left,
-                    right = right
-                })
+            -- Process all lines and store them properly
+            for i = 1, #tipData.lines do
+                local line = tipData.lines[i]
+                if line and line.leftText then
+                    if BoxxyAuras.DEBUG and i <= 3 then
+                        print(string.format("TryTooltipInfoScrape: Line %d: '%s' | '%s'", i, 
+                            tostring(line.leftText), tostring(line.rightText)))
+                    end
+                    if not (string.find(line.leftText, "remaining", 1, true) or (line.rightText and string.find(line.rightText, "remaining", 1, true))) then
+                        table.insert(tooltipLines, { left = line.leftText, right = line.rightText or "" })
+                    end
+                end
             end
         end
     end
 
-    -- Store the collected lines in the global cache using INSTANCE ID as the key
-    if targetAuraInstanceID and tooltipLines and #tooltipLines > 0 then
-        BoxxyAuras.AllAuras[targetAuraInstanceID] = {
-            name = spellNameFromTip or "Unknown", -- Store the name from the first line
-            lines = tooltipLines -- Store the table of line info tables
-        }
-    elseif targetAuraInstanceID then
-        -- Even if no lines after filtering, store something to prevent re-scraping
-        BoxxyAuras.AllAuras[targetAuraInstanceID] = {
-            name = spellNameFromTip or "Unknown",
-            lines = {}
-        }
+    if spellName and spellName ~= "" and #tooltipLines > 0 then
+        if BoxxyAuras.DEBUG then
+            print(string.format("TryTooltipInfoScrape: Success, cached %d lines with name '%s'", #tooltipLines, spellName))
+        end
+        return true, spellName, tooltipLines
     end
+    
+    if BoxxyAuras.DEBUG then
+        print("TryTooltipInfoScrape: Failed")
+    end
+    return false, nil, nil
+end
 
-    -- Minimal cache check is implicitly handled by the top check now
-    --[[ -- Remove old spellId minimal cache check
-    if spellId then
-        local existingCache = BoxxyAuras.AllAuras[spellId]
-        -- Only add minimal cache if it doesn't exist at all
-        if not existingCache then
-            print("Didn't end up cached, THIS SHOULD NOT HAPPEN")
+
+
+-- Approach 2: Use GameTooltip with aura index
+function BoxxyAuras.UIUtils.TryGameTooltipAuraScrape(spellId, targetAuraInstanceID, filter, retryCount)
+    retryCount = retryCount or 0
+    
+    -- Skip tooltip scraping for demo auras
+    if type(targetAuraInstanceID) == "string" and string.find(targetAuraInstanceID, "demo_", 1, true) then
+        BoxxyAuras.UIUtils.OnScrapeComplete()
+        return false
+    end
+    
+    -- Find the aura by instance ID
+    local auraIndex = nil
+    for i = 1, 40 do
+        local auraData = C_UnitAuras.GetAuraDataByIndex("player", i, filter)
+        if not auraData then break end
+        if auraData.auraInstanceID == targetAuraInstanceID then
+            auraIndex = i
+            break
         end
     end
-    --]]
+
+    if not auraIndex then
+        if BoxxyAuras.DEBUG then
+            print("TryGameTooltipAuraScrape: Aura not found by index - aura may have expired, completing scrape")
+        end
+        -- If aura not found by index, it likely expired during processing
+        -- Don't fall back to spell ID as that gives talent/spell tooltips, not aura tooltips
+        BoxxyAuras.UIUtils.OnScrapeComplete()
+        return false
+    end
+
+    local scraper = _G.BoxxyAurasScraperTooltip
+    scraper:Hide()  -- Ensure it's hidden first
+    scraper:ClearLines()
+    scraper:SetUnitAura("player", auraIndex, filter)
+    scraper:Show()
+    
+    -- Progressive delay based on retry count - give WoW more time to populate
+    local checkDelay = math.min(0.2 + (retryCount * 0.1), 0.8)
+    
+    C_Timer.After(checkDelay, function()
+        local success = BoxxyAuras.UIUtils.ExtractTooltipLines(targetAuraInstanceID, "GameTooltip_Aura")
+        
+        if success then
+            scraper:Hide()
+            if BoxxyAuras.DEBUG then
+                print(string.format("TryGameTooltipAuraScrape: Success on attempt %d", retryCount + 1))
+            end
+            BoxxyAuras.UIUtils.OnScrapeComplete()
+            return
+        end
+        
+        -- Not successful, try again with longer delay
+        local retryDelay = math.min(0.3 + (retryCount * 0.1), 0.8)
+        C_Timer.After(retryDelay, function()
+            local success2 = BoxxyAuras.UIUtils.ExtractTooltipLines(targetAuraInstanceID, "GameTooltip_Aura")
+            scraper:Hide()
+            
+            if success2 then
+                if BoxxyAuras.DEBUG then
+                    print(string.format("TryGameTooltipAuraScrape: Success on retry %d", retryCount + 1))
+                end
+                BoxxyAuras.UIUtils.OnScrapeComplete()
+                return
+            end
+            
+            -- Still failed - complete the scrape rather than falling back to spell ID
+            if BoxxyAuras.DEBUG then
+                print(string.format("TryGameTooltipAuraScrape: Failed on attempt %d, completing scrape (avoiding spell ID fallback for aura)", retryCount + 1))
+            end
+            
+            -- Don't fall back to spell ID as it gives wrong tooltips for talent-based auras
+            BoxxyAuras.UIUtils.OnScrapeComplete()
+        end)
+    end)
+    
+    return true -- We attempted it, success will be determined in the callback
+end
+
+-- Approach 3: Use GameTooltip with spell ID
+function BoxxyAuras.UIUtils.TryGameTooltipSpellScrape(spellId, targetAuraInstanceID, retryCount)
+    retryCount = retryCount or 0
+    
+    -- Skip tooltip scraping for demo auras
+    if type(targetAuraInstanceID) == "string" and string.find(targetAuraInstanceID, "demo_", 1, true) then
+        BoxxyAuras.UIUtils.OnScrapeComplete()
+        return false
+    end
+    
+    if not spellId then
+        if BoxxyAuras.DEBUG then
+            print("TryGameTooltipSpellScrape: No spell ID provided")
+        end
+        return false
+    end
+
+    local scraper = _G.BoxxyAurasScraperTooltip
+    scraper:Hide()  -- Ensure it's hidden first
+    scraper:ClearLines()
+    scraper:SetSpellByID(spellId)
+    scraper:Show()
+    
+    -- Progressive delay based on retry count - give WoW more time to populate
+    local checkDelay = math.min(0.2 + (retryCount * 0.1), 0.8)
+    
+    C_Timer.After(checkDelay, function()
+        local success = BoxxyAuras.UIUtils.ExtractTooltipLines(targetAuraInstanceID, "GameTooltip_Spell")
+        
+        if success then
+            scraper:Hide()
+            if BoxxyAuras.DEBUG then
+                print(string.format("TryGameTooltipSpellScrape: Success on attempt %d", retryCount + 1))
+            end
+            BoxxyAuras.UIUtils.OnScrapeComplete()
+            return
+        end
+        
+        -- Not successful, try again with longer delay
+        local retryDelay = math.min(0.3 + (retryCount * 0.1), 0.8)
+        C_Timer.After(retryDelay, function()
+            local success2 = BoxxyAuras.UIUtils.ExtractTooltipLines(targetAuraInstanceID, "GameTooltip_Spell")
+            scraper:Hide()
+            
+            if success2 then
+                if BoxxyAuras.DEBUG then
+                    print(string.format("TryGameTooltipSpellScrape: Success on retry %d", retryCount + 1))
+                end
+                BoxxyAuras.UIUtils.OnScrapeComplete()
+                return
+            end
+            
+            -- Still failed, try basic spell info approach or retry main function
+            if BoxxyAuras.DEBUG then
+                print(string.format("TryGameTooltipSpellScrape: Failed on attempt %d, trying basic spell info", retryCount + 1))
+            end
+            
+            -- Try basic spell info approach
+            local basicSuccess = BoxxyAuras.UIUtils.TryBasicSpellInfoScrape(spellId, targetAuraInstanceID)
+            
+            if not basicSuccess and retryCount < 8 then
+                -- Re-queue for retry instead of calling AttemptTooltipScrape directly
+                if BoxxyAuras.DEBUG then
+                    print(string.format("TryGameTooltipSpellScrape: Retrying via queue (attempt %d)", retryCount + 2))
+                end
+                C_Timer.After(0.5, function()
+                    BoxxyAuras.UIUtils.QueueTooltipScrape(spellId, targetAuraInstanceID, "HELPFUL", retryCount + 1)
+                end)
+            else
+                -- Either basicSuccess worked or we've hit max retries - move to next
+                BoxxyAuras.UIUtils.OnScrapeComplete()
+            end
+        end)
+    end)
+    
+    return true -- We attempted it, success will be determined in the callback
+end
+
+-- Approach 4: Basic spell info as absolute fallback
+function BoxxyAuras.UIUtils.TryBasicSpellInfoScrape(spellId, targetAuraInstanceID)
+    if not spellId then
+        if BoxxyAuras.DEBUG then
+            print("TryBasicSpellInfoScrape: No spell ID provided")
+        end
+        return false
+    end
+    
+    -- Try multiple approaches to get spell information using modern APIs
+    local spellName = nil
+    local spellDescription = nil
+    
+    -- Try C_Spell.GetSpellInfo (modern API)
+    if C_Spell and C_Spell.GetSpellInfo then
+        local spellInfo = C_Spell.GetSpellInfo(spellId)
+        if spellInfo then
+            spellName = spellInfo.name
+        end
+    end
+    
+    -- Fallback: Try C_Spell.GetSpellName if GetSpellInfo didn't work
+    if not spellName and C_Spell and C_Spell.GetSpellName then
+        spellName = C_Spell.GetSpellName(spellId)
+    end
+    
+    -- Try to get spell description
+    if C_Spell and C_Spell.GetSpellDescription then
+        spellDescription = C_Spell.GetSpellDescription(spellId)
+    end
+    
+    -- Try using a temporary tooltip if we still don't have a name
+    if not spellName then
+        if BoxxyAuras.DEBUG then
+            print("TryBasicSpellInfoScrape: Trying temporary tooltip approach")
+        end
+        local tempTooltip = CreateFrame("GameTooltip", "BoxxyAurasSpellInfoTooltip", UIParent, "GameTooltipTemplate")
+        tempTooltip:SetOwner(UIParent, "ANCHOR_NONE")
+        tempTooltip:SetSpellByID(spellId)
+        
+        -- Wait a moment for tooltip to populate
+        C_Timer.After(0.1, function()
+            local nameLabel = _G["BoxxyAurasSpellInfoTooltipTextLeft1"]
+            if nameLabel then
+                spellName = nameLabel:GetText()
+            end
+            tempTooltip:Hide()
+            
+            if spellName and spellName ~= "" then
+                -- Create basic tooltip data
+                local basicLines = {{left = spellName, right = ""}}
+                
+                if spellDescription and spellDescription ~= "" then
+                    table.insert(basicLines, {left = spellDescription, right = ""})
+                end
+                
+                BoxxyAuras.AllAuras[targetAuraInstanceID] = {
+                    name = spellName,
+                    lines = basicLines,
+                    scrapedVia = "BasicSpellInfo_Tooltip"
+                }
+                
+                if BoxxyAuras.DEBUG then
+                    print(string.format("TryBasicSpellInfoScrape: Success via tooltip, using spell name '%s' for instanceID=%s", 
+                        spellName, tostring(targetAuraInstanceID)))
+                end
+            else
+                if BoxxyAuras.DEBUG then
+                    print(string.format("TryBasicSpellInfoScrape: Failed via tooltip, no spell name found for spellId=%s", tostring(spellId)))
+                end
+            end
+            -- Callback is handled by the calling function since this is async
+        end)
+        return true -- We attempted it, success determined in callback
+    end
+    
+    if spellName and spellName ~= "" then
+        -- Create basic tooltip data
+        local basicLines = {{left = spellName, right = ""}}
+        
+        if spellDescription and spellDescription ~= "" then
+            table.insert(basicLines, {left = spellDescription, right = ""})
+        end
+        
+        BoxxyAuras.AllAuras[targetAuraInstanceID] = {
+            name = spellName,
+            lines = basicLines,
+            scrapedVia = "BasicSpellInfo"
+        }
+        
+        if BoxxyAuras.DEBUG then
+            print(string.format("TryBasicSpellInfoScrape: Success, using spell name '%s' for instanceID=%s", 
+                spellName, tostring(targetAuraInstanceID)))
+        end
+        return true
+    end
+    
+    if BoxxyAuras.DEBUG then
+        print(string.format("TryBasicSpellInfoScrape: Failed, no spell name found for spellId=%s", tostring(spellId)))
+    end
+    return false
+end
+
+-- Helper function to extract lines from the scraper tooltip
+function BoxxyAuras.UIUtils.ExtractTooltipLines(targetAuraInstanceID, source)
+    local tooltip = BoxxyAuras.BoxxyAurasScraperTooltip
+    if not tooltip then
+        if BoxxyAuras.DEBUG then
+            print(string.format("ExtractTooltipLines (%s): No scraper tooltip available", source))
+        end
+        return nil, nil
+    end
+
+    local spellNameFromTip = _G[tooltip:GetName() .. "TextLeft1"]:GetText()
+    if BoxxyAuras.DEBUG then
+        print(string.format("ExtractTooltipLines (%s): Checking tooltip, spellName='%s'", source, tostring(spellNameFromTip)))
+        
+        -- NEW: Add debug output to see all tooltip lines
+        BoxxyAuras.UIUtils.DebugTooltipContent(source, "unknown", targetAuraInstanceID)
+    end
+
+    if not spellNameFromTip or spellNameFromTip == "" then
+        if BoxxyAuras.DEBUG then
+            print(string.format("ExtractTooltipLines (%s): No spell name found", source))
+        end
+        return false
+    end
+
+    for i = 1, 30 do
+        local leftLabel = _G["BoxxyAurasScraperTooltipTextLeft" .. i]
+        if leftLabel and leftLabel:IsShown() and leftLabel:GetText() then
+            local leftText = leftLabel:GetText()
+            local rightLabel = _G["BoxxyAurasScraperTooltipTextRight" .. i]
+            local rightText = (rightLabel and rightLabel:IsShown() and rightLabel:GetText()) or ""
+            if not (string.find(leftText, "remaining", 1, true) or string.find(rightText, "remaining", 1, true)) then
+                table.insert(tooltipLines, {left = leftText, right = rightText})
+            end
+        else
+            break
+        end
+    end
+
+    if #tooltipLines > 0 then
+        BoxxyAuras.AllAuras[targetAuraInstanceID] = {
+            name = spellNameFromTip,
+            lines = tooltipLines,
+            scrapedVia = source
+        }
+        
+        if BoxxyAuras.DEBUG then
+            print(string.format("ExtractTooltipLines (%s): Success, cached %d lines for instanceID=%s", 
+                source, #tooltipLines, tostring(targetAuraInstanceID)))
+        end
+        return true
+    end
+    
+    if BoxxyAuras.DEBUG then
+        print(string.format("ExtractTooltipLines (%s): No valid lines found", source))
+    end
+    return false
+end
+
+-- This new function will perform the actual scraping from the dummy tooltip
+function BoxxyAuras.UIUtils.ScrapeAndCacheFromDummy(spellId, targetAuraInstanceID)
+    local scraper = _G.BoxxyAurasScraperTooltip
+    local tooltipLines = {}
+    local spellNameFromTip = _G.BoxxyAurasScraperTooltipTextLeft1 and _G.BoxxyAurasScraperTooltipTextLeft1:GetText()
+
+    if BoxxyAuras.DEBUG then
+        print(string.format("ScrapeAndCacheFromDummy: spellName=%s", tostring(spellNameFromTip)))
+    end
+
+    if spellNameFromTip then
+        for i = 1, 30 do
+            local leftLabel = _G["BoxxyAurasScraperTooltipTextLeft" .. i]
+            if leftLabel and leftLabel:IsShown() and leftLabel:GetText() then
+                local leftText = leftLabel:GetText()
+                local rightLabel = _G["BoxxyAurasScraperTooltipTextRight" .. i]
+                local rightText = (rightLabel and rightLabel:IsShown() and rightLabel:GetText()) or ""
+                if not (string.find(leftText, "remaining", 1, true) or string.find(rightText, "remaining", 1, true)) then
+                    table.insert(tooltipLines, {left = leftText, right = rightText})
+                end
+            else
+                break
+            end
+        end
+    end
+    
+    scraper:Hide()
+
+    -- If the dummy scrape was successful, overwrite the placeholder.
+    if spellNameFromTip and #tooltipLines > 0 then
+        BoxxyAuras.AllAuras[targetAuraInstanceID] = {
+            name = spellNameFromTip,
+            lines = tooltipLines,
+            scrapedVia = "GameTooltip"
+            -- isPlaceholder is now implicitly false
+        }
+        
+        if BoxxyAuras.DEBUG then
+            print(string.format("ScrapeAndCacheFromDummy: Enhanced scrape successful, cached %d lines", #tooltipLines))
+        end
+    else
+        if BoxxyAuras.DEBUG then
+            print("ScrapeAndCacheFromDummy: Enhanced scrape failed")
+        end
+    end
+end
+
+-- Fallback function for scraping using spell ID when aura is expired
+function BoxxyAuras.UIUtils.ScrapeAndCacheFromDummySpell(spellId, targetAuraInstanceID)
+    local scraper = _G.BoxxyAurasScraperTooltip
+    local tooltipLines = {}
+    local spellNameFromTip = _G.BoxxyAurasScraperTooltipTextLeft1 and _G.BoxxyAurasScraperTooltipTextLeft1:GetText()
+
+    if BoxxyAuras.DEBUG then
+        print(string.format("ScrapeAndCacheFromDummySpell: spellName=%s", tostring(spellNameFromTip)))
+    end
+
+    if spellNameFromTip then
+        for i = 1, 30 do
+            local leftLabel = _G["BoxxyAurasScraperTooltipTextLeft" .. i]
+            if leftLabel and leftLabel:IsShown() and leftLabel:GetText() then
+                local leftText = leftLabel:GetText()
+                local rightLabel = _G["BoxxyAurasScraperTooltipTextRight" .. i]
+                local rightText = (rightLabel and rightLabel:IsShown() and rightLabel:GetText()) or ""
+                if not (string.find(leftText, "remaining", 1, true) or string.find(rightText, "remaining", 1, true)) then
+                    table.insert(tooltipLines, {left = leftText, right = rightText})
+                end
+            else
+                break
+            end
+        end
+    end
+    
+    scraper:Hide()
+
+    -- If the spell ID scrape was successful, cache it
+    if spellNameFromTip and #tooltipLines > 0 then
+        BoxxyAuras.AllAuras[targetAuraInstanceID] = {
+            name = spellNameFromTip,
+            lines = tooltipLines,
+            scrapedVia = "SpellID_Fallback"
+            -- isPlaceholder is now implicitly false
+        }
+        
+        if BoxxyAuras.DEBUG then
+            print(string.format("ScrapeAndCacheFromDummySpell: Fallback scrape successful, cached %d lines", #tooltipLines))
+        end
+    else
+        if BoxxyAuras.DEBUG then
+            print("ScrapeAndCacheFromDummySpell: Fallback scrape failed")
+        end
+    end
 end
 
 -- Function to check if mouse cursor is within a frame's bounds
@@ -444,3 +1076,5 @@ end
 function BoxxyAuras.DebugLogWarning(message)
     print(string.format("|cffFFFF00WARNING:|r %s", message))
 end
+
+

@@ -15,6 +15,7 @@ Art/UIElements.xml
 
 # Load Lua files in correct dependency order
 UIUtils.lua      
+UIBuilder.lua    
 FrameHandler.lua 
 AuraIcon.lua     
 BoxxyAuras.lua   
