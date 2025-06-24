@@ -5,14 +5,15 @@ local BoxxyAuras = _G.BoxxyAuras
 BoxxyAuras.UIBuilder = {}
 
 -- Constants for consistent spacing and sizing
-local ELEMENT_SPACING = 12 -- Standard spacing between elements
-local HEADER_SPACING = 20 -- Spacing after section headers
+local ELEMENT_SPACING = 0 -- Standard spacing between elements
+local HEADER_SPACING = 0 -- Spacing after section headers
 local GROUP_PADDING = 12 -- Internal padding for group containers
-local ELEMENT_PADDING = 10 -- Padding for individual elements within groups
-local SLIDER_HEIGHT = 35 -- Height needed for a slider (label + slider + spacing)
-local CHECKBOX_ROW_HEIGHT = 35 -- Height needed for a row of checkboxes
+local ELEMENT_PADDING = 0 -- Padding for individual elements within groups
+local SLIDER_HEIGHT = 60 -- Height needed for a slider (label + slider + spacing)
+local SLIDER_HORIZONTAL_PADDING = 15 -- Extra horizontal padding for sliders to prevent thumb overflow
+local CHECKBOX_ROW_HEIGHT = 15 -- Height needed for a row of checkboxes
 local BUTTON_HEIGHT = 35 -- Height needed for a button
-local HEADER_HEIGHT = 32 -- Height needed for a section header
+local HEADER_HEIGHT = 22 -- Height needed for a section header
 local EDITBOX_HEIGHT = 25 -- Height needed for an edit box
 
 -- Container Class
@@ -84,10 +85,10 @@ function Container:AddSlider(labelText, minVal, maxVal, step, onValueChanged, in
     slider:SetMinMaxValues(minVal, maxVal)
     slider:SetValueStep(step)
     slider:SetObeyStepOnDrag(true)
-    slider:SetWidth(self.frame:GetWidth() - (GROUP_PADDING * 2))
+    slider:SetWidth(self.frame:GetWidth() - (GROUP_PADDING * 2) - (SLIDER_HORIZONTAL_PADDING * 2))
     
-    -- Position slider below its label
-    slider:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -8)
+    -- Position slider below its label with horizontal padding
+    slider:SetPoint("TOPLEFT", label, "BOTTOMLEFT", SLIDER_HORIZONTAL_PADDING, -8)
     
     -- Set up value display and callbacks
     local delayTimer = nil
@@ -141,22 +142,45 @@ function Container:AddSlider(labelText, minVal, maxVal, step, onValueChanged, in
     return slider
 end
 
+function Container:CalculateCheckboxWidth(text)
+    -- Calculate the width needed for a checkbox with the given text
+    -- Based on the BAURASCheckBoxTemplate structure: 12px checkbox + 4px padding + label width
+    local checkboxWidth = 12 -- Size of the checkbox icon from XML
+    local padding = 4 -- Padding between checkbox and label from XML
+    
+    -- Create a temporary font string to measure text width
+    local tempFont = self.frame:CreateFontString(nil, "ARTWORK", "BAURASFont_Checkbox")
+    tempFont:SetText(text)
+    local labelWidth = tempFont:GetStringWidth()
+    tempFont:Hide() -- Hide but don't destroy immediately to avoid issues
+    
+    -- Clean up the temporary font string after a brief delay
+    C_Timer.After(0.1, function()
+        if tempFont then
+            tempFont:Hide()
+            tempFont:SetParent(nil)
+        end
+    end)
+    
+    return checkboxWidth + padding + labelWidth
+end
+
 function Container:AddCheckboxRow(options, onValueChanged)
     local checkboxes = {}
-    local checkboxSpacing = 49
+    
+    -- First pass: create all checkboxes and calculate their widths
+    local checkboxWidths = {}
+    local totalCheckboxWidth = 0
     
     for i, option in ipairs(options) do
         local checkbox = CreateFrame("CheckButton", nil, self.frame, "BAURASCheckBoxTemplate")
         checkbox:SetText(option.text)
         checkbox.value = option.value
         
-        if i == 1 then
-            -- Position first checkbox normally
-            checkbox:SetPoint("TOPLEFT", self.frame, "TOPLEFT", GROUP_PADDING, self.currentY)
-        else
-            -- Position subsequent checkboxes to the right
-            checkbox:SetPoint("TOPLEFT", checkboxes[i-1], "TOPRIGHT", checkboxSpacing, 0)
-        end
+        -- Calculate this checkbox's width
+        local width = self:CalculateCheckboxWidth(option.text)
+        checkboxWidths[i] = width
+        totalCheckboxWidth = totalCheckboxWidth + width
         
         checkbox:SetScript("OnClick", function(self)
             for j, cb in ipairs(checkboxes) do
@@ -169,6 +193,19 @@ function Container:AddCheckboxRow(options, onValueChanged)
         end)
         
         checkboxes[i] = checkbox
+    end
+    
+    -- Use fixed spacing between checkboxes
+    local fixedSpacing = 10 -- Fixed 20px spacing between checkboxes
+    
+    -- Second pass: position the checkboxes with fixed spacing
+    local currentX = GROUP_PADDING
+    
+    for i, checkbox in ipairs(checkboxes) do
+        checkbox:SetPoint("TOPLEFT", self.frame, "TOPLEFT", currentX, self.currentY)
+        
+        -- Update position for next checkbox (current position + this checkbox's width + fixed spacing)
+        currentX = currentX + checkboxWidths[i] + fixedSpacing
     end
     
     -- Update container position
@@ -192,9 +229,18 @@ function Container:AddButton(text, width, onClick)
     return self:AddElement(button, BUTTON_HEIGHT)
 end
 
-function Container:AddEditBox(placeholder, maxLetters, onEnterPressed, onEscapePressed)
+function Container:AddEditBox(placeholder, maxLetters, onEnterPressed, onEscapePressed, customWidth, customXOffset)
     local editBox = CreateFrame("EditBox", nil, self.frame, "InputBoxTemplate")
-    editBox:SetWidth(self.frame:GetWidth() - (GROUP_PADDING * 2))
+    
+    -- Use custom width and positioning if provided, otherwise use full width
+    if customWidth and customXOffset then
+        editBox:SetWidth(customWidth)
+        editBox:SetPoint("TOPLEFT", self.frame, "TOPLEFT", GROUP_PADDING + customXOffset, self.currentY)
+    else
+        editBox:SetWidth(self.frame:GetWidth() - (GROUP_PADDING * 2))
+        editBox:SetPoint("TOPLEFT", self.frame, "TOPLEFT", GROUP_PADDING, self.currentY)
+    end
+    
     editBox:SetHeight(20)
     editBox:SetAutoFocus(false)
     editBox:SetMaxLetters(maxLetters or 32)
@@ -216,7 +262,12 @@ function Container:AddEditBox(placeholder, maxLetters, onEnterPressed, onEscapeP
         end
     end)
     
-    return self:AddElement(editBox, EDITBOX_HEIGHT)
+    -- Update container position manually since we're not using AddElement
+    self.currentY = self.currentY - EDITBOX_HEIGHT - ELEMENT_SPACING
+    local totalHeight = math.abs(self.currentY) + GROUP_PADDING
+    self.frame:SetHeight(totalHeight)
+    
+    return editBox
 end
 
 function Container:AddCheckbox(text, onClick)
@@ -228,6 +279,76 @@ function Container:AddCheckbox(text, onClick)
     end
     
     return self:AddElement(checkbox, 20)
+end
+
+function Container:AddSpacer(height)
+    -- Create an invisible frame that just takes up space
+    local spacer = CreateFrame("Frame", nil, self.frame)
+    spacer:SetWidth(1) -- Minimal width since it's invisible
+    spacer:SetHeight(height or 10) -- Default 10px height
+    
+    -- Update container position without using AddElement since we don't need positioning
+    self.currentY = self.currentY - (height or 10) - ELEMENT_SPACING
+    local totalHeight = math.abs(self.currentY) + GROUP_PADDING
+    self.frame:SetHeight(totalHeight)
+    
+    return spacer
+end
+
+function Container:CalculateButtonRowDimensions(buttons)
+    -- Calculate the dimensions for a button row without creating it
+    local buttonSpacing = 5 -- Space between buttons
+    local totalButtonWidth = 0
+    
+    -- Calculate total width needed for all buttons
+    for _, buttonInfo in ipairs(buttons) do
+        totalButtonWidth = totalButtonWidth + (buttonInfo.width or 60)
+    end
+    totalButtonWidth = totalButtonWidth + (buttonSpacing * (#buttons - 1))
+    
+    -- Calculate starting position to center the button row
+    local containerWidth = self.frame:GetWidth() - (GROUP_PADDING * 2)
+    local startX = (containerWidth - totalButtonWidth) / 2
+    
+    return {
+        startX = startX,
+        totalWidth = totalButtonWidth,
+        buttonSpacing = buttonSpacing
+    }
+end
+
+function Container:AddButtonRow(buttons)
+    -- Create a row of buttons with equal spacing
+    local buttonFrames = {}
+    local dimensions = self:CalculateButtonRowDimensions(buttons)
+    
+    for i, buttonInfo in ipairs(buttons) do
+        local button = CreateFrame("Button", buttonInfo.name, self.frame, "BAURASButtonTemplate")
+        button:SetWidth(buttonInfo.width or 60)
+        button:SetHeight(25)
+        button:SetText(buttonInfo.text)
+        
+        if i == 1 then
+            -- Position first button
+            button:SetPoint("TOPLEFT", self.frame, "TOPLEFT", GROUP_PADDING + dimensions.startX, self.currentY)
+        else
+            -- Position subsequent buttons to the right
+            button:SetPoint("LEFT", buttonFrames[i-1], "RIGHT", dimensions.buttonSpacing, 0)
+        end
+        
+        if buttonInfo.onClick then
+            button:SetScript("OnClick", buttonInfo.onClick)
+        end
+        
+        buttonFrames[i] = button
+    end
+    
+    -- Update container position
+    self.currentY = self.currentY - BUTTON_HEIGHT - ELEMENT_SPACING
+    local totalHeight = math.abs(self.currentY) + GROUP_PADDING
+    self.frame:SetHeight(totalHeight)
+    
+    return buttonFrames
 end
 
 function Container:GetFrame()

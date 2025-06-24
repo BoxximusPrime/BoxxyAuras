@@ -64,7 +64,7 @@ title:SetText("Custom Aura List")
 local instructionLabel = customOptionsFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
 instructionLabel:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -15) -- Below title
 instructionLabel:SetPoint("RIGHT", customOptionsFrame, "RIGHT", -10, 0)
-instructionLabel:SetText("Enter exact spell names, separated by commas. Case-sensitive.")
+instructionLabel:SetText("Enter exact spell names, separated by commas.\nCase-insensitive. Spacing after commas doesn't matter.")
 instructionLabel:SetJustifyH("LEFT")
 instructionLabel:SetWordWrap(true)
 
@@ -195,8 +195,9 @@ function BoxxyAuras.CustomOptions:SaveCustomAuras()
 
     -- Split the string by commas, trim whitespace
     for name in string.gmatch(text .. ',', "([^,]*),") do -- Add trailing comma to catch last item
-        local trimmedName = string.trim(name)
-        if trimmedName ~= "" then
+        -- Manual trim: remove leading and trailing whitespace (spaces, tabs, newlines)
+        local trimmedName = string.match(name, "^%s*(.-)%s*$")
+        if trimmedName and trimmedName ~= "" then
             newCustomNames[trimmedName] = true -- Add to the new table
         end
     end
@@ -226,6 +227,18 @@ function BoxxyAuras.CustomOptions:Toggle()
     if frame:IsShown() then
         frame:Hide()
     else
+        -- Apply the current global scale to match the main options window
+        local currentSettings = GetCurrentProfileSettings()
+        if currentSettings and currentSettings.optionsScale then
+            local scaleValue = currentSettings.optionsScale
+            if scaleValue <= 0 then
+                scaleValue = 1.0 -- Fallback to default if invalid
+            end
+            frame:SetScale(scaleValue)
+        else
+            frame:SetScale(1.0) -- Default scale if no setting found
+        end
+        
         -- Positioning Logic Start
         local mainOptions = BoxxyAuras.Options and BoxxyAuras.Options.Frame
         if mainOptions and mainOptions:IsShown() then

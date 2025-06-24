@@ -2,7 +2,7 @@
     <font name="BAURASFont_General" font="Interface\Addons\BoxxyAuras\Fonts\OpenSans-SemiBold.ttf" height="11" virtual="true">
         <Color r="0.8" g="0.8" b="0.8"/>
     </font>
-    <font name="BAURASFont_Header" font="Interface\Addons\BoxxyAuras\Fonts\OpenSans-SemiBold.ttf" height="11" virtual="true">
+    <font name="BAURASFont_Header" font="Interface\Addons\BoxxyAuras\Fonts\OpenSans-SemiBold.ttf" height="12" virtual="true">
         <Color r="0.6" g="0.6" b="0.6"/>
     </font>
     <font name="BAURASFont_Vers" font="Interface\Addons\BoxxyAuras\Fonts\OpenSans-SemiBold.ttf" height="8" virtual="true">

@@ -164,6 +164,11 @@ function BoxxyAuras.Options:ApplyScale(scale)
         if self.Frame then
             self.Frame:SetScale(scale)
         end
+        
+        -- Apply to the custom options frame if it exists
+        if BoxxyAuras.CustomOptions and BoxxyAuras.CustomOptions.Frame then
+            BoxxyAuras.CustomOptions.Frame:SetScale(scale)
+        end
     end
 end
 
@@ -307,7 +312,7 @@ local profileContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Cur
 
 -- Profile Selection Dropdown (manual creation for complex styling)
 local profileDropdown = CreateFrame("Frame", "BoxxyAurasProfileDropdown", profileContainer:GetFrame(), "UIDropDownMenuTemplate")
-profileDropdown:SetWidth(180)
+profileDropdown:SetWidth(profileContainer:GetFrame():GetWidth() - 24) -- Full width minus padding
 profileContainer:AddElement(profileDropdown, 30)
 
 -- >> ADDED: Hide default button textures to allow custom styling <<
@@ -369,63 +374,80 @@ end)
 
 BoxxyAuras.Options.ProfileDropdown = profileDropdown
 
+-- Spacer
+profileContainer:AddSpacer()
+
 -- Profile Actions Header
 profileContainer:AddHeader("Profile Actions")
 
--- Profile Name EditBox
+-- Calculate button row dimensions for edit box alignment
+local buttonRowConfig = {
+    {name = "BoxxyAurasCreateProfileButton", text = "New", width = 60},
+    {name = "BoxxyAurasCopyProfileButton", text = "Copy", width = 60},
+    {name = "BoxxyAurasDeleteProfileButton", text = "Delete", width = 60}
+}
+local buttonDimensions = profileContainer:CalculateButtonRowDimensions(buttonRowConfig)
+
+-- Profile Name EditBox (aligned with button row)
+local editBoxOffset = buttonDimensions.startX + 6 -- Small adjustment to account for edit box visual padding
 local profileNameEditBox = profileContainer:AddEditBox("", 32, function(self)
     local name = self:GetText()
     if name and name ~= "" then
         self:SetText("")
         self:ClearFocus()
     end
-end)
+end, nil, buttonDimensions.totalWidth - 6, editBoxOffset)
 BoxxyAuras.Options.ProfileNameEditBox = profileNameEditBox
 
--- Create Profile Button
-local createButton = profileContainer:AddButton("New", 60, function()
-    local name = BoxxyAuras.Options.ProfileNameEditBox:GetText()
-    if name and name ~= "" then
-        BoxxyAuras.Options:CreateProfile(name)
-        BoxxyAuras.Options.ProfileNameEditBox:SetText("")
-    end
-    PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
-end)
-BoxxyAuras.Options.CreateProfileButton = createButton
+-- Profile Action Buttons (centered row)
+local profileButtons = profileContainer:AddButtonRow({
+    {
+        name = "BoxxyAurasCreateProfileButton",
+        text = "New",
+        width = 60,
+        onClick = function()
+            local name = BoxxyAuras.Options.ProfileNameEditBox:GetText()
+            if name and name ~= "" then
+                BoxxyAuras.Options:CreateProfile(name)
+                BoxxyAuras.Options.ProfileNameEditBox:SetText("")
+            end
+            PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+        end
+    },
+    {
+        name = "BoxxyAurasCopyProfileButton",
+        text = "Copy",
+        width = 60,
+        onClick = function()
+            local name = BoxxyAuras.Options.ProfileNameEditBox:GetText()
+            if name and name ~= "" then
+                BoxxyAuras.Options:CopyProfile(name)
+                BoxxyAuras.Options.ProfileNameEditBox:SetText("")
+            end
+            PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+        end
+    },
+    {
+        name = "BoxxyAurasDeleteProfileButton",
+        text = "Delete",
+        width = 60,
+        onClick = function(self)
+            if not self:IsEnabled() then
+                return
+            end
+            local selectedProfile = BoxxyAurasDB and BoxxyAurasDB.activeProfile
+            if selectedProfile then
+                StaticPopup_Show("BOXXYAURAS_DELETE_PROFILE_CONFIRM", selectedProfile)
+            end
+            PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+        end
+    }
+})
 
--- Copy Profile Button (positioned next to Create button)
-local copyButton = CreateFrame("Button", "BoxxyAurasCopyProfileButton", profileContainer:GetFrame(), "BAURASButtonTemplate")
-copyButton:SetPoint("LEFT", createButton, "RIGHT", 5, 0)
-copyButton:SetWidth(60)
-copyButton:SetHeight(25)
-copyButton:SetText("Copy")
-copyButton:SetScript("OnClick", function()
-    local name = BoxxyAuras.Options.ProfileNameEditBox:GetText()
-    if name and name ~= "" then
-        BoxxyAuras.Options:CopyProfile(name)
-        BoxxyAuras.Options.ProfileNameEditBox:SetText("")
-    end
-    PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
-end)
-BoxxyAuras.Options.CopyProfileButton = copyButton
-
--- Delete Profile Button (positioned next to Copy button)
-local deleteButton = CreateFrame("Button", "BoxxyAurasDeleteProfileButton", profileContainer:GetFrame(), "BAURASButtonTemplate")
-deleteButton:SetPoint("LEFT", copyButton, "RIGHT", 5, 0)
-deleteButton:SetWidth(60)
-deleteButton:SetHeight(25)
-deleteButton:SetText("Delete")
-deleteButton:SetScript("OnClick", function(self)
-    if not self:IsEnabled() then
-        return
-    end
-    local selectedProfile = BoxxyAurasDB and BoxxyAurasDB.activeProfile
-    if selectedProfile then
-        StaticPopup_Show("BOXXYAURAS_DELETE_PROFILE_CONFIRM", selectedProfile)
-    end
-    PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
-end)
-BoxxyAuras.Options.DeleteProfileButton = deleteButton
+-- Store references to the buttons for later use
+BoxxyAuras.Options.CreateProfileButton = profileButtons[1]
+BoxxyAuras.Options.CopyProfileButton = profileButtons[2]
+BoxxyAuras.Options.DeleteProfileButton = profileButtons[3]
 
 -- Store reference to the container for positioning next section
 lastContainer = profileContainer
@@ -519,6 +541,9 @@ local buffAlignCheckboxes = buffContainer:AddCheckboxRow(
 )
 BoxxyAuras.Options.BuffAlignCheckboxes = buffAlignCheckboxes
 
+-- Add spacer between alignment and sliders
+buffContainer:AddSpacer()
+
 -- Buff Icon Size Slider
 local buffSizeSlider = buffContainer:AddSlider("Buff Icon Size", 12, 64, 1, function(value)
     local settings = GetCurrentProfileSettings()
@@ -566,6 +591,9 @@ local debuffAlignCheckboxes = debuffContainer:AddCheckboxRow(
     end
 )
 BoxxyAuras.Options.DebuffAlignCheckboxes = debuffAlignCheckboxes
+
+-- Add spacer between alignment and sliders
+debuffContainer:AddSpacer()
 
 -- Debuff Icon Size Slider
 local debuffSizeSlider = debuffContainer:AddSlider("Debuff Icon Size", 12, 64, 1, function(value)
@@ -615,6 +643,9 @@ local customAlignCheckboxes = customContainer:AddCheckboxRow(
 )
 BoxxyAuras.Options.CustomAlignCheckboxes = customAlignCheckboxes
 
+-- Add spacer between alignment and sliders
+customContainer:AddSpacer()
+
 -- Custom Icon Size Slider
 local customSizeSlider = customContainer:AddSlider("Custom Icon Size", 12, 64, 1, function(value)
     local settings = GetCurrentProfileSettings()
@@ -659,11 +690,11 @@ lastContainer = customContainer
 --[[------------------------------------------------------------
 -- Global Settings Container
 --------------------------------------------------------------]]
-local globalContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Global Settings")
+local globalContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Global Scale")
 globalContainer:SetPosition("TOPLEFT", lastContainer:GetFrame(), "BOTTOMLEFT", 0, -15)
 
 -- Global Scale Slider
-local scaleSlider = globalContainer:AddSlider("Global Scale", 0.5, 2.0, 0.05, function(value)
+local scaleSlider = globalContainer:AddSlider("", 0.5, 2.0, 0.05, function(value)
     -- Update saved variable but do NOT immediately rescale the options window.
     local currentSettings = GetCurrentProfileSettings()
     if currentSettings then

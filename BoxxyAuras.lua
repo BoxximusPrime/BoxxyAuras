@@ -410,12 +410,13 @@ local function InitializeAuras()
         end
     end
 
-    -- Get custom aura assignments
+    -- Get custom aura assignments (case-insensitive)
     local customNamesLookup = {}
     local profileCustomAuras = currentSettings.customAuraNames
     if profileCustomAuras and type(profileCustomAuras) == "table" then
         for name, _ in pairs(profileCustomAuras) do
-            customNamesLookup[name] = true
+            -- Store lowercase version for case-insensitive matching
+            customNamesLookup[string.lower(name)] = true
         end
     end
 
@@ -429,7 +430,7 @@ local function InitializeAuras()
 
     -- Assign auras to the appropriate frame types
     for _, auraData in ipairs(allCurrentBuffs) do
-        local isCustom = customNamesLookup[auraData.name]
+        local isCustom = customNamesLookup[string.lower(auraData.name or "")]
         if isCustom and aurasByFrame["Custom"] then
             auraData.originalAuraType = "HELPFUL"
             table.insert(aurasByFrame["Custom"], auraData)
@@ -439,7 +440,7 @@ local function InitializeAuras()
     end
 
     for _, auraData in ipairs(allCurrentDebuffs) do
-        local isCustom = customNamesLookup[auraData.name]
+        local isCustom = customNamesLookup[string.lower(auraData.name or "")]
         if isCustom and aurasByFrame["Custom"] then
             auraData.originalAuraType = "HARMFUL"
             table.insert(aurasByFrame["Custom"], auraData)
@@ -638,12 +639,13 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
         end
     end
 
-    -- Get custom aura assignments
+    -- Get custom aura assignments (case-insensitive)
     local customNamesLookup = {}
     local profileCustomAuras = currentSettings.customAuraNames
     if profileCustomAuras and type(profileCustomAuras) == "table" then
         for name, _ in pairs(profileCustomAuras) do
-            customNamesLookup[name] = true
+            -- Store lowercase version for case-insensitive matching
+            customNamesLookup[string.lower(name)] = true
         end
     end
 
@@ -657,7 +659,7 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
 
     -- Assign auras to the appropriate frame types
     for _, auraData in ipairs(allCurrentBuffs) do
-        local isCustom = customNamesLookup[auraData.name]
+        local isCustom = customNamesLookup[string.lower(auraData.name or "")]
         if isCustom and aurasByFrame["Custom"] then
             auraData.originalAuraType = "HELPFUL"
             table.insert(aurasByFrame["Custom"], auraData)
@@ -667,7 +669,7 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
     end
 
     for _, auraData in ipairs(allCurrentDebuffs) do
-        local isCustom = customNamesLookup[auraData.name]
+        local isCustom = customNamesLookup[string.lower(auraData.name or "")]
         if isCustom and aurasByFrame["Custom"] then
             auraData.originalAuraType = "HARMFUL"
             table.insert(aurasByFrame["Custom"], auraData)
