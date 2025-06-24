@@ -297,32 +297,33 @@ local contentFrame = CreateFrame("Frame", "BoxxyAurasOptionsContentFrame", scrol
 contentFrame:SetSize(scrollFrame:GetWidth(), 700) -- <<< Increased height significantly >>>
 scrollFrame:SetScrollChild(contentFrame)
 
--- Layout Variables
-local lastElement = contentFrame -- Start anchoring groups to the top of contentFrame
-local verticalSpacing = -10 -- Reduced initial spacing from top (was -15)
-local groupPadding = 10 -- Internal padding for group boxes
-local groupWidth = contentFrame:GetWidth() - (groupPadding * 2)
-local lastInGroup = nil -- Will track last element within a group
-local groupVSpacing = 0 -- Will track vertical spacing within a group
-local checkboxSpacing = 49 -- <<< Reduced spacing further >>>
-local internalElementVSpacing = -12 -- << NEW: Standardized spacing between elements
+-- Layout Variables (for container positioning)
+local lastContainer = nil -- Will track the last created container for positioning
 
 --[[------------------------------------------------------------
--- Group 0: Profile Management
+-- Profile Management Container
 --------------------------------------------------------------]]
-local profileGroup = BoxxyAuras.UIBuilder.CreateGroup(contentFrame, nil, verticalSpacing)
+local profileContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Current Profile")
 
--- Profile Selection Header and Dropdown
-local profileSelectHeader, profileSelectHeaderHeight = BoxxyAuras.UIBuilder.CreateSectionHeader(profileGroup, "Current Profile", nil)
-BoxxyAuras.Options.ProfileSelectLabel = profileSelectHeader
-BoxxyAuras.UIBuilder.AddElementToGroup(profileGroup, profileSelectHeader, profileSelectHeaderHeight)
-
--- Profile Selection Dropdown (manual creation but positioned using UIBuilder spacing)
-local profileDropdown = CreateFrame("Frame", "BoxxyAurasProfileDropdown", profileGroup, "UIDropDownMenuTemplate")
+-- Profile Selection Dropdown (manual creation for complex styling)
+local profileDropdown = CreateFrame("Frame", "BoxxyAurasProfileDropdown", profileContainer:GetFrame(), "UIDropDownMenuTemplate")
 profileDropdown:SetWidth(180)
-profileDropdown:SetPoint("TOPLEFT", profileSelectHeader, "BOTTOMLEFT", 5, -8) -- Reduced spacing
-profileDropdown:SetFrameLevel(profileGroup:GetFrameLevel() + 2)
-BoxxyAuras.Options.ProfileDropdown = profileDropdown
+profileContainer:AddElement(profileDropdown, 30)
+
+-- >> ADDED: Hide default button textures to allow custom styling <<
+local dropdownButton = _G[profileDropdown:GetName() .. "Button"]
+if dropdownButton then
+    dropdownButton:Hide()
+end
+
+-- Hide the background textures
+local dropdownLeft = _G[profileDropdown:GetName() .. "Left"]
+local dropdownMiddle = _G[profileDropdown:GetName() .. "Middle"]
+local dropdownRight = _G[profileDropdown:GetName() .. "Right"]
+
+if dropdownLeft then dropdownLeft:Hide() end
+if dropdownMiddle then dropdownMiddle:Hide() end
+if dropdownRight then dropdownRight:Hide() end
 
 -- Center Dropdown Text
 local dropdownText = _G[profileDropdown:GetName() .. "Text"]
@@ -366,26 +367,13 @@ profileDropdown:SetScript("OnMouseUp", function(self, button)
     end
 end)
 
--- Add dropdown to group tracking
-BoxxyAuras.UIBuilder.AddElementToGroup(profileGroup, profileDropdown, 30)
+BoxxyAuras.Options.ProfileDropdown = profileDropdown
 
 -- Profile Actions Header
-local profileActionHeader, profileActionHeaderHeight = BoxxyAuras.UIBuilder.CreateSectionHeader(profileGroup, "Profile Actions", profileGroup.lastElement)
-BoxxyAuras.Options.ProfileActionLabel = profileActionHeader
-BoxxyAuras.UIBuilder.AddElementToGroup(profileGroup, profileActionHeader, profileActionHeaderHeight)
+profileContainer:AddHeader("Profile Actions")
 
 -- Profile Name EditBox
-local profileNameEditBox = CreateFrame("EditBox", "BoxxyAurasProfileNameEditBox", profileGroup, "InputBoxTemplate")
-profileNameEditBox:SetPoint("TOPLEFT", profileActionHeader, "BOTTOMLEFT", 5, -8) -- Reduced spacing
-profileNameEditBox:SetWidth(profileGroup:GetWidth() - 20)
-profileNameEditBox:SetHeight(20)
-profileNameEditBox:SetAutoFocus(false)
-profileNameEditBox:SetMaxLetters(32)
-profileNameEditBox:SetTextInsets(5, 5, 0, 0)
-profileNameEditBox:SetScript("OnEscapePressed", function(self)
-    self:ClearFocus()
-end)
-profileNameEditBox:SetScript("OnEnterPressed", function(self)
+local profileNameEditBox = profileContainer:AddEditBox("", 32, function(self)
     local name = self:GetText()
     if name and name ~= "" then
         self:SetText("")
@@ -393,25 +381,20 @@ profileNameEditBox:SetScript("OnEnterPressed", function(self)
     end
 end)
 BoxxyAuras.Options.ProfileNameEditBox = profileNameEditBox
-BoxxyAuras.UIBuilder.AddElementToGroup(profileGroup, profileNameEditBox, 25)
 
 -- Create Profile Button
-local createButton, createButtonHeight = BoxxyAuras.UIBuilder.CreateButton(
-    profileGroup, "Create Profile", 60, profileGroup.lastElement,
-    function()
-        local name = BoxxyAuras.Options.ProfileNameEditBox:GetText()
-        if name and name ~= "" then
-            BoxxyAuras.Options:CreateProfile(name)
-            BoxxyAuras.Options.ProfileNameEditBox:SetText("")
-        end
-        PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+local createButton = profileContainer:AddButton("New", 60, function()
+    local name = BoxxyAuras.Options.ProfileNameEditBox:GetText()
+    if name and name ~= "" then
+        BoxxyAuras.Options:CreateProfile(name)
+        BoxxyAuras.Options.ProfileNameEditBox:SetText("")
     end
-)
+    PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+end)
 BoxxyAuras.Options.CreateProfileButton = createButton
-BoxxyAuras.UIBuilder.AddElementToGroup(profileGroup, createButton, createButtonHeight)
 
 -- Copy Profile Button (positioned next to Create button)
-local copyButton = CreateFrame("Button", "BoxxyAurasCopyProfileButton", profileGroup, "BAURASButtonTemplate")
+local copyButton = CreateFrame("Button", "BoxxyAurasCopyProfileButton", profileContainer:GetFrame(), "BAURASButtonTemplate")
 copyButton:SetPoint("LEFT", createButton, "RIGHT", 5, 0)
 copyButton:SetWidth(60)
 copyButton:SetHeight(25)
@@ -427,7 +410,7 @@ end)
 BoxxyAuras.Options.CopyProfileButton = copyButton
 
 -- Delete Profile Button (positioned next to Copy button)
-local deleteButton = CreateFrame("Button", "BoxxyAurasDeleteProfileButton", profileGroup, "BAURASButtonTemplate")
+local deleteButton = CreateFrame("Button", "BoxxyAurasDeleteProfileButton", profileContainer:GetFrame(), "BAURASButtonTemplate")
 deleteButton:SetPoint("LEFT", copyButton, "RIGHT", 5, 0)
 deleteButton:SetWidth(60)
 deleteButton:SetHeight(25)
@@ -444,24 +427,17 @@ deleteButton:SetScript("OnClick", function(self)
 end)
 BoxxyAuras.Options.DeleteProfileButton = deleteButton
 
--- Update lastElement for next group positioning
-lastElement = profileGroup
-verticalSpacing = -10 -- Reduced space between groups
+-- Store reference to the container for positioning next section
+lastContainer = profileContainer
 
 --[[------------------------------------------------------------
--- Group 1: General Settings
+-- General Settings Container
 --------------------------------------------------------------]]
-local generalGroup = BoxxyAuras.UIBuilder.CreateGroup(contentFrame, lastElement, verticalSpacing)
-
--- General Settings Header
-local generalHeader, generalHeaderHeight = BoxxyAuras.UIBuilder.CreateSectionHeader(generalGroup, "General Settings", nil)
-BoxxyAuras.UIBuilder.AddElementToGroup(generalGroup, generalHeader, generalHeaderHeight)
+local generalContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "General Settings")
+generalContainer:SetPosition("TOPLEFT", lastContainer:GetFrame(), "BOTTOMLEFT", 0, -15)
 
 -- Lock Frames Checkbox
-local lockFramesCheck = CreateFrame("CheckButton", "BoxxyAurasLockFramesCheckButton", generalGroup, "BAURASCheckBoxTemplate")
-lockFramesCheck:SetPoint("TOPLEFT", generalHeader, "BOTTOMLEFT", 5, -8) -- Reduced spacing
-lockFramesCheck:SetText("Lock Frames")
-lockFramesCheck:SetScript("OnClick", function(self)
+local lockFramesCheck = generalContainer:AddCheckbox("Lock Frames", function(self)
     local currentSettings = GetCurrentProfileSettings()
     if not currentSettings then
         return
@@ -479,13 +455,9 @@ lockFramesCheck:SetScript("OnClick", function(self)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end)
 BoxxyAuras.Options.LockFramesCheck = lockFramesCheck
-BoxxyAuras.UIBuilder.AddElementToGroup(generalGroup, lockFramesCheck, 20)
 
 -- Hide Blizzard Auras Checkbox
-local hideBlizzardCheck = CreateFrame("CheckButton", "BoxxyAurasHideBlizzardCheckButton", generalGroup, "BAURASCheckBoxTemplate")
-hideBlizzardCheck:SetPoint("TOPLEFT", lockFramesCheck, "BOTTOMLEFT", 0, -8) -- Reduced spacing
-hideBlizzardCheck:SetText("Hide Default Blizzard Auras")
-hideBlizzardCheck:SetScript("OnClick", function(self)
+local hideBlizzardCheck = generalContainer:AddCheckbox("Hide Default Blizzard Auras", function(self)
     local currentSettings = GetCurrentProfileSettings()
     if not currentSettings then
         return
@@ -503,13 +475,9 @@ hideBlizzardCheck:SetScript("OnClick", function(self)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end)
 BoxxyAuras.Options.HideBlizzardCheck = hideBlizzardCheck
-BoxxyAuras.UIBuilder.AddElementToGroup(generalGroup, hideBlizzardCheck, 20)
 
 -- Demo Mode Checkbox
-local demoModeCheck = CreateFrame("CheckButton", "BoxxyAurasDemoModeCheckButton", generalGroup, "BAURASCheckBoxTemplate")
-demoModeCheck:SetPoint("TOPLEFT", hideBlizzardCheck, "BOTTOMLEFT", 0, -8) -- Reduced spacing
-demoModeCheck:SetText("Demo Mode (Show Test Auras)")
-demoModeCheck:SetScript("OnClick", function(self)
+local demoModeCheck = generalContainer:AddCheckbox("Demo Mode (Show Test Auras)", function(self)
     local currentState = self:GetChecked()
     local newState = not currentState
     self:SetChecked(newState)
@@ -525,29 +493,23 @@ demoModeCheck:SetScript("OnClick", function(self)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end)
 BoxxyAuras.Options.DemoModeCheck = demoModeCheck
-BoxxyAuras.UIBuilder.AddElementToGroup(generalGroup, demoModeCheck, 20)
 
--- Update lastElement for next group positioning
-lastElement = generalGroup
-verticalSpacing = -10 -- Space between groups
+-- Update reference for next container
+lastContainer = generalContainer
 
 --[[------------------------------------------------------------
--- Group 2: Display Frame Settings (Alignment & Size)
+-- Display Frame Settings (Alignment & Size)
 --------------------------------------------------------------]]
-local subGroupVerticalSpacing = -20 -- Spacing between sub-groups
-
-local currentSettings = GetCurrentProfileSettings() -- Get settings once at the top
 
 --[[------------------------
--- Sub-Group 1: Buffs
+-- Buff Settings Container
 --------------------------]]
-local buffSubGroup = BoxxyAuras.UIBuilder.CreateGroup(contentFrame, lastElement, verticalSpacing)
-lastElement = buffSubGroup -- The next group will anchor to this one
+local buffContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Buff Settings")
+buffContainer:SetPosition("TOPLEFT", lastContainer:GetFrame(), "BOTTOMLEFT", 0, -15)
 
 -- Buff Text Alignment
-local buffAlignCheckboxes, buffAlignHeader, buffAlignHeight = BoxxyAuras.UIBuilder.CreateMultipleChoiceGroup(
-    buffSubGroup, "Buff Text Alignment", {{text = "Left", value = "LEFT"}, {text = "Center", value = "CENTER"}, {text = "Right", value = "RIGHT"}},
-    buffSubGroup.lastElement,
+local buffAlignCheckboxes = buffContainer:AddCheckboxRow(
+    {{text = "Left", value = "LEFT"}, {text = "Center", value = "CENTER"}, {text = "Right", value = "RIGHT"}},
     function(value)
         local settings = GetCurrentProfileSettings()
         if not settings.buffFrameSettings then settings.buffFrameSettings = {} end
@@ -555,58 +517,47 @@ local buffAlignCheckboxes, buffAlignHeader, buffAlignHeight = BoxxyAuras.UIBuild
         BoxxyAuras.Options:ApplyTextAlign("Buff")
     end
 )
-BoxxyAuras.UIBuilder.AddElementToGroup(buffSubGroup, buffAlignCheckboxes[1], buffAlignHeight)
-BoxxyAuras.Options.BuffAlignCheckboxes = buffAlignCheckboxes -- Store the table of checkboxes
+BoxxyAuras.Options.BuffAlignCheckboxes = buffAlignCheckboxes
 
 -- Buff Icon Size Slider
-local buffSizeSlider, buffSizeLabel, buffSizeHeight = BoxxyAuras.UIBuilder.CreateSliderGroup(
-    buffSubGroup, "Buff Icon Size", 12, 64, 1, buffSubGroup.lastElement, false,
-    function(value)
-        local settings = GetCurrentProfileSettings()
-        if not settings.buffFrameSettings then settings.buffFrameSettings = {} end
-        settings.buffFrameSettings.iconSize = value
-        BoxxyAuras.Options:ApplyIconSizeChange("Buff")
-    end
-)
-BoxxyAuras.UIBuilder.AddElementToGroup(buffSubGroup, buffSizeSlider, buffSizeHeight)
+local buffSizeSlider = buffContainer:AddSlider("Buff Icon Size", 12, 64, 1, function(value)
+    local settings = GetCurrentProfileSettings()
+    if not settings.buffFrameSettings then settings.buffFrameSettings = {} end
+    settings.buffFrameSettings.iconSize = value
+    BoxxyAuras.Options:ApplyIconSizeChange("Buff")
+end)
 BoxxyAuras.Options.BuffSizeSlider = buffSizeSlider
 
 -- Buff Text Size Slider
-local buffTextSizeSlider, buffTextSizeLabel, buffTextSizeHeight = BoxxyAuras.UIBuilder.CreateSliderGroup(
-    buffSubGroup, "Buff Text Size", 6, 20, 1, buffSubGroup.lastElement, true,
-    function(value)
-        local settings = GetCurrentProfileSettings()
-        if not settings.buffFrameSettings then settings.buffFrameSettings = {} end
-        settings.buffFrameSettings.textSize = value
-        BoxxyAuras.Options:ApplyTextSizeChange("Buff")
-    end
-)
-BoxxyAuras.UIBuilder.AddElementToGroup(buffSubGroup, buffTextSizeSlider, buffTextSizeHeight)
+local buffTextSizeSlider = buffContainer:AddSlider("Buff Text Size", 6, 20, 1, function(value)
+    local settings = GetCurrentProfileSettings()
+    if not settings.buffFrameSettings then settings.buffFrameSettings = {} end
+    settings.buffFrameSettings.textSize = value
+    BoxxyAuras.Options:ApplyTextSizeChange("Buff")
+end)
 BoxxyAuras.Options.BuffTextSizeSlider = buffTextSizeSlider
 
 -- Buff Border Size Slider
-local buffBorderSizeSlider, buffBorderSizeLabel, buffBorderSizeHeight = BoxxyAuras.UIBuilder.CreateSliderGroup(
-    buffSubGroup, "Buff Border Size", 0, 5, 1, buffSubGroup.lastElement, true,
-    function(value)
-        local settings = GetCurrentProfileSettings()
-        if not settings.buffFrameSettings then settings.buffFrameSettings = {} end
-        settings.buffFrameSettings.borderSize = value
-        BoxxyAuras.Options:ApplyBorderSizeChange("Buff")
-    end
-)
-BoxxyAuras.UIBuilder.AddElementToGroup(buffSubGroup, buffBorderSizeSlider, buffBorderSizeHeight)
+local buffBorderSizeSlider = buffContainer:AddSlider("Buff Border Size", 0, 5, 1, function(value)
+    local settings = GetCurrentProfileSettings()
+    if not settings.buffFrameSettings then settings.buffFrameSettings = {} end
+    settings.buffFrameSettings.borderSize = value
+    BoxxyAuras.Options:ApplyBorderSizeChange("Buff")
+end)
 BoxxyAuras.Options.BuffBorderSizeSlider = buffBorderSizeSlider
 
+-- Update reference for next container
+lastContainer = buffContainer
+
 --[[--------------------------
--- Sub-Group 2: Debuffs
+-- Debuff Settings Container
 ----------------------------]]
-local debuffSubGroup = BoxxyAuras.UIBuilder.CreateGroup(contentFrame, lastElement, subGroupVerticalSpacing)
-lastElement = debuffSubGroup
+local debuffContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Debuff Settings")
+debuffContainer:SetPosition("TOPLEFT", lastContainer:GetFrame(), "BOTTOMLEFT", 0, -15)
 
 -- Debuff Text Alignment
-local debuffAlignCheckboxes, debuffAlignHeader, debuffAlignHeight = BoxxyAuras.UIBuilder.CreateMultipleChoiceGroup(
-    debuffSubGroup, "Debuff Text Alignment", {{text = "Left", value = "LEFT"}, {text = "Center", value = "CENTER"}, {text = "Right", value = "RIGHT"}},
-    debuffSubGroup.lastElement,
+local debuffAlignCheckboxes = debuffContainer:AddCheckboxRow(
+    {{text = "Left", value = "LEFT"}, {text = "Center", value = "CENTER"}, {text = "Right", value = "RIGHT"}},
     function(value)
         local settings = GetCurrentProfileSettings()
         if not settings.debuffFrameSettings then settings.debuffFrameSettings = {} end
@@ -614,58 +565,47 @@ local debuffAlignCheckboxes, debuffAlignHeader, debuffAlignHeight = BoxxyAuras.U
         BoxxyAuras.Options:ApplyTextAlign("Debuff")
     end
 )
-BoxxyAuras.UIBuilder.AddElementToGroup(debuffSubGroup, debuffAlignCheckboxes[1], debuffAlignHeight)
 BoxxyAuras.Options.DebuffAlignCheckboxes = debuffAlignCheckboxes
 
 -- Debuff Icon Size Slider
-local debuffSizeSlider, debuffSizeLabel, debuffSizeHeight = BoxxyAuras.UIBuilder.CreateSliderGroup(
-    debuffSubGroup, "Debuff Icon Size", 12, 64, 1, debuffSubGroup.lastElement, false,
-    function(value)
-        local settings = GetCurrentProfileSettings()
-        if not settings.debuffFrameSettings then settings.debuffFrameSettings = {} end
-        settings.debuffFrameSettings.iconSize = value
-        BoxxyAuras.Options:ApplyIconSizeChange("Debuff")
-    end
-)
-BoxxyAuras.UIBuilder.AddElementToGroup(debuffSubGroup, debuffSizeSlider, debuffSizeHeight)
+local debuffSizeSlider = debuffContainer:AddSlider("Debuff Icon Size", 12, 64, 1, function(value)
+    local settings = GetCurrentProfileSettings()
+    if not settings.debuffFrameSettings then settings.debuffFrameSettings = {} end
+    settings.debuffFrameSettings.iconSize = value
+    BoxxyAuras.Options:ApplyIconSizeChange("Debuff")
+end)
 BoxxyAuras.Options.DebuffSizeSlider = debuffSizeSlider
 
 -- Debuff Text Size Slider
-local debuffTextSizeSlider, debuffTextSizeLabel, debuffTextSizeHeight = BoxxyAuras.UIBuilder.CreateSliderGroup(
-    debuffSubGroup, "Debuff Text Size", 6, 20, 1, debuffSubGroup.lastElement, true,
-    function(value)
-        local settings = GetCurrentProfileSettings()
-        if not settings.debuffFrameSettings then settings.debuffFrameSettings = {} end
-        settings.debuffFrameSettings.textSize = value
-        BoxxyAuras.Options:ApplyTextSizeChange("Debuff")
-    end
-)
-BoxxyAuras.UIBuilder.AddElementToGroup(debuffSubGroup, debuffTextSizeSlider, debuffTextSizeHeight)
+local debuffTextSizeSlider = debuffContainer:AddSlider("Debuff Text Size", 6, 20, 1, function(value)
+    local settings = GetCurrentProfileSettings()
+    if not settings.debuffFrameSettings then settings.debuffFrameSettings = {} end
+    settings.debuffFrameSettings.textSize = value
+    BoxxyAuras.Options:ApplyTextSizeChange("Debuff")
+end)
 BoxxyAuras.Options.DebuffTextSizeSlider = debuffTextSizeSlider
 
 -- Debuff Border Size Slider
-local debuffBorderSizeSlider, debuffBorderSizeLabel, debuffBorderSizeHeight = BoxxyAuras.UIBuilder.CreateSliderGroup(
-    debuffSubGroup, "Debuff Border Size", 0, 5, 1, debuffSubGroup.lastElement, true,
-    function(value)
-        local settings = GetCurrentProfileSettings()
-        if not settings.debuffFrameSettings then settings.debuffFrameSettings = {} end
-        settings.debuffFrameSettings.borderSize = value
-        BoxxyAuras.Options:ApplyBorderSizeChange("Debuff")
-    end
-)
-BoxxyAuras.UIBuilder.AddElementToGroup(debuffSubGroup, debuffBorderSizeSlider, debuffBorderSizeHeight)
+local debuffBorderSizeSlider = debuffContainer:AddSlider("Debuff Border Size", 0, 5, 1, function(value)
+    local settings = GetCurrentProfileSettings()
+    if not settings.debuffFrameSettings then settings.debuffFrameSettings = {} end
+    settings.debuffFrameSettings.borderSize = value
+    BoxxyAuras.Options:ApplyBorderSizeChange("Debuff")
+end)
 BoxxyAuras.Options.DebuffBorderSizeSlider = debuffBorderSizeSlider
 
+-- Update reference for next container
+lastContainer = debuffContainer
+
 --[[--------------------------
--- Sub-Group 3: Custom
+-- Custom Settings Container
 ----------------------------]]
-local customSubGroup = BoxxyAuras.UIBuilder.CreateGroup(contentFrame, lastElement, subGroupVerticalSpacing)
-lastElement = customSubGroup
+local customContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Custom Settings")
+customContainer:SetPosition("TOPLEFT", lastContainer:GetFrame(), "BOTTOMLEFT", 0, -15)
 
 -- Custom Text Alignment
-local customAlignCheckboxes, customAlignHeader, customAlignHeight = BoxxyAuras.UIBuilder.CreateMultipleChoiceGroup(
-    customSubGroup, "Custom Text Alignment", {{text = "Left", value = "LEFT"}, {text = "Center", value = "CENTER"}, {text = "Right", value = "RIGHT"}},
-    customSubGroup.lastElement,
+local customAlignCheckboxes = customContainer:AddCheckboxRow(
+    {{text = "Left", value = "LEFT"}, {text = "Center", value = "CENTER"}, {text = "Right", value = "RIGHT"}},
     function(value)
         local settings = GetCurrentProfileSettings()
         if not settings.customFrameSettings then settings.customFrameSettings = {} end
@@ -673,93 +613,65 @@ local customAlignCheckboxes, customAlignHeader, customAlignHeight = BoxxyAuras.U
         BoxxyAuras.Options:ApplyTextAlign("Custom")
     end
 )
-BoxxyAuras.UIBuilder.AddElementToGroup(customSubGroup, customAlignCheckboxes[1], customAlignHeight)
 BoxxyAuras.Options.CustomAlignCheckboxes = customAlignCheckboxes
 
 -- Custom Icon Size Slider
-local customSizeSlider, customSizeLabel, customSizeHeight = BoxxyAuras.UIBuilder.CreateSliderGroup(
-    customSubGroup, "Custom Icon Size", 12, 64, 1, customSubGroup.lastElement, false,
-    function(value)
-        local settings = GetCurrentProfileSettings()
-        if not settings.customFrameSettings then settings.customFrameSettings = {} end
-        settings.customFrameSettings.iconSize = value
-        BoxxyAuras.Options:ApplyIconSizeChange("Custom")
-    end
-)
-BoxxyAuras.UIBuilder.AddElementToGroup(customSubGroup, customSizeSlider, customSizeHeight)
+local customSizeSlider = customContainer:AddSlider("Custom Icon Size", 12, 64, 1, function(value)
+    local settings = GetCurrentProfileSettings()
+    if not settings.customFrameSettings then settings.customFrameSettings = {} end
+    settings.customFrameSettings.iconSize = value
+    BoxxyAuras.Options:ApplyIconSizeChange("Custom")
+end)
 BoxxyAuras.Options.CustomSizeSlider = customSizeSlider
 
 -- Custom Text Size Slider
-local customTextSizeSlider, customTextSizeLabel, customTextSizeHeight = BoxxyAuras.UIBuilder.CreateSliderGroup(
-    customSubGroup, "Custom Text Size", 6, 20, 1, customSubGroup.lastElement, true,
-    function(value)
-        local settings = GetCurrentProfileSettings()
-        if not settings.customFrameSettings then settings.customFrameSettings = {} end
-        settings.customFrameSettings.textSize = value
-        BoxxyAuras.Options:ApplyTextSizeChange("Custom")
-    end
-)
-BoxxyAuras.UIBuilder.AddElementToGroup(customSubGroup, customTextSizeSlider, customTextSizeHeight)
+local customTextSizeSlider = customContainer:AddSlider("Custom Text Size", 6, 20, 1, function(value)
+    local settings = GetCurrentProfileSettings()
+    if not settings.customFrameSettings then settings.customFrameSettings = {} end
+    settings.customFrameSettings.textSize = value
+    BoxxyAuras.Options:ApplyTextSizeChange("Custom")
+end)
 BoxxyAuras.Options.CustomTextSizeSlider = customTextSizeSlider
 
 -- Custom Border Size Slider
-local customBorderSizeSlider, customBorderSizeLabel, customBorderSizeHeight = BoxxyAuras.UIBuilder.CreateSliderGroup(
-    customSubGroup, "Custom Border Size", 0, 5, 1, customSubGroup.lastElement, true,
-    function(value)
-        local settings = GetCurrentProfileSettings()
-        if not settings.customFrameSettings then settings.customFrameSettings = {} end
-        settings.customFrameSettings.borderSize = value
-        BoxxyAuras.Options:ApplyBorderSizeChange("Custom")
-    end
-)
-BoxxyAuras.UIBuilder.AddElementToGroup(customSubGroup, customBorderSizeSlider, customBorderSizeHeight)
+local customBorderSizeSlider = customContainer:AddSlider("Custom Border Size", 0, 5, 1, function(value)
+    local settings = GetCurrentProfileSettings()
+    if not settings.customFrameSettings then settings.customFrameSettings = {} end
+    settings.customFrameSettings.borderSize = value
+    BoxxyAuras.Options:ApplyBorderSizeChange("Custom")
+end)
 BoxxyAuras.Options.CustomBorderSizeSlider = customBorderSizeSlider
 
 -- Button to Open Custom Aura Options
-local customOptionsButton, customOptionsButtonHeight = BoxxyAuras.UIBuilder.CreateButton(
-    customSubGroup, "Set Custom Auras", nil, customSubGroup.lastElement,
-    function()
-        if _G.BoxxyAuras and _G.BoxxyAuras.CustomOptions and _G.BoxxyAuras.CustomOptions.Toggle then
-            _G.BoxxyAuras.CustomOptions:Toggle()
-        end
-        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-    end,
-    true -- Extra spacing since this follows a slider
-)
-BoxxyAuras.UIBuilder.AddElementToGroup(customSubGroup, customOptionsButton, customOptionsButtonHeight)
+local customOptionsButton = customContainer:AddButton("Set Custom Auras", nil, function()
+    if _G.BoxxyAuras and _G.BoxxyAuras.CustomOptions and _G.BoxxyAuras.CustomOptions.Toggle then
+        _G.BoxxyAuras.CustomOptions:Toggle()
+    end
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+end)
 BoxxyAuras.Options.OpenCustomOptionsButton = customOptionsButton
 
--- Calculate MAIN Display Group Height (based on its children)
-local totalDisplayHeight = buffSubGroup:GetHeight() + debuffSubGroup:GetHeight() + customSubGroup:GetHeight() + (subGroupVerticalSpacing * 2) + 10 -- Add final padding
--- The line above seems to reference a displayGroup that no longer exists. I'll just remove this for now as the groups manage their own height.
+-- Update reference for next container
+lastContainer = customContainer
 
--- Update lastElement for next group positioning
-lastElement = customSubGroup -- Update this to the last created subgroup
-verticalSpacing = -20 -- Space between main groups
+
 
 --[[------------------------------------------------------------
--- Group 3: Global Settings
+-- Global Settings Container
 --------------------------------------------------------------]]
-local globalGroup = BoxxyAuras.UIBuilder.CreateGroup(contentFrame, lastElement, verticalSpacing)
-
--- Global Settings Header
-local globalHeader, globalHeaderHeight = BoxxyAuras.UIBuilder.CreateSectionHeader(globalGroup, "Global Settings", nil)
-BoxxyAuras.UIBuilder.AddElementToGroup(globalGroup, globalHeader, globalHeaderHeight)
+local globalContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Global Settings")
+globalContainer:SetPosition("TOPLEFT", lastContainer:GetFrame(), "BOTTOMLEFT", 0, -15)
 
 -- Global Scale Slider
-local scaleSlider, scaleLabel, scaleHeight = BoxxyAuras.UIBuilder.CreateSliderGroup(
-    globalGroup, "Global Scale", 0.5, 2.0, 0.05, globalHeader, false,
-    function(value)
-        -- Update saved variable but do NOT immediately rescale the options window.
-        local currentSettings = GetCurrentProfileSettings()
-        if currentSettings then
-            currentSettings.optionsScale = value
-        end
-    end,
-    false -- <-- instantCallback: false (debounced)
-)
+local scaleSlider = globalContainer:AddSlider("Global Scale", 0.5, 2.0, 0.05, function(value)
+    -- Update saved variable but do NOT immediately rescale the options window.
+    local currentSettings = GetCurrentProfileSettings()
+    if currentSettings then
+        currentSettings.optionsScale = value
+    end
+end, false) -- instantCallback: false (debounced)
+
 BoxxyAuras.Options.ScaleSlider = scaleSlider
-BoxxyAuras.UIBuilder.AddElementToGroup(globalGroup, scaleSlider, scaleHeight)
 
 -- Apply the scale only when the user releases the mouse button on the slider
 if scaleSlider then
@@ -770,10 +682,6 @@ if scaleSlider then
         end
     end)
 end
-
--- Update lastElement for next group positioning
-lastElement = globalGroup
-verticalSpacing = -10 -- Space between groups
 
 --[[------------------------------------------------------------
 -- Load, Save, and Toggle Functions
@@ -820,7 +728,7 @@ function BoxxyAuras.Options:Load()
         
         -- Buff Text Alignment
         if self.BuffAlignCheckboxes and settings.buffFrameSettings.buffTextAlign then
-            BoxxyAuras.UIBuilder.SetMultipleChoiceValue(self.BuffAlignCheckboxes, settings.buffFrameSettings.buffTextAlign)
+            BoxxyAuras.UIBuilder.SetCheckboxRowValue(self.BuffAlignCheckboxes, settings.buffFrameSettings.buffTextAlign)
         end
     end
 
@@ -843,7 +751,7 @@ function BoxxyAuras.Options:Load()
         
         -- Debuff Text Alignment
         if self.DebuffAlignCheckboxes and settings.debuffFrameSettings.debuffTextAlign then
-            BoxxyAuras.UIBuilder.SetMultipleChoiceValue(self.DebuffAlignCheckboxes, settings.debuffFrameSettings.debuffTextAlign)
+            BoxxyAuras.UIBuilder.SetCheckboxRowValue(self.DebuffAlignCheckboxes, settings.debuffFrameSettings.debuffTextAlign)
         end
     end
 
@@ -866,7 +774,7 @@ function BoxxyAuras.Options:Load()
         
         -- Custom Text Alignment
         if self.CustomAlignCheckboxes and settings.customFrameSettings.customTextAlign then
-            BoxxyAuras.UIBuilder.SetMultipleChoiceValue(self.CustomAlignCheckboxes, settings.customFrameSettings.customTextAlign)
+            BoxxyAuras.UIBuilder.SetCheckboxRowValue(self.CustomAlignCheckboxes, settings.customFrameSettings.customTextAlign)
         end
     end
 

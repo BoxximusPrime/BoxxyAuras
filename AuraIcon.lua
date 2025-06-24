@@ -557,55 +557,21 @@ end
 
 -- Helper function to add tooltip lines with proper wrapping and coloring for expired auras
 function AuraIcon.AddWrappedTooltipLine(leftText, rightText, isTitle)
-    if not leftText then return end
-    
-    local maxLineLength = 50 -- Reasonable character limit for wrapping
-    
+    if not leftText or leftText == "" then return end
+
     -- Define proper tooltip colors
-    local titleColor = {r = 1, g = 0.82, b = 0}    -- Golden yellow for spell names
-    local normalColor = {r = 1, g = 1, b = 1}      -- White for descriptions
-    local rightColor = {r = 1, g = 1, b = 1}       -- White for right text
-    
-    -- If it's a title line (first line) or has right text, use double line
-    if isTitle or (rightText and rightText ~= "") then
-        local leftR, leftG, leftB = titleColor.r, titleColor.g, titleColor.b
-        if not isTitle then
-            leftR, leftG, leftB = normalColor.r, normalColor.g, normalColor.b
-        end
-        GameTooltip:AddDoubleLine(leftText, rightText or "", 
-            leftR, leftG, leftB, rightColor.r, rightColor.g, rightColor.b)
-        return
-    end
-    
-    -- Choose color based on line type
-    local lineColor = isTitle and titleColor or normalColor
-    
-    -- For long descriptions, break them into multiple lines
-    if string.len(leftText) > maxLineLength then
-        local words = {}
-        for word in string.gmatch(leftText, "%S+") do
-            table.insert(words, word)
-        end
-        
-        local currentLine = ""
-        for _, word in ipairs(words) do
-            local testLine = currentLine == "" and word or currentLine .. " " .. word
-            if string.len(testLine) > maxLineLength and currentLine ~= "" then
-                -- Add the current line and start a new one
-                GameTooltip:AddLine(currentLine, lineColor.r, lineColor.g, lineColor.b, true)
-                currentLine = word
-            else
-                currentLine = testLine
-            end
-        end
-        
-        -- Add any remaining text
-        if currentLine ~= "" then
-            GameTooltip:AddLine(currentLine, lineColor.r, lineColor.g, lineColor.b, true)
-        end
+    local titleColor = {r = 1, g = 0.82, b = 0}
+    local normalColor = {r = 1, g = 1, b = 1}
+    local rightColor = {r = 1, g = 1, b = 1}
+
+    -- If it has right-side text, it's a double line.
+    if rightText and rightText ~= "" then
+        local r, g, b = isTitle and titleColor.r or normalColor.r, isTitle and titleColor.g or normalColor.g, isTitle and titleColor.b or normalColor.b
+        GameTooltip:AddDoubleLine(leftText, rightText, r, g, b, rightColor.r, rightColor.g, rightColor.b)
     else
-        -- Short lines can be added normally
-        GameTooltip:AddLine(leftText, lineColor.r, lineColor.g, lineColor.b, true)
+        -- It's a single line. This could be a title or a description paragraph. Let the game wrap.
+        local r, g, b = isTitle and titleColor.r or normalColor.r, isTitle and titleColor.g or normalColor.g, isTitle and titleColor.b or normalColor.b
+        GameTooltip:AddLine(leftText, r, g, b, true)
     end
 end
 
@@ -767,29 +733,62 @@ function AuraIcon.RefreshTooltipContent(self)
                     #cachedData.lines, tostring(cachedData.scrapedVia), tostring(self.auraInstanceID)))
             end
             
-            -- Use text wrapping to control tooltip width
-            
+            -- Reconstruct description paragraphs and add lines
+            local descriptionParagraph = ""
+            local paragraphStarted = false
+
             for i, lineInfo in ipairs(cachedData.lines) do
                 if lineInfo.left then
-                    AuraIcon.AddWrappedTooltipLine(lineInfo.left, lineInfo.right, i == 1)
+                    local isTitle = (i == 1)
+                    -- A "normal" line is part of a description if it has no right-side text and is not the title.
+                    local isNormalLine = (not lineInfo.right or lineInfo.right == "") and not isTitle
+
+                    if isNormalLine then
+                        -- Append to the current paragraph.
+                        if descriptionParagraph == "" then
+                            descriptionParagraph = lineInfo.left
+                        else
+                            descriptionParagraph = descriptionParagraph .. " " .. lineInfo.left
+                        end
+                        paragraphStarted = true
+                    else
+                        -- This is a special line (e.g., title, or a line with right-side text).
+                        -- First, add any pending paragraph to the tooltip.
+                        if paragraphStarted then
+                            AuraIcon.AddWrappedTooltipLine(descriptionParagraph, nil, false)
+                            descriptionParagraph = ""
+                            paragraphStarted = false
+                        end
+
+                        -- Now, add the current special line.
+                        AuraIcon.AddWrappedTooltipLine(lineInfo.left, lineInfo.right, isTitle)
+                    end
                 end
             end
+
+            -- After the loop, add any final pending paragraph.
+            if paragraphStarted then
+                AuraIcon.AddWrappedTooltipLine(descriptionParagraph, nil, false)
+            end
             
-            -- Add caster information if available (check if TipTac already added one)
+            -- Add caster and expired information
             local casterName = AuraIcon.GetCasterNameFromCurrentData(self)
-            if casterName then
-                local tiptacCasterExists = AuraIcon.HasCasterLineInTooltip()
+            local tiptacCasterExists = casterName and AuraIcon.HasCasterLineInTooltip()
+
+            if casterName and not tiptacCasterExists then
                 if BoxxyAuras.DEBUG then
                     print(string.format("Tooltip: Expired aura casterName='%s', tiptacExists=%s for instanceID=%s", 
                         tostring(casterName), tostring(tiptacCasterExists), tostring(self.auraInstanceID)))
                 end
-                if not tiptacCasterExists then
-                    GameTooltip:AddLine("From: " .. casterName, 0.5, 0.8, 1.0, true)  -- Light blue color
-                    GameTooltip:Show()  -- Force tooltip to recalculate size
-                end
+                -- Add "From" and "Expired" on the same line using AddDoubleLine for better formatting
+                GameTooltip:AddDoubleLine("From: " .. casterName, "(Expired)", 0.5, 0.8, 1.0, 1, 0.5, 0.5)
+            else
+                -- If no caster info, just show "(Expired)" on its own line
+                GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5, true)
             end
             
-            GameTooltip:AddLine("(Expired)", 1, 0.5, 0.5, true)
+            -- Force tooltip to recalculate size after adding custom lines
+            GameTooltip:Show()
         else
             if BoxxyAuras.DEBUG then
                 print(string.format("RefreshTooltipContent: No cached data for expired aura (instanceID=%s)", tostring(self.auraInstanceID)))

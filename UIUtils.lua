@@ -405,9 +405,9 @@ end
 -- Main tooltip scraping function
 function BoxxyAuras.UIUtils.ExecuteTooltipScrape(spellId, instanceId, filter, retryCount)
     retryCount = retryCount or 0
-    
+
     if BoxxyAuras.DEBUG then
-        print(string.format("ExecuteTooltipScrape: spellId=%s, instanceID=%s, filter=%s, retry=%d", 
+        print(string.format("ExecuteTooltipScrape: spellId=%s, instanceID=%s, filter=%s, retry=%d",
             tostring(spellId), tostring(instanceId), tostring(filter), retryCount))
     end
 
@@ -416,43 +416,59 @@ function BoxxyAuras.UIUtils.ExecuteTooltipScrape(spellId, instanceId, filter, re
         if BoxxyAuras.DEBUG then
             print("ExecuteTooltipScrape: Already have complete data, moving to next in queue")
         end
-        BoxxyAuras.OnScrapeComplete()
+        BoxxyAuras.UIUtils.OnScrapeComplete()
         return
     end
 
-    -- Try C_TooltipInfo scraping
+    -- Define a function to be called when any async scrape method fails
+    local function onAsyncScrapeFailure(lastMethod)
+        if lastMethod == "GameTooltip_Aura" then
+            if BoxxyAuras.DEBUG then print(" -> Aura scrape failed, falling back to Spell scrape") end
+            BoxxyAuras.UIUtils.TryGameTooltipSpellScrape(spellId, instanceId, 0)
+        else
+            -- All methods failed
+            if BoxxyAuras.DEBUG then print(" -> All scraping methods failed, giving up.") end
+            BoxxyAuras.UIUtils.OnScrapeComplete()
+        end
+    end
+
+    -- 1. Try C_TooltipInfo scraping (Synchronous)
     local success, spellName, tooltipLines = BoxxyAuras.UIUtils.TryTooltipInfoScrape(spellId, instanceId, filter)
-    
     if success then
-        -- Cache the result
         BoxxyAuras.AllAuras[instanceId] = {
             name = spellName,
             lines = tooltipLines,
             scrapedVia = "C_TooltipInfo"
         }
-        
-        if BoxxyAuras.DEBUG then
-            print("ExecuteTooltipScrape: C_TooltipInfo scrape successful, moving to next in queue")
-        end
+        if BoxxyAuras.DEBUG then print("ExecuteTooltipScrape: Success with C_TooltipInfo") end
         BoxxyAuras.UIUtils.OnScrapeComplete()
         return
     end
 
-    -- If failed, retry with delay
-    if retryCount < 8 then
-        local delay = 0.1 + (retryCount * 0.1)
-        if BoxxyAuras.DEBUG then
-            print(string.format("ExecuteTooltipScrape: Failed, retrying in %.1f seconds (attempt %d/8)", delay, retryCount + 1))
+    -- 2. If C_TooltipInfo fails, try GameTooltip with aura index (Asynchronous)
+    if BoxxyAuras.DEBUG then print(" -> C_TooltipInfo failed, falling back to TryGameTooltipAuraScrape") end
+    
+    -- We need a way to check the result of the async operations.
+    -- The async functions will call OnScrapeComplete on their own success.
+    -- We need to handle their failure. Let's create a wrapper for the callback.
+    local originalOnComplete = BoxxyAuras.UIUtils.OnScrapeComplete
+    
+    -- Let's redefine the Try functions to accept a failure callback
+    -- For now, I can't do that. I will rewrite the other functions later.
+    -- The core issue is that the async functions don't report failure.
+    -- Let's try to proceed by modifying the other functions in subsequent steps.
+    -- For now, this is a placeholder for the logic.
+    
+    -- This simplified version just calls the next function, assuming it will handle its own success/failure reporting.
+    -- This is not ideal, but it's a step toward the final goal.
+    local auraScrapeAttempted = BoxxyAuras.UIUtils.TryGameTooltipAuraScrape(spellId, instanceId, filter, 0)
+    if not auraScrapeAttempted then
+        -- This means the function failed synchronously (e.g., aura not found)
+        local spellScrapeAttempted = BoxxyAuras.UIUtils.TryGameTooltipSpellScrape(spellId, instanceId, 0)
+        if not spellScrapeAttempted then
+            -- Both async attempts failed synchronously, so we're done.
+            BoxxyAuras.UIUtils.OnScrapeComplete()
         end
-        
-        C_Timer.After(delay, function()
-            BoxxyAuras.UIUtils.ExecuteTooltipScrape(spellId, instanceId, filter, retryCount + 1)
-        end)
-    else
-        if BoxxyAuras.DEBUG then
-            print("ExecuteTooltipScrape: Max retries reached, giving up on this aura")
-        end
-        BoxxyAuras.UIUtils.OnScrapeComplete()
     end
 end
 
@@ -630,8 +646,6 @@ function BoxxyAuras.UIUtils.TryTooltipInfoScrape(spellId, instanceId, filter)
     end
     return false, nil, nil
 end
-
-
 
 -- Approach 2: Use GameTooltip with aura index
 function BoxxyAuras.UIUtils.TryGameTooltipAuraScrape(spellId, targetAuraInstanceID, filter, retryCount)
@@ -1076,5 +1090,6 @@ end
 function BoxxyAuras.DebugLogWarning(message)
     print(string.format("|cffFFFF00WARNING:|r %s", message))
 end
+
 
 
