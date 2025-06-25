@@ -4,7 +4,69 @@ _G.BoxxyAuras = _G.BoxxyAuras or {}
 local BoxxyAuras = _G.BoxxyAuras -- Use the global table
 
 -- Remove redundant AllAuras creation if it's already done in BoxxyAuras.lua
--- BoxxyAuras.AllAuras = {} 
+-- BoxxyAuras.AllAuras = {}
+
+-- PixelUtil Compatibility Layer
+local PixelUtilCompat = {}
+
+-- Standard WoW API fallback functions
+local function FallbackSetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+    frame:SetPoint(point, relativeTo, relativePoint, xOffset or 0, yOffset or 0)
+end
+
+local function FallbackSetSize(frame, width, height)
+    frame:SetSize(width, height)
+end
+
+local function FallbackSetWidth(frame, width)
+    frame:SetWidth(width)
+end
+
+local function FallbackSetHeight(frame, height)
+    frame:SetHeight(height)
+end
+
+if PixelUtil then
+    -- Use native PixelUtil with error handling - fall back to standard methods if they fail
+    function PixelUtilCompat.SetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        local success, err = pcall(PixelUtil.SetPoint, frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        if not success then
+            FallbackSetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        end
+    end
+    
+    function PixelUtilCompat.SetSize(frame, width, height)
+        local success, err = pcall(PixelUtil.SetSize, frame, width, height)
+        if not success then
+            FallbackSetSize(frame, width, height)
+        end
+    end
+    
+    function PixelUtilCompat.SetWidth(frame, width)
+        local success, err = pcall(PixelUtil.SetWidth, frame, width)
+        if not success then
+            FallbackSetWidth(frame, width)
+        end
+    end
+    
+    function PixelUtilCompat.SetHeight(frame, height)
+        local success, err = pcall(PixelUtil.SetHeight, frame, height)
+        if not success then
+            FallbackSetHeight(frame, height)
+        end
+    end
+else
+    -- Fallback implementations using standard WoW API
+    PixelUtilCompat.SetPoint = FallbackSetPoint
+    PixelUtilCompat.SetSize = FallbackSetSize
+    PixelUtilCompat.SetWidth = FallbackSetWidth
+    PixelUtilCompat.SetHeight = FallbackSetHeight
+end
+
+-- SetAllPoints is not part of PixelUtil - it's a standard frame method
+function PixelUtilCompat.SetAllPoints(frame, relativeTo)
+    frame:SetAllPoints(relativeTo)
+end 
 
 -- Add this near the top of AuraIcon.lua if it's missing
 local DebuffTypeColor = {
@@ -49,34 +111,27 @@ function AuraIcon.New(parentFrame, index, baseName)
 
     local frame = CreateFrame("Frame", baseName .. index, parentFrame, "BackdropTemplate")
     frame:SetFrameLevel(parentFrame:GetFrameLevel() + 5)
-    frame:SetSize(totalWidth, totalHeight)
+    PixelUtilCompat.SetSize(frame, totalWidth, totalHeight)
 
     -- Create core UI elements
     local texture = frame:CreateTexture(nil, "ARTWORK")
-    texture:SetSize(iconSize, iconSize)
-    texture:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
+    PixelUtilCompat.SetSize(texture, iconSize, iconSize)
+    PixelUtilCompat.SetPoint(texture, "TOPLEFT", frame, "TOPLEFT", padding, -padding)
     texture:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
     local countText = frame:CreateFontString(nil, "OVERLAY", "BoxxyAuras_StackTxt")
-    countText:SetPoint("BOTTOMRIGHT", texture, "BOTTOMRIGHT", 2, -2)
+    PixelUtilCompat.SetPoint(countText, "BOTTOMRIGHT", texture, "BOTTOMRIGHT", 2, -2)
     countText:SetJustifyH("RIGHT")
 
     local countTextBg = frame:CreateTexture(nil, "ARTWORK", nil, 1)
     countTextBg:SetColorTexture(0, 0, 0, 0.85)
-    countTextBg:SetPoint("TOPLEFT", countText, "TOPLEFT", -2, 2)
-    countTextBg:SetPoint("BOTTOMRIGHT", countText, "BOTTOMRIGHT", -2, -2)
-
-    -- Create text background first (so it's behind the text)
-    local durationTextBg = frame:CreateTexture(nil, "ARTWORK", nil, 1)
-    durationTextBg:SetColorTexture(0, 0, 0, 0.85)
-    durationTextBg:SetPoint("TOPLEFT", texture, "BOTTOMLEFT", 0, -padding)
-    durationTextBg:SetPoint("TOPRIGHT", texture, "BOTTOMRIGHT", 0, -padding)
-    durationTextBg:SetPoint("BOTTOM", frame, "BOTTOM", 0, padding)
+    PixelUtilCompat.SetPoint(countTextBg, "TOPLEFT", countText, "TOPLEFT", -2, 2)
+    PixelUtilCompat.SetPoint(countTextBg, "BOTTOMRIGHT", countText, "BOTTOMRIGHT", -2, -2)
 
     local durationText = frame:CreateFontString(nil, "OVERLAY", "BoxxyAuras_DurationTxt")
-    durationText:SetPoint("TOPLEFT", texture, "BOTTOMLEFT", 0, -padding)
-    durationText:SetPoint("TOPRIGHT", texture, "BOTTOMRIGHT", 0, -padding)
-    durationText:SetPoint("BOTTOM", frame, "BOTTOM", 0, padding)
+    PixelUtilCompat.SetPoint(durationText, "TOPLEFT", texture, "BOTTOMLEFT", 0, -padding)
+    PixelUtilCompat.SetPoint(durationText, "TOPRIGHT", texture, "BOTTOMRIGHT", 0, -padding)
+    PixelUtilCompat.SetPoint(durationText, "BOTTOM", frame, "BOTTOM", 0, padding)
     durationText:SetJustifyH("CENTER")
 
     -- Apply text size from settings
@@ -88,67 +143,43 @@ function AuraIcon.New(parentFrame, index, baseName)
     -- Create overlay textures
     local wipeOverlay = frame:CreateTexture(nil, "ARTWORK", nil, 2)
     wipeOverlay:SetColorTexture(1, 1, 1, 1.0)
-    wipeOverlay:SetSize(iconSize, iconSize)
-    wipeOverlay:SetPoint("TOPLEFT", texture, "TOPLEFT")
+    PixelUtilCompat.SetSize(wipeOverlay, iconSize, iconSize)
+    PixelUtilCompat.SetPoint(wipeOverlay, "TOPLEFT", texture, "TOPLEFT")
     wipeOverlay:SetAlpha(0)
 
     local shakeOverlay = frame:CreateTexture(nil, "OVERLAY", nil, 1)
     shakeOverlay:SetColorTexture(1, 0, 0, 0.75)
-    shakeOverlay:SetSize(iconSize, iconSize)
-    shakeOverlay:SetPoint("TOPLEFT", texture, "TOPLEFT")
+    PixelUtilCompat.SetSize(shakeOverlay, iconSize, iconSize)
+    PixelUtilCompat.SetPoint(shakeOverlay, "TOPLEFT", texture, "TOPLEFT")
     shakeOverlay:SetAlpha(0)
 
     -- Get border size from settings
     local borderSize = 0 -- Default border size
-    if currentSettings and settingsKey and currentSettings[settingsKey] and currentSettings[settingsKey].borderSize then
-        borderSize = currentSettings[settingsKey].borderSize
+    if currentSettings and settingsKey and currentSettings[settingsKey] then
+        borderSize = currentSettings[settingsKey].borderSize or 0 -- Use 0 if borderSize is nil
     end
 
     -- Apply backdrop
     BoxxyAuras.UIUtils.DrawSlicedBG(frame, "ItemEntryBG", "backdrop", 0)
     
-    -- Create border with thickness effect
-    if borderSize > 0 then
-        -- Create additional border frames for thickness
-        for i = 1, borderSize do
-            local borderFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-            borderFrame:SetAllPoints(frame)
-            borderFrame:SetFrameLevel(frame:GetFrameLevel() + i)
-            
-            -- Use WoW's native backdrop system for thick borders
-            borderFrame:SetBackdrop({
-                bgFile = nil,
-                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-                edgeSize = i * 2, -- Scale edge size with border thickness
-                insets = { left = -i, right = -i, top = -i, bottom = -i }
-            })
-            borderFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
-            
-            -- Store reference for cleanup
-            if not frame.thickBorderFrames then
-                frame.thickBorderFrames = {}
-            end
-            table.insert(frame.thickBorderFrames, borderFrame)
-        end
+    -- Create border based on border size setting
+    if borderSize == 0 then
+        -- No border at all
+    elseif borderSize == 1 then
+        -- Standard border (what was previously 0)
+        BoxxyAuras.UIUtils.DrawSlicedBG(frame, "ItemEntryBorder", "border", 0)
+    else
+        -- Thick border for borderSize >= 2 (what was previously >= 1)
+        local shrinkAmount = -math.min((borderSize - 1) * 2, 12) -- Scale shrink with border size, max 12
+        BoxxyAuras.UIUtils.DrawSlicedBG(frame, "ThickBorder", "border", shrinkAmount)
     end
-    
-    -- Always create the base border
-    BoxxyAuras.UIUtils.DrawSlicedBG(frame, "ItemEntryBorder", "border", 0)
 
-    local cfgBG = (BoxxyAuras.Config and BoxxyAuras.Config.BackgroundColor) or {
-        r = 0.05,
-        g = 0.05,
-        b = 0.05,
-        a = 0.9
-    }
-    local cfgBorder = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or {
-        r = 0.3,
-        g = 0.3,
-        b = 0.3,
-        a = 0.8
-    }
+    local cfgBG = (currentSettings and currentSettings.normalBackgroundColor) or BoxxyAuras:GetDefaultProfileSettings().normalBackgroundColor
+    local cfgBorder = (currentSettings and currentSettings.normalBorderColor) or BoxxyAuras:GetDefaultProfileSettings().normalBorderColor
     BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "backdrop", cfgBG.r, cfgBG.g, cfgBG.b, cfgBG.a)
-    BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a)
+    if borderSize > 0 then
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a)
+    end
 
     -- Set up event handlers
     frame:SetScript("OnEnter", function()
@@ -168,8 +199,27 @@ function AuraIcon.New(parentFrame, index, baseName)
         -- but we still need to call the instance's OnLeave for the tooltip.
         AuraIcon.OnLeave(instance)
     end)
-    frame:SetScript("OnMouseUp", function(_, button)
-        if button == "RightButton" and instance.auraType == "HELPFUL" and not InCombatLockdown() then
+    frame:SetScript("OnMouseDown", function(self, button)
+        if button == "LeftButton" then
+            -- Check if frames are unlocked and enable dragging the parent frame
+            local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+            if not currentSettings.lockFrames and instance.parentDisplayFrame then
+                instance.parentDisplayFrame:StartMoving()
+            end
+        end
+    end)
+    frame:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" then
+            -- Stop dragging the parent frame if it was being moved
+            local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+            if not currentSettings.lockFrames and instance.parentDisplayFrame then
+                instance.parentDisplayFrame:StopMovingOrSizing()
+                -- Save the new position with LibWindow
+                if LibWindow and LibWindow.SavePosition then
+                    LibWindow.SavePosition(instance.parentDisplayFrame)
+                end
+            end
+        elseif button == "RightButton" and instance.auraType == "HELPFUL" and not InCombatLockdown() then
             if instance.auraInstanceID then
                 local buffIndex
                 for i = 1, 40 do
@@ -284,7 +334,6 @@ function AuraIcon.New(parentFrame, index, baseName)
     frame.countText = countText
     frame.countTextBg = countTextBg
     frame.durationText = durationText
-    frame.durationTextBg = durationTextBg
     frame.wipeOverlay = wipeOverlay
     frame.shakeOverlay = shakeOverlay
 
@@ -311,10 +360,8 @@ end
 
 function AuraIcon.Update(self, auraData, index, auraType)
     if not auraData then
-        if self.frame and self.frame:IsShown() then
-            self.frame:Hide()
-            self.frame:SetScript("OnUpdate", nil)
-        end
+        -- Instead of just hiding, properly reset the icon for pooling
+        self:Reset()
         return
     end
 
@@ -360,36 +407,78 @@ function AuraIcon.Update(self, auraData, index, auraType)
     self.auraKey = auraData.spellId
     self.dispelName = auraData.dispelName -- Store dispel type for border color
 
-    -- Set border color based on aura type
-    if auraType == "HARMFUL" then
-        local dispelType = string.upper(auraData.dispelName or "NONE")
-
-        if dispelType == "NONE" then
-            BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", 1.0, 0.1, 0.1, 0.9)
-            self.frame.durationText:SetTextColor(1, 1, 1, 1.0)
-        else
-            local colorTable = DebuffTypeColor[dispelType]
-            if colorTable then
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", colorTable[1], colorTable[2], colorTable[3],
-                    0.9)
-                self.frame.durationText:SetTextColor(colorTable[1], colorTable[2], colorTable[3], 1.0)
-            else
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", 1.0, 0.1, 0.1, 0.9)
-                self.frame.durationText:SetTextColor(1, 1, 1, 1.0)
+    -- Find frame type and get border size from settings
+    local frameType = nil
+    if self.parentDisplayFrame then
+        for fType, frame in pairs(BoxxyAuras.Frames or {}) do
+            if frame == self.parentDisplayFrame then
+                frameType = fType
+                break
             end
         end
+    end
+
+    local settingsKey = frameType and BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
+    local currentSettings = settingsKey and BoxxyAuras:GetCurrentProfileSettings()
+
+    -- Get border size from settings
+    local borderSize = 0 -- Default border size
+    if currentSettings and settingsKey and currentSettings[settingsKey] then
+        borderSize = currentSettings[settingsKey].borderSize or 0 -- Use 0 if borderSize is nil
+    end
+
+    -- Set border color based on aura type (only if border exists)
+    if borderSize > 0 then
+        if auraType == "HARMFUL" then
+            local dispelType = string.upper(auraData.dispelName or "NONE")
+
+            if dispelType == "NONE" then
+                BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", 1.0, 0.1, 0.1, 0.9)
+                self.frame.durationText:SetTextColor(1, 1, 1, 1.0)
+            else
+                local colorTable = DebuffTypeColor[dispelType]
+                if colorTable then
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", colorTable[1], colorTable[2], colorTable[3],
+                        0.9)
+                    self.frame.durationText:SetTextColor(colorTable[1], colorTable[2], colorTable[3], 1.0)
+                else
+                    BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", 1.0, 0.1, 0.1, 0.9)
+                    self.frame.durationText:SetTextColor(1, 1, 1, 1.0)
+                end
+            end
+        else
+            local cfgBorder = (currentSettings and currentSettings.normalBorderColor) or {
+                r = 0.3,
+                g = 0.3,
+                b = 0.3,
+                a = 0.8
+            }
+            BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a)
+            self.frame.durationText:SetTextColor(1, 1, 1, 1)
+        end
     else
-        local cfgBorder = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or {
-            r = 0.3,
-            g = 0.3,
-            b = 0.3,
-            a = 0.8
-        }
-        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a)
-        self.frame.durationText:SetTextColor(1, 1, 1, 1)
+        -- No border, but still set text color for consistency
+        if auraType == "HARMFUL" then
+            local dispelType = string.upper(auraData.dispelName or "NONE")
+            if dispelType ~= "NONE" then
+                local colorTable = DebuffTypeColor[dispelType]
+                if colorTable then
+                    self.frame.durationText:SetTextColor(colorTable[1], colorTable[2], colorTable[3], 1.0)
+                else
+                    self.frame.durationText:SetTextColor(1, 1, 1, 1.0)
+                end
+            else
+                self.frame.durationText:SetTextColor(1, 1, 1, 1.0)
+            end
+        else
+            self.frame.durationText:SetTextColor(1, 1, 1, 1)
+        end
     end
 
     -- Set up duration tracking
+    -- Always clear any existing OnUpdate script first to prevent accumulation
+    self.frame:SetScript("OnUpdate", nil)
+    
     if not auraData.forceExpired and self.duration and self.duration > 0 then
         self.frame:SetScript("OnUpdate", function(_, elapsed)
             AuraIcon.UpdateDurationDisplay(self, GetTime())
@@ -406,32 +495,16 @@ function AuraIcon.Update(self, auraData, index, auraType)
         end)
     else
         if self.duration == 0 or self.duration <= 0 then
-            self.frame:SetScript("OnUpdate", nil)
             if self.frame.durationText then
                 self.frame.durationText:Hide()
             end
         end
     end
 
-    -- Ensure correct size by finding the correct frame type from the parent frame
-    local frameType = nil
-    if self.parentDisplayFrame then
-        for fType, frame in pairs(BoxxyAuras.Frames or {}) do
-            if frame == self.parentDisplayFrame then
-                frameType = fType
-                break
-            end
-        end
-    end
-
-    if frameType then
-        local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-        local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
-
-        if currentSettings and settingsKey and currentSettings[settingsKey] then
-            local iconSize = currentSettings[settingsKey].iconSize or BoxxyAuras.Config.IconSize
-            self:Resize(iconSize)
-        end
+    -- Ensure correct size (we already have frameType, settingsKey, and currentSettings from above)
+    if frameType and currentSettings and settingsKey and currentSettings[settingsKey] then
+        local iconSize = currentSettings[settingsKey].iconSize or BoxxyAuras.Config.IconSize
+        self:Resize(iconSize)
     end
 
     -- Show frame
@@ -854,78 +927,65 @@ function AuraIcon:UpdateBorderSize()
     if frameType then
         local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
         local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
-        if currentSettings and settingsKey and currentSettings[settingsKey] and currentSettings[settingsKey].borderSize then
-            borderSize = currentSettings[settingsKey].borderSize
+        if currentSettings and settingsKey and currentSettings[settingsKey] then
+            borderSize = currentSettings[settingsKey].borderSize or 0 -- Use 0 if borderSize is nil
         end
     end
 
-    -- Redraw the border with the new size using thick border frames
+    -- Redraw the border with the new size using custom thick texture
     if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG then
-        -- Clear existing thick border frames
-        if self.frame.thickBorderFrames then
-            for _, borderFrame in ipairs(self.frame.thickBorderFrames) do
-                if borderFrame then
-                    borderFrame:Hide()
-                    borderFrame:SetParent(nil)
+        -- Clear existing border textures to redraw with new size
+        if self.frame.borderTextures then
+            for _, tex in pairs(self.frame.borderTextures) do
+                if tex then
+                    tex:Hide()
                 end
             end
-            self.frame.thickBorderFrames = nil
+            self.frame.borderTextures = nil
         end
         
-        -- Create new thick border frames
-        if borderSize > 0 then
-            for i = 1, borderSize do
-                local borderFrame = CreateFrame("Frame", nil, self.frame, "BackdropTemplate")
-                borderFrame:SetAllPoints(self.frame)
-                borderFrame:SetFrameLevel(self.frame:GetFrameLevel() + i)
-                
-                -- Use WoW's native backdrop system for thick borders
-                borderFrame:SetBackdrop({
-                    bgFile = nil,
-                    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-                    edgeSize = i * 2, -- Scale edge size with border thickness
-                    insets = { left = -i, right = -i, top = -i, bottom = -i }
-                })
-                
-                -- Store reference for cleanup
-                if not self.frame.thickBorderFrames then
-                    self.frame.thickBorderFrames = {}
-                end
-                table.insert(self.frame.thickBorderFrames, borderFrame)
-            end
-        end
-        
-        -- Get the appropriate colors for both base border and thick borders
-        local r, g, b, a = 0.3, 0.3, 0.3, 0.8 -- Default colors
-        
-        if self.auraType == "HARMFUL" then
-            local dispelType = string.upper(self.dispelName or "NONE")
-            if dispelType == "NONE" then
-                r, g, b, a = 1.0, 0.1, 0.1, 0.9
-            else
-                local colorTable = DebuffTypeColor[dispelType]
-                if colorTable then
-                    r, g, b, a = colorTable[1], colorTable[2], colorTable[3], 0.9
-                else
-                    r, g, b, a = 1.0, 0.1, 0.1, 0.9
-                end
-            end
+        -- Create border with appropriate texture based on size
+        if borderSize == 0 then
+            -- No border at all - don't draw any border
+        elseif borderSize == 1 then
+            -- Standard border (what was previously 0)
+            BoxxyAuras.UIUtils.DrawSlicedBG(self.frame, "ItemEntryBorder", "border", 0)
         else
-            local cfgBorder = (BoxxyAuras.Config and BoxxyAuras.Config.BorderColor) or { r = 0.3, g = 0.3, b = 0.3, a = 0.8 }
-            r, g, b, a = cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a
+            -- Thick border for borderSize >= 2 (what was previously >= 1)
+            local shrinkAmount = -math.min((borderSize - 1) * 2, 12) -- Scale shrink with border size, max 12
+            BoxxyAuras.UIUtils.DrawSlicedBG(self.frame, "ThickBorder", "border", shrinkAmount)
         end
         
-        -- Apply color to base border
-        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", r, g, b, a)
-        
-        -- Apply color to thick border frames
-        if self.frame.thickBorderFrames then
-            for _, borderFrame in ipairs(self.frame.thickBorderFrames) do
-                if borderFrame then
-                    borderFrame:SetBackdropBorderColor(r, g, b, a)
+        -- Apply color to the border (only if border exists)
+        if borderSize > 0 then
+            local r, g, b, a = 0.3, 0.3, 0.3, 0.8 -- Default colors
+            
+            if self.auraType == "HARMFUL" then
+                local dispelType = string.upper(self.dispelName or "NONE")
+                if dispelType == "NONE" then
+                    r, g, b, a = 1.0, 0.1, 0.1, 0.9
+                else
+                    local colorTable = DebuffTypeColor[dispelType]
+                    if colorTable then
+                        r, g, b, a = colorTable[1], colorTable[2], colorTable[3], 0.9
+                    else
+                        r, g, b, a = 1.0, 0.1, 0.1, 0.9
+                    end
                 end
+            else
+                local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+                local cfgBorder = (currentSettings and currentSettings.normalBorderColor) or BoxxyAuras:GetDefaultProfileSettings().normalBorderColor
+                r, g, b, a = cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a
             end
+            
+            -- Apply color to the border
+            BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "border", r, g, b, a)
         end
+        
+        -- Also update the background color when border size changes
+        local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+        local cfgBG = (currentSettings and currentSettings.normalBackgroundColor) or BoxxyAuras:GetDefaultProfileSettings().normalBackgroundColor
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self.frame, "backdrop", cfgBG.r, cfgBG.g, cfgBG.b, cfgBG.a)
     end
 end
 
@@ -986,28 +1046,28 @@ function AuraIcon:Resize(newIconSize)
     self.currentTextSize = textSize
 
     -- Resize frame and widgets
-    self.frame:SetSize(newWidth, newHeight)
-    self.textureWidget:SetSize(newIconSize, newIconSize)
+    PixelUtilCompat.SetSize(self.frame, newWidth, newHeight)
+    PixelUtilCompat.SetSize(self.textureWidget, newIconSize, newIconSize)
 
     -- Resize overlays
     if self.frame.wipeOverlay then
-        self.frame.wipeOverlay:SetSize(newIconSize, newIconSize)
+        PixelUtilCompat.SetSize(self.frame.wipeOverlay, newIconSize, newIconSize)
     end
     if self.frame.shakeOverlay then
-        self.frame.shakeOverlay:SetSize(newIconSize, newIconSize)
+        PixelUtilCompat.SetSize(self.frame.shakeOverlay, newIconSize, newIconSize)
     end
 
     -- Reposition text elements
     if self.frame.countText then
         self.frame.countText:ClearAllPoints()
-        self.frame.countText:SetPoint("BOTTOMRIGHT", self.textureWidget, "BOTTOMRIGHT", 2, -2)
+        PixelUtilCompat.SetPoint(self.frame.countText, "BOTTOMRIGHT", self.textureWidget, "BOTTOMRIGHT", 2, -2)
     end
 
     if self.frame.durationText then
         self.frame.durationText:ClearAllPoints()
-        self.frame.durationText:SetPoint("TOPLEFT", self.textureWidget, "BOTTOMLEFT", 0, -padding)
-        self.frame.durationText:SetPoint("TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", 0, -padding)
-        self.frame.durationText:SetPoint("BOTTOM", self.frame, "BOTTOM", 0, padding)
+        PixelUtilCompat.SetPoint(self.frame.durationText, "TOPLEFT", self.textureWidget, "BOTTOMLEFT", 0, -padding)
+        PixelUtilCompat.SetPoint(self.frame.durationText, "TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", 0, -padding)
+        PixelUtilCompat.SetPoint(self.frame.durationText, "BOTTOM", self.frame, "BOTTOM", 0, padding)
 
         -- Update font size if it changed
         local fontPath, _, fontFlags = self.frame.durationText:GetFont()
@@ -1016,23 +1076,15 @@ function AuraIcon:Resize(newIconSize)
         end
     end
 
-    -- Reposition text background to match text
-    if self.frame.durationTextBg then
-        self.frame.durationTextBg:ClearAllPoints()
-        self.frame.durationTextBg:SetPoint("TOPLEFT", self.textureWidget, "BOTTOMLEFT", 0, -padding)
-        self.frame.durationTextBg:SetPoint("TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", 0, -padding)
-        self.frame.durationTextBg:SetPoint("BOTTOM", self.frame, "BOTTOM", 0, padding)
-    end
-
     -- Re-anchor overlay textures
     if self.frame.wipeOverlay then
         self.frame.wipeOverlay:ClearAllPoints()
-        self.frame.wipeOverlay:SetPoint("TOPLEFT", self.textureWidget, "TOPLEFT")
+        PixelUtilCompat.SetPoint(self.frame.wipeOverlay, "TOPLEFT", self.textureWidget, "TOPLEFT")
     end
 
     if self.frame.shakeOverlay then
         self.frame.shakeOverlay:ClearAllPoints()
-        self.frame.shakeOverlay:SetPoint("TOPLEFT", self.textureWidget, "TOPLEFT")
+        PixelUtilCompat.SetPoint(self.frame.shakeOverlay, "TOPLEFT", self.textureWidget, "TOPLEFT")
     end
 end
 
@@ -1064,6 +1116,80 @@ function AuraIcon.GetCasterNameFromCurrentData(self)
     -- Fallback: if no tracked data, we can't reliably determine caster
     -- WoW's live APIs don't preserve original caster information
     return nil
+end
+
+-- Add comprehensive reset method for pooling
+function AuraIcon:Reset()
+    if not self.frame then
+        return
+    end
+    
+    -- Clear all scripts to prevent memory leaks and performance issues
+    self.frame:SetScript("OnUpdate", nil)
+    
+    -- Reset state variables that could cause issues
+    self.isMouseOver = false
+    self.tooltipUpdateTimer = 0
+    self.lastFormattedDurationText = nil
+    self.lastIsExpiredState = nil
+    self.lastIsParentHoveredState = nil
+    self.isExpired = false
+    
+    -- Reset aura data
+    self.duration = 0
+    self.expirationTime = 0
+    self.auraIndex = 0
+    self.auraType = nil
+    self.name = nil
+    self.spellId = nil
+    self.originalAuraType = nil
+    self.auraInstanceID = nil
+    self.slot = nil
+    self.auraKey = nil
+    self.dispelName = nil
+    
+    -- Stop any running animations
+    if self.newAuraAnimGroup and self.newAuraAnimGroup:IsPlaying() then
+        self.newAuraAnimGroup:Stop()
+    end
+    if self.shakeAnimGroup and self.shakeAnimGroup:IsPlaying() then
+        self.shakeAnimGroup:Stop()
+    end
+    
+    -- Reset visual elements
+    if self.textureWidget then
+        self.textureWidget:SetVertexColor(1, 1, 1) -- Reset to normal color
+    end
+    
+    -- Hide and reset text elements
+    if self.frame.durationText then
+        self.frame.durationText:Hide()
+        self.frame.durationText:SetTextColor(1, 1, 1, 1) -- Reset to normal color
+    end
+    
+    if self.frame.countText then
+        self.frame.countText:Hide()
+    end
+    
+    if self.frame.countTextBg then
+        self.frame.countTextBg:Hide()
+    end
+    
+    -- Reset overlay alphas
+    if self.frame.wipeOverlay then
+        self.frame.wipeOverlay:SetAlpha(0)
+    end
+    if self.frame.shakeOverlay then
+        self.frame.shakeOverlay:SetAlpha(0)
+    end
+    
+    -- Hide the frame
+    self.frame:Hide()
+    
+    -- Hide tooltip if it's showing for this frame
+    if GameTooltip:IsOwned(self.frame) then
+        GameTooltip:Hide()
+    end
 end
 
 -- Assign to the global table

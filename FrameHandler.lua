@@ -4,6 +4,68 @@ local BoxxyAuras = _G.BoxxyAuras -- Create a convenient local alias to the globa
 BoxxyAuras.FrameHandler = {}
 BoxxyAurasDB = BoxxyAurasDB or {}
 
+-- PixelUtil Compatibility Layer
+local PixelUtilCompat = {}
+
+-- Standard WoW API fallback functions
+local function FallbackSetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+    frame:SetPoint(point, relativeTo, relativePoint, xOffset or 0, yOffset or 0)
+end
+
+local function FallbackSetSize(frame, width, height)
+    frame:SetSize(width, height)
+end
+
+local function FallbackSetWidth(frame, width)
+    frame:SetWidth(width)
+end
+
+local function FallbackSetHeight(frame, height)
+    frame:SetHeight(height)
+end
+
+if PixelUtil then
+    -- Use native PixelUtil with error handling - fall back to standard methods if they fail
+    function PixelUtilCompat.SetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        local success, err = pcall(PixelUtil.SetPoint, frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        if not success then
+            FallbackSetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        end
+    end
+    
+    function PixelUtilCompat.SetSize(frame, width, height)
+        local success, err = pcall(PixelUtil.SetSize, frame, width, height)
+        if not success then
+            FallbackSetSize(frame, width, height)
+        end
+    end
+    
+    function PixelUtilCompat.SetWidth(frame, width)
+        local success, err = pcall(PixelUtil.SetWidth, frame, width)
+        if not success then
+            FallbackSetWidth(frame, width)
+        end
+    end
+    
+    function PixelUtilCompat.SetHeight(frame, height)
+        local success, err = pcall(PixelUtil.SetHeight, frame, height)
+        if not success then
+            FallbackSetHeight(frame, height)
+        end
+    end
+else
+    -- Fallback implementations using standard WoW API
+    PixelUtilCompat.SetPoint = FallbackSetPoint
+    PixelUtilCompat.SetSize = FallbackSetSize
+    PixelUtilCompat.SetWidth = FallbackSetWidth
+    PixelUtilCompat.SetHeight = FallbackSetHeight
+end
+
+-- SetAllPoints is not part of PixelUtil - it's a standard frame method
+function PixelUtilCompat.SetAllPoints(frame, relativeTo)
+    frame:SetAllPoints(relativeTo)
+end
+
 -- Import LibWindow
 local LibWindow = LibStub("LibWindow-1.1")
 
@@ -18,7 +80,9 @@ local function HandleOnMouseDown(self, button)
     if BoxxyAuras.DEBUG then
         print("HandleOnMouseDown fired for handle: " .. self:GetName() .. " Button: " .. button)
     end
-    if button == "LeftButton" and not BoxxyAuras.Config.FramesLocked then
+    -- Check current profile lock state instead of Config.FramesLocked
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+    if button == "LeftButton" and not currentSettings.lockFrames then
         local parentFrame = self:GetParent()
         local resizeSide = self.resizeSide
 
@@ -98,7 +162,7 @@ local function HandleOnMouseDown(self, button)
 
                     -- Check if the *calculated* width is different enough
                     if math.abs(self:GetWidth() - calculatedWidth) > 0.5 then
-                        self:SetWidth(calculatedWidth)
+                        PixelUtilCompat.SetWidth(self, calculatedWidth)
                         widthChanged = true
 
                         -- Reposition frame to keep the opposite edge stationary
@@ -111,7 +175,7 @@ local function HandleOnMouseDown(self, button)
                             newLeft = self.resizeStartLeft
                         end
                         self:ClearAllPoints()
-                        self:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", newLeft, self.resizeStartTop)
+                        PixelUtilCompat.SetPoint(self, "TOPLEFT", UIParent, "BOTTOMLEFT", newLeft, self.resizeStartTop)
                         BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, numIcons)
                     end
                 end
@@ -121,7 +185,9 @@ local function HandleOnMouseDown(self, button)
 end
 
 local function HandleOnMouseUp(self, button)
-    if button == "LeftButton" and not BoxxyAuras.Config.FramesLocked then
+    -- Check current profile lock state instead of Config.FramesLocked
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+    if button == "LeftButton" and not currentSettings.lockFrames then
         local parentFrame = self:GetParent()
         if parentFrame.isResizing then
             parentFrame.lastResizeTime = GetTime()
@@ -245,8 +311,8 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
 
     -- Calculate frame size based on number of icons and icon size
     local frameSize = BoxxyAuras.FrameHandler.CalculateFrameWidth(1, BoxxyAuras.Config.IconSize)
-    frame:SetSize(frameSize, frameSize)
-    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    PixelUtilCompat.SetSize(frame, frameSize, frameSize)
+    PixelUtilCompat.SetPoint(frame, "CENTER", UIParent, "CENTER", 0, 0)
 
     -- Draw frame visuals (Keep this part as it sets up appearance)
     BoxxyAuras.UIUtils.DrawSlicedBG(frame, "MainFrameHoverBG", "backdrop", 0)
@@ -279,13 +345,19 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
 
     -- Register for drag events
     frame:SetScript("OnDragStart", function(self)
-        if not BoxxyAuras.Config.FramesLocked then
+        -- Check current lock state instead of Config.FramesLocked
+        local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+        if not currentSettings.lockFrames then
             self:StartMoving()
         end
     end)
     frame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        LibWindow.SavePosition(self)
+        -- Only process drag stop if we're actually movable (not locked)
+        local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+        if not currentSettings.lockFrames then
+            self:StopMovingOrSizing()
+            LibWindow.SavePosition(self)
+        end
     end)
 
     -- Register helper methods.
@@ -296,15 +368,24 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
         if self.titleLabel then
             self.titleLabel:Hide()
         end -- Hide title
-        -- self:EnableMouse(false) -- DO NOT disable mouse, we need it for hover detection
-
+        
+        -- Disable mouse interaction completely when locked
+        self:SetMovable(false)  -- Disable moving
+        self:RegisterForDrag()  -- Clear drag registration
+        self:EnableMouse(false)  -- Disable ALL mouse interaction (right-click, left-click, etc.)
+        
+        -- Keep mouse enabled on icon frames for tooltips - they're small and positioned over actual icons
+        -- so they shouldn't interfere with camera movement like the large main frame does
+        
         -- Also hide handles since they won't be usable
         if self.handles then
             if self.handles.left then
                 self.handles.left:Hide()
+                self.handles.left:EnableMouse(false) -- Disable mouse on handles too
             end
             if self.handles.right then
-                self.handles.right:Hide()
+                self.handles.right:Hide() 
+                self.handles.right:EnableMouse(false) -- Disable mouse on handles too
             end
         end
     end
@@ -321,15 +402,22 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
         BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", BoxxyAuras.Config.MainFrameBGColorNormal)
         BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", BoxxyAuras.Config.BorderColor) -- Restore border
 
-        -- self:EnableMouse(true) -- Mouse is always enabled now
+        -- Re-enable mouse interaction for clicks/drags
+        self:SetMovable(true)  -- Re-enable moving
+        self:RegisterForDrag("LeftButton")  -- Re-register for drag events
+        self:EnableMouse(true)  -- Re-enable mouse interaction
 
-        -- Also show handles
+        -- Icon frames keep their mouse enabled throughout (for tooltips)
+
+        -- Also show handles and re-enable their mouse interaction
         if self.handles then
             if self.handles.left then
                 self.handles.left:Show()
+                self.handles.left:EnableMouse(true) -- Re-enable mouse on handles
             end
             if self.handles.right then
                 self.handles.right:Show()
+                self.handles.right:EnableMouse(true) -- Re-enable mouse on handles
             end
         end
     end
@@ -361,8 +449,8 @@ function CreateHandles(frame)
             FrameHeight, FrameHeight, HandleWidth or -1))
     end
 
-    leftHandle:SetSize(HandleWidth, FrameHeight)
-    leftHandle:SetPoint("LEFT", frame, "LEFT", 0, 0) -- Corrected anchor
+    PixelUtilCompat.SetSize(leftHandle, HandleWidth, FrameHeight)
+    PixelUtilCompat.SetPoint(leftHandle, "LEFT", frame, "LEFT", 0, 0) -- Corrected anchor
     leftHandle:SetFrameLevel(frame:GetFrameLevel() + 10) -- Add back frame level
     leftHandle:SetFrameStrata("HIGH") -- Add back strata
     leftHandle:SetBackdrop({
@@ -432,8 +520,8 @@ function CreateHandles(frame)
             FrameHeight, FrameHeight, HandleWidth or -1))
     end
 
-    rightHandle:SetSize(HandleWidth, FrameHeight)
-    rightHandle:SetPoint("RIGHT", frame, "RIGHT", 0, 0) -- Corrected anchor
+    PixelUtilCompat.SetSize(rightHandle, HandleWidth, FrameHeight)
+    PixelUtilCompat.SetPoint(rightHandle, "RIGHT", frame, "RIGHT", 0, 0) -- Corrected anchor
     rightHandle:SetFrameLevel(frame:GetFrameLevel() + 10) -- Add back frame level
     rightHandle:SetFrameStrata("HIGH") -- Add back strata
     rightHandle:SetBackdrop({
@@ -528,7 +616,7 @@ function BoxxyAuras.FrameHandler.UpdateFrame(frame)
     local frameWidth = BoxxyAuras.FrameHandler.CalculateFrameWidth(numIconsWide, iconSize)
 
     -- Set the frame size
-    frame:SetWidth(frameWidth)
+    PixelUtilCompat.SetWidth(frame, frameWidth)
 
     -- Update aura layout
     BoxxyAuras.FrameHandler.UpdateAurasInFrame(frame)
@@ -611,20 +699,20 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, overrideNumIconsW
 
     -- Resize frame height if needed
     if frame:GetHeight() ~= calculatedFrameHeight then
-        frame:SetHeight(calculatedFrameHeight)
+        PixelUtilCompat.SetHeight(frame, calculatedFrameHeight)
 
         -- === Update Handle Dimensions ===
         if frame.handles then
             local parentH = frame:GetHeight()
             if frame.handles.left then
-                frame.handles.left:SetSize(HandleWidth, parentH) -- NEW: Set both dimensions
+                PixelUtilCompat.SetSize(frame.handles.left, HandleWidth, parentH) -- NEW: Set both dimensions
                 frame.handles.left:ClearAllPoints() -- Re-anchor to ensure vertical centering
-                frame.handles.left:SetPoint("LEFT", frame, "LEFT", 0, 0)
+                PixelUtilCompat.SetPoint(frame.handles.left, "LEFT", frame, "LEFT", 0, 0)
             end
             if frame.handles.right then
-                frame.handles.right:SetSize(HandleWidth, parentH) -- NEW: Set both dimensions
+                PixelUtilCompat.SetSize(frame.handles.right, HandleWidth, parentH) -- NEW: Set both dimensions
                 frame.handles.right:ClearAllPoints() -- Re-anchor to ensure vertical centering
-                frame.handles.right:SetPoint("RIGHT", frame, "RIGHT", 0, 0)
+                PixelUtilCompat.SetPoint(frame.handles.right, "RIGHT", frame, "RIGHT", 0, 0)
             end
         end
         -- === End Handle Update ===
@@ -668,7 +756,7 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, overrideNumIconsW
 
             -- Position icon
             icon.frame:ClearAllPoints()
-            icon.frame:SetPoint("TOPLEFT", frame, "TOPLEFT", xPos, yPos)
+            PixelUtilCompat.SetPoint(icon.frame, "TOPLEFT", frame, "TOPLEFT", xPos, yPos)
         end
     end
 

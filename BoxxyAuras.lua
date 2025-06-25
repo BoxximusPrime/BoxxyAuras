@@ -2,7 +2,7 @@ local addonNameString, privateTable = ... -- Use different names for the local v
 _G.BoxxyAuras = _G.BoxxyAuras or {} -- Explicitly create/assign the GLOBAL table
 local BoxxyAuras = _G.BoxxyAuras -- Create a convenient local alias to the global table
 
-BoxxyAuras.Version = "1.1.0"
+BoxxyAuras.Version = "1.2.0"
 
 BoxxyAuras.AllAuras = {} -- Global cache for aura info
 BoxxyAuras.recentAuraEvents = {} -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
@@ -20,6 +20,9 @@ BoxxyAuras.WasLocked = nil
 
 -- <<< NEW: Geometric Mouse Position Tracker >>>
 BoxxyAuras.MouseInFrameGeometry = nil
+
+-- <<< NEW: Icon Counters for Pooling >>>
+BoxxyAuras.iconCounters = { Buff = 0, Debuff = 0, Custom = 0 }
 
 local LibWindow = LibStub("LibWindow-1.1")
 
@@ -191,11 +194,14 @@ function BoxxyAuras:GetDefaultProfileSettings()
         lockFrames = false,
         hideBlizzardAuras = true,
         optionsScale = 1.0,
+        normalBorderColor = { r = 0.498, g = 0.498, b = 0.498, a = 1.0 }, -- Default normal border color (127,127,127)
+        normalBackgroundColor = { r = 0.15, g = 0.15, b = 0.15, a = 1.0 }, -- Default background color (25,25,25)
         customAuraNames = {},
         buffFrameSettings = {
+            -- Default: lower of the three bars, roughly top-middle of the screen
             x = 0,
-            y = 100,
-            anchor = "CENTER",
+            y = -180,        -- 180px below the top edge
+            anchor = "TOP", -- anchor to top of UIParent for consistency across resolutions
             height = defaultMinHeight,
             numIconsWide = defaultIconsWide_Reset,
             buffTextAlign = "CENTER",
@@ -205,9 +211,10 @@ function BoxxyAuras:GetDefaultProfileSettings()
             width = defaultWidth
         },
         debuffFrameSettings = {
+            -- Positioned above the Buff bar
             x = 0,
-            y = 200,
-            anchor = "CENTER",
+            y = -120,
+            anchor = "TOP",
             height = defaultMinHeight,
             numIconsWide = defaultIconsWide_Reset,
             debuffTextAlign = "CENTER",
@@ -217,9 +224,10 @@ function BoxxyAuras:GetDefaultProfileSettings()
             width = defaultWidth
         },
         customFrameSettings = {
+            -- Highest bar in the default stack
             x = 0,
-            y = 300,
-            anchor = "CENTER",
+            y = -60,
+            anchor = "TOP",
             height = defaultMinHeight,
             numIconsWide = defaultIconsWide_Reset,
             customTextAlign = "CENTER",
@@ -344,6 +352,16 @@ function BoxxyAuras:GetCurrentProfileSettings()
         profile.customFrameSettings.numIconsWide = 6
     end
 
+    -- Ensure normalBorderColor exists
+    if profile.normalBorderColor == nil then
+        profile.normalBorderColor = { r = 0.498, g = 0.498, b = 0.498, a = 0.8 }
+    end
+
+    -- Ensure normalBackgroundColor exists
+    if profile.normalBackgroundColor == nil then
+        profile.normalBackgroundColor = { r = 0.098, g = 0.098, b = 0.098, a = 1.0 }
+    end
+
     return profile
 end
 
@@ -369,14 +387,25 @@ local function InitializeAuras()
         BoxxyAuras.iconArrays = {}
     end
 
-    -- Clear all existing auras and hide icons
+    -- Clear all existing auras and return icons to their pools
     for frameType, frame in pairs(BoxxyAuras.Frames or {}) do
         BoxxyAuras.auraTracking[frameType] = {}
+
+        if not BoxxyAuras.iconPools[frameType] then BoxxyAuras.iconPools[frameType] = {} end
+        local iconPool = BoxxyAuras.iconPools[frameType]
 
         if BoxxyAuras.iconArrays[frameType] then
             for _, icon in ipairs(BoxxyAuras.iconArrays[frameType]) do
                 if icon and icon.frame then
-                    icon.frame:Hide()
+                    -- Use the comprehensive Reset method instead of manual cleanup
+                    if icon.Reset then
+                        icon:Reset()
+                    else
+                        -- Fallback for older icon instances
+                        icon.frame:Hide()
+                        icon.frame:SetScript("OnUpdate", nil)
+                    end
+                    table.insert(iconPool, icon)
                 end
             end
         end
@@ -459,6 +488,7 @@ local function InitializeAuras()
     for frameType, frame in pairs(BoxxyAuras.Frames) do
         local auras = BoxxyAuras.auraTracking[frameType] or {}
         BoxxyAuras.iconArrays[frameType] = BoxxyAuras.iconArrays[frameType] or {}
+        local iconPool = BoxxyAuras.iconPools[frameType] or {}
 
         -- Determine aura filter for this frame type
         local auraFilter = "HELPFUL"
@@ -470,14 +500,16 @@ local function InitializeAuras()
 
         -- Create icons for each aura
         for i, auraData in ipairs(auras) do
-            local icon = BoxxyAuras.iconArrays[frameType][i]
+            local icon = table.remove(iconPool)
             if not icon then
                 local baseNamePrefix = "BoxxyAuras" .. frameType .. "Icon"
-                icon = AuraIcon.New(frame, i, baseNamePrefix)
-                BoxxyAuras.iconArrays[frameType][i] = icon
-                if icon and icon.newAuraAnimGroup then
-                    icon.newAuraAnimGroup:Play()
-                end
+                BoxxyAuras.iconCounters[frameType] = BoxxyAuras.iconCounters[frameType] + 1
+                icon = AuraIcon.New(frame, BoxxyAuras.iconCounters[frameType], baseNamePrefix)
+            end
+
+            BoxxyAuras.iconArrays[frameType][i] = icon
+            if icon and icon.newAuraAnimGroup then
+                icon.newAuraAnimGroup:Play()
             end
 
             icon:Update(auraData, i, auraFilter)
@@ -837,15 +869,32 @@ function UpdateIconsForFrame(frameType, frame, auras)
     local function GetOrCreateIcon(pool, index, parentFrame, baseNamePrefix)
         local icon = table.remove(pool)
         if not icon then
-            local uniqueName = baseNamePrefix .. index
-            icon = AuraIcon.New(parentFrame, index, baseNamePrefix)
+            local frameType
+            for fType, f in pairs(BoxxyAuras.Frames or {}) do
+                if f == parentFrame then
+                    frameType = fType
+                    break
+                end
+            end
+            if frameType then
+                BoxxyAuras.iconCounters[frameType] = BoxxyAuras.iconCounters[frameType] + 1
+                local uniqueIndex = BoxxyAuras.iconCounters[frameType]
+                icon = AuraIcon.New(parentFrame, uniqueIndex, baseNamePrefix)
+            end
         end
         return icon
     end
 
     local function ReturnIconToPool(pool, icon)
         if icon and icon.frame then
-            icon.frame:Hide()
+            -- Use the comprehensive Reset method instead of manual cleanup
+            if icon.Reset then
+                icon:Reset()
+            else
+                -- Fallback for older icon instances
+                icon.frame:Hide()
+                icon.frame:SetScript("OnUpdate", nil)
+            end
             table.insert(pool, icon)
         end
     end
@@ -875,6 +924,11 @@ function UpdateIconsForFrame(frameType, frame, auras)
             if targetIcon and targetIcon.newAuraAnimGroup then
                 targetIcon.newAuraAnimGroup:Play()
             end
+        end
+        
+        -- Reset tooltip timer for reused icons to prevent stale state
+        if targetIcon then
+            targetIcon.tooltipUpdateTimer = 0
         end
 
         -- Update the icon with aura data
@@ -938,6 +992,9 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         end
         if BoxxyAuras.Frames == nil then
             BoxxyAuras.Frames = {}
+        end
+        if BoxxyAuras.iconPools == nil then
+            BoxxyAuras.iconPools = {}
         end
 
         local framesToCreate = {"Buff", "Debuff", "Custom"}
@@ -1119,19 +1176,63 @@ function BoxxyAuras:SwitchToProfile(profileName)
     
     print("|cff00FF00BoxxyAuras:|r Switched to profile '" .. profileName .. "'.")
     
-    -- Apply the new settings to all frame types
+    -- Obtain a reference to the settings that we just switched to for convenience
+    local currentSettings = self:GetCurrentProfileSettings() or {}
+
+    ------------------------------------------------------------------
+    -- 1. Apply frame-level settings (width/scale/icon layout etc.)
+    ------------------------------------------------------------------
     if self.FrameHandler and self.FrameHandler.ApplySettings then
         local frameTypes = {"Buff", "Debuff", "Custom"}
         for _, frameType in ipairs(frameTypes) do
             self.FrameHandler.ApplySettings(frameType)
         end
     end
-    
-    -- Update auras to reflect new settings
+
+    ------------------------------------------------------------------
+    -- 2. Restore frame positions saved for this profile (LibWindow)
+    ------------------------------------------------------------------
+    if LibWindow and LibWindow.RestorePosition and self.Frames then
+        for _, frame in pairs(self.Frames) do
+            if frame then
+                LibWindow.RestorePosition(frame)
+            end
+        end
+    end
+
+    ------------------------------------------------------------------
+    -- 3. Apply lock/unlock state for frames
+    ------------------------------------------------------------------
+    if self.FrameHandler and self.FrameHandler.ApplyLockState and currentSettings.lockFrames ~= nil then
+        self.FrameHandler.ApplyLockState(currentSettings.lockFrames)
+    end
+
+    ------------------------------------------------------------------
+    -- 4. Apply Blizzard aura visibility according to profile setting
+    ------------------------------------------------------------------
+    if currentSettings.hideBlizzardAuras ~= nil then
+        self.ApplyBlizzardAuraVisibility(currentSettings.hideBlizzardAuras)
+    end
+
+    ------------------------------------------------------------------
+    -- 5. Refresh border/background colors for all existing icons
+    ------------------------------------------------------------------
+    if self.Options then
+        if self.Options.ApplyNormalBorderColorChange then
+            self.Options:ApplyNormalBorderColorChange()
+        end
+        if self.Options.ApplyBackgroundColorChange then
+            self.Options:ApplyBackgroundColorChange()
+        end
+    end
+
+    ------------------------------------------------------------------
+    -- 6. Finally trigger a full aura update so icon durations, sizes, etc. refresh
+    ------------------------------------------------------------------
     if self.UpdateAuras then
         self.UpdateAuras()
     end
-    
+
     return true
 end
 

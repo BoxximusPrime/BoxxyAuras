@@ -4,6 +4,84 @@ local BoxxyAuras = _G.BoxxyAuras
 
 BoxxyAuras.UIBuilder = {}
 
+-- PixelUtil Compatibility Layer
+-- Provides fallback implementations when PixelUtil is not available or malfunctioning
+local PixelUtilCompat = {}
+
+-- Standard WoW API fallback functions
+local function FallbackSetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+    frame:SetPoint(point, relativeTo, relativePoint, xOffset or 0, yOffset or 0)
+end
+
+local function FallbackSetSize(frame, width, height)
+    frame:SetSize(width, height)
+end
+
+local function FallbackSetWidth(frame, width)
+    frame:SetWidth(width)
+end
+
+local function FallbackSetHeight(frame, height)
+    frame:SetHeight(height)
+end
+
+if PixelUtil then
+    -- Use native PixelUtil with error handling - fall back to standard methods if they fail
+    function PixelUtilCompat.SetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        local success, err = pcall(PixelUtil.SetPoint, frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        if not success then
+            if BoxxyAuras.DEBUG then
+                print("PixelUtil.SetPoint failed, using fallback: " .. tostring(err))
+            end
+            FallbackSetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        end
+    end
+    
+    function PixelUtilCompat.SetSize(frame, width, height)
+        local success, err = pcall(PixelUtil.SetSize, frame, width, height)
+        if not success then
+            if BoxxyAuras.DEBUG then
+                print("PixelUtil.SetSize failed, using fallback: " .. tostring(err))
+            end
+            FallbackSetSize(frame, width, height)
+        end
+    end
+    
+    function PixelUtilCompat.SetWidth(frame, width)
+        local success, err = pcall(PixelUtil.SetWidth, frame, width)
+        if not success then
+            if BoxxyAuras.DEBUG then
+                print("PixelUtil.SetWidth failed, using fallback: " .. tostring(err))
+            end
+            FallbackSetWidth(frame, width)
+        end
+    end
+    
+    function PixelUtilCompat.SetHeight(frame, height)
+        local success, err = pcall(PixelUtil.SetHeight, frame, height)
+        if not success then
+            if BoxxyAuras.DEBUG then
+                print("PixelUtil.SetHeight failed, using fallback: " .. tostring(err))
+            end
+            FallbackSetHeight(frame, height)
+        end
+    end
+    
+    print("PixelUtilCompat: Using native PixelUtil with error handling")
+else
+    -- Fallback implementations using standard WoW API
+    PixelUtilCompat.SetPoint = FallbackSetPoint
+    PixelUtilCompat.SetSize = FallbackSetSize
+    PixelUtilCompat.SetWidth = FallbackSetWidth
+    PixelUtilCompat.SetHeight = FallbackSetHeight
+    print("PixelUtilCompat: Using fallback implementations")
+end
+
+-- SetAllPoints is not part of PixelUtil - it's a standard frame method
+function PixelUtilCompat.SetAllPoints(frame, relativeTo)
+    frame:SetAllPoints(relativeTo)
+end
+
 -- Constants for consistent spacing and sizing
 local ELEMENT_SPACING = 0 -- Standard spacing between elements
 local HEADER_SPACING = 0 -- Spacing after section headers
@@ -33,8 +111,8 @@ function Container:new(parent, title)
     
     -- Set initial size
     local width = parent:GetWidth() - (GROUP_PADDING * 2)
-    container.frame:SetWidth(width)
-    container.frame:SetPoint("TOPLEFT", parent, "TOPLEFT", GROUP_PADDING, 0)
+    PixelUtilCompat.SetWidth(container.frame, width)
+    PixelUtilCompat.SetPoint(container.frame, "TOPLEFT", parent, "TOPLEFT", GROUP_PADDING, 0)
     
     -- Apply styling
     if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG then
@@ -56,14 +134,14 @@ function Container:AddElement(element, height)
     table.insert(self.elements, element)
     
     -- Position the element
-    element:SetPoint("TOPLEFT", self.frame, "TOPLEFT", GROUP_PADDING, self.currentY)
+    PixelUtilCompat.SetPoint(element, "TOPLEFT", self.frame, "TOPLEFT", GROUP_PADDING, self.currentY)
     
     -- Update current Y position for next element
     self.currentY = self.currentY - height - ELEMENT_SPACING
     
     -- Update container height
     local totalHeight = math.abs(self.currentY) + GROUP_PADDING
-    self.frame:SetHeight(totalHeight)
+    PixelUtilCompat.SetHeight(self.frame, totalHeight)
     
     return element
 end
@@ -85,10 +163,10 @@ function Container:AddSlider(labelText, minVal, maxVal, step, onValueChanged, in
     slider:SetMinMaxValues(minVal, maxVal)
     slider:SetValueStep(step)
     slider:SetObeyStepOnDrag(true)
-    slider:SetWidth(self.frame:GetWidth() - (GROUP_PADDING * 2) - (SLIDER_HORIZONTAL_PADDING * 2))
+    PixelUtilCompat.SetWidth(slider, self.frame:GetWidth() - (GROUP_PADDING * 2) - (SLIDER_HORIZONTAL_PADDING * 2))
     
     -- Position slider below its label with horizontal padding
-    slider:SetPoint("TOPLEFT", label, "BOTTOMLEFT", SLIDER_HORIZONTAL_PADDING, -8)
+    PixelUtilCompat.SetPoint(slider, "TOPLEFT", label, "BOTTOMLEFT", SLIDER_HORIZONTAL_PADDING, -8)
     
     -- Set up value display and callbacks
     local delayTimer = nil
@@ -104,7 +182,7 @@ function Container:AddSlider(labelText, minVal, maxVal, step, onValueChanged, in
             local range = max - min
             if range > 0 then
                 local thumbPos = (value - min) / range
-                sld.VirtualThumb:SetPoint("CENTER", sld, "LEFT", thumbPos * sld:GetWidth(), 0)
+                PixelUtilCompat.SetPoint(sld.VirtualThumb, "CENTER", sld, "LEFT", thumbPos * sld:GetWidth(), 0)
             end
         end
     end
@@ -136,7 +214,7 @@ function Container:AddSlider(labelText, minVal, maxVal, step, onValueChanged, in
     -- Update container position (slider takes up the space)
     self.currentY = self.currentY - SLIDER_HEIGHT - ELEMENT_SPACING
     local totalHeight = math.abs(self.currentY) + GROUP_PADDING
-    self.frame:SetHeight(totalHeight)
+    PixelUtilCompat.SetHeight(self.frame, totalHeight)
     
     slider.label = label
     return slider
@@ -202,7 +280,7 @@ function Container:AddCheckboxRow(options, onValueChanged)
     local currentX = GROUP_PADDING
     
     for i, checkbox in ipairs(checkboxes) do
-        checkbox:SetPoint("TOPLEFT", self.frame, "TOPLEFT", currentX, self.currentY)
+        PixelUtilCompat.SetPoint(checkbox, "TOPLEFT", self.frame, "TOPLEFT", currentX, self.currentY)
         
         -- Update position for next checkbox (current position + this checkbox's width + fixed spacing)
         currentX = currentX + checkboxWidths[i] + fixedSpacing
@@ -211,7 +289,7 @@ function Container:AddCheckboxRow(options, onValueChanged)
     -- Update container position
     self.currentY = self.currentY - CHECKBOX_ROW_HEIGHT - ELEMENT_SPACING
     local totalHeight = math.abs(self.currentY) + GROUP_PADDING
-    self.frame:SetHeight(totalHeight)
+    PixelUtilCompat.SetHeight(self.frame, totalHeight)
     
     return checkboxes
 end
@@ -219,8 +297,7 @@ end
 function Container:AddButton(text, width, onClick)
     local button = CreateFrame("Button", nil, self.frame, "BAURASButtonTemplate")
     button:SetText(text)
-    button:SetWidth(width or (self.frame:GetWidth() - (GROUP_PADDING * 2)))
-    button:SetHeight(25)
+    PixelUtilCompat.SetSize(button, width or (self.frame:GetWidth() - (GROUP_PADDING * 2)), 25)
     
     if onClick then
         button:SetScript("OnClick", onClick)
@@ -233,15 +310,12 @@ function Container:AddEditBox(placeholder, maxLetters, onEnterPressed, onEscapeP
     local editBox = CreateFrame("EditBox", nil, self.frame, "InputBoxTemplate")
     
     -- Use custom width and positioning if provided, otherwise use full width
-    if customWidth and customXOffset then
-        editBox:SetWidth(customWidth)
-        editBox:SetPoint("TOPLEFT", self.frame, "TOPLEFT", GROUP_PADDING + customXOffset, self.currentY)
-    else
-        editBox:SetWidth(self.frame:GetWidth() - (GROUP_PADDING * 2))
-        editBox:SetPoint("TOPLEFT", self.frame, "TOPLEFT", GROUP_PADDING, self.currentY)
-    end
+    local boxWidth = customWidth or self.frame:GetWidth() - (GROUP_PADDING * 2)
+    local xOffset = customXOffset and (GROUP_PADDING + customXOffset) or GROUP_PADDING
+
+    PixelUtilCompat.SetSize(editBox, boxWidth, 20)
+    PixelUtilCompat.SetPoint(editBox, "TOPLEFT", self.frame, "TOPLEFT", xOffset, self.currentY)
     
-    editBox:SetHeight(20)
     editBox:SetAutoFocus(false)
     editBox:SetMaxLetters(maxLetters or 32)
     editBox:SetTextInsets(5, 5, 0, 0)
@@ -265,7 +339,7 @@ function Container:AddEditBox(placeholder, maxLetters, onEnterPressed, onEscapeP
     -- Update container position manually since we're not using AddElement
     self.currentY = self.currentY - EDITBOX_HEIGHT - ELEMENT_SPACING
     local totalHeight = math.abs(self.currentY) + GROUP_PADDING
-    self.frame:SetHeight(totalHeight)
+    PixelUtilCompat.SetHeight(self.frame, totalHeight)
     
     return editBox
 end
@@ -284,13 +358,12 @@ end
 function Container:AddSpacer(height)
     -- Create an invisible frame that just takes up space
     local spacer = CreateFrame("Frame", nil, self.frame)
-    spacer:SetWidth(1) -- Minimal width since it's invisible
-    spacer:SetHeight(height or 10) -- Default 10px height
+    PixelUtilCompat.SetSize(spacer, 1, height or 10) -- Minimal width since it's invisible
     
     -- Update container position without using AddElement since we don't need positioning
     self.currentY = self.currentY - (height or 10) - ELEMENT_SPACING
     local totalHeight = math.abs(self.currentY) + GROUP_PADDING
-    self.frame:SetHeight(totalHeight)
+    PixelUtilCompat.SetHeight(self.frame, totalHeight)
     
     return spacer
 end
@@ -324,16 +397,15 @@ function Container:AddButtonRow(buttons)
     
     for i, buttonInfo in ipairs(buttons) do
         local button = CreateFrame("Button", buttonInfo.name, self.frame, "BAURASButtonTemplate")
-        button:SetWidth(buttonInfo.width or 60)
-        button:SetHeight(25)
+        PixelUtilCompat.SetSize(button, buttonInfo.width or 60, 25)
         button:SetText(buttonInfo.text)
         
         if i == 1 then
             -- Position first button
-            button:SetPoint("TOPLEFT", self.frame, "TOPLEFT", GROUP_PADDING + dimensions.startX, self.currentY)
+            PixelUtilCompat.SetPoint(button, "TOPLEFT", self.frame, "TOPLEFT", GROUP_PADDING + dimensions.startX, self.currentY)
         else
             -- Position subsequent buttons to the right
-            button:SetPoint("LEFT", buttonFrames[i-1], "RIGHT", dimensions.buttonSpacing, 0)
+            PixelUtilCompat.SetPoint(button, "LEFT", buttonFrames[i-1], "RIGHT", dimensions.buttonSpacing, 0)
         end
         
         if buttonInfo.onClick then
@@ -346,7 +418,7 @@ function Container:AddButtonRow(buttons)
     -- Update container position
     self.currentY = self.currentY - BUTTON_HEIGHT - ELEMENT_SPACING
     local totalHeight = math.abs(self.currentY) + GROUP_PADDING
-    self.frame:SetHeight(totalHeight)
+    PixelUtilCompat.SetHeight(self.frame, totalHeight)
     
     return buttonFrames
 end
@@ -356,7 +428,7 @@ function Container:GetFrame()
 end
 
 function Container:SetPosition(point, relativeTo, relativePoint, xOffset, yOffset)
-    self.frame:SetPoint(point, relativeTo, relativePoint, xOffset or 0, yOffset or 0)
+    PixelUtilCompat.SetPoint(self.frame, point, relativeTo, relativePoint, xOffset or 0, yOffset or 0)
 end
 
 -- Public API Functions

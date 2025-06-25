@@ -4,6 +4,68 @@ local BoxxyAuras = _G.BoxxyAuras -- Create a convenient local alias to the globa
 
 BoxxyAuras.UIUtils = {}
 
+-- PixelUtil Compatibility Layer
+local PixelUtilCompat = {}
+
+-- Standard WoW API fallback functions
+local function FallbackSetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+    frame:SetPoint(point, relativeTo, relativePoint, xOffset or 0, yOffset or 0)
+end
+
+local function FallbackSetSize(frame, width, height)
+    frame:SetSize(width, height)
+end
+
+local function FallbackSetWidth(frame, width)
+    frame:SetWidth(width)
+end
+
+local function FallbackSetHeight(frame, height)
+    frame:SetHeight(height)
+end
+
+if PixelUtil then
+    -- Use native PixelUtil with error handling - fall back to standard methods if they fail
+    function PixelUtilCompat.SetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        local success, err = pcall(PixelUtil.SetPoint, frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        if not success then
+            FallbackSetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        end
+    end
+    
+    function PixelUtilCompat.SetSize(frame, width, height)
+        local success, err = pcall(PixelUtil.SetSize, frame, width, height)
+        if not success then
+            FallbackSetSize(frame, width, height)
+        end
+    end
+    
+    function PixelUtilCompat.SetWidth(frame, width)
+        local success, err = pcall(PixelUtil.SetWidth, frame, width)
+        if not success then
+            FallbackSetWidth(frame, width)
+        end
+    end
+    
+    function PixelUtilCompat.SetHeight(frame, height)
+        local success, err = pcall(PixelUtil.SetHeight, frame, height)
+        if not success then
+            FallbackSetHeight(frame, height)
+        end
+    end
+else
+    -- Fallback implementations using standard WoW API
+    PixelUtilCompat.SetPoint = FallbackSetPoint
+    PixelUtilCompat.SetSize = FallbackSetSize
+    PixelUtilCompat.SetWidth = FallbackSetWidth
+    PixelUtilCompat.SetHeight = FallbackSetHeight
+end
+
+-- SetAllPoints is not part of PixelUtil - it's a standard frame method
+function PixelUtilCompat.SetAllPoints(frame, relativeTo)
+    frame:SetAllPoints(relativeTo)
+end
+
 -- Create a hidden tooltip for scraping. This is crucial for capturing data added by other addons.
 local scraperTooltip = CreateFrame("GameTooltip", "BoxxyAurasScraperTooltip", UIParent, "GameTooltipTemplate")
 scraperTooltip:SetOwner(UIParent, "ANCHOR_NONE")
@@ -98,6 +160,11 @@ BoxxyAuras.FrameTextures = {
         file = "EdgedBorder_Sharp", -- Assuming this exists or we replace it
         cornerSize = 8,
         cornerCoord = 24 / 64
+    },
+    ThickBorder = {
+        file = "EdgedBorder_Sharp_Thick", -- Custom thick border texture
+        cornerSize = 16,
+        cornerCoord = 32 / 64
     },
     BtnBG = { -- <<< ADDED for General Button Background
         file = "SelectionBox", -- Reuse SelectionBox or specific button texture
@@ -206,43 +273,45 @@ function BoxxyAuras.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
             tex:Hide() -- Hide texture if loading failed
         end
 
+        -- Note: Using PixelUtil for positioning only, texture adjustments handled by WoW automatically
+
         if key == 2 or key == 8 then
             if key == 2 then
-                tex:SetPoint("TOPLEFT", group[1], "TOPRIGHT", 0, 0);
-                tex:SetPoint("BOTTOMRIGHT", group[3], "BOTTOMLEFT", 0, 0);
+                PixelUtilCompat.SetPoint(tex, "TOPLEFT", group[1], "TOPRIGHT", 0, 0);
+                PixelUtilCompat.SetPoint(tex, "BOTTOMRIGHT", group[3], "BOTTOMLEFT", 0, 0);
                 tex:SetTexCoord(coord, 1 - coord, 0, coord);
             else
-                tex:SetPoint("TOPLEFT", group[7], "TOPRIGHT", 0, 0);
-                tex:SetPoint("BOTTOMRIGHT", group[9], "BOTTOMLEFT", 0, 0);
+                PixelUtilCompat.SetPoint(tex, "TOPLEFT", group[7], "TOPRIGHT", 0, 0);
+                PixelUtilCompat.SetPoint(tex, "BOTTOMRIGHT", group[9], "BOTTOMLEFT", 0, 0);
                 tex:SetTexCoord(coord, 1 - coord, 1 - coord, 1);
             end
         elseif key == 4 or key == 6 then
             if key == 4 then
-                tex:SetPoint("TOPLEFT", group[1], "BOTTOMLEFT", 0, 0);
-                tex:SetPoint("BOTTOMRIGHT", group[7], "TOPRIGHT", 0, 0);
+                PixelUtilCompat.SetPoint(tex, "TOPLEFT", group[1], "BOTTOMLEFT", 0, 0);
+                PixelUtilCompat.SetPoint(tex, "BOTTOMRIGHT", group[7], "TOPRIGHT", 0, 0);
                 tex:SetTexCoord(0, coord, coord, 1 - coord);
             else
-                tex:SetPoint("TOPLEFT", group[3], "BOTTOMLEFT", 0, 0);
-                tex:SetPoint("BOTTOMRIGHT", group[9], "TOPRIGHT", 0, 0);
+                PixelUtilCompat.SetPoint(tex, "TOPLEFT", group[3], "BOTTOMLEFT", 0, 0);
+                PixelUtilCompat.SetPoint(tex, "BOTTOMRIGHT", group[9], "TOPRIGHT", 0, 0);
                 tex:SetTexCoord(1 - coord, 1, coord, 1 - coord);
             end
         elseif key == 5 then
-            tex:SetPoint("TOPLEFT", group[1], "BOTTOMRIGHT", 0, 0);
-            tex:SetPoint("BOTTOMRIGHT", group[9], "TOPLEFT", 0, 0);
+            PixelUtilCompat.SetPoint(tex, "TOPLEFT", group[1], "BOTTOMRIGHT", 0, 0);
+            PixelUtilCompat.SetPoint(tex, "BOTTOMRIGHT", group[9], "TOPLEFT", 0, 0);
             tex:SetTexCoord(coord, 1 - coord, coord, 1 - coord);
         else
-            tex:SetSize(cornerSize, cornerSize);
+            PixelUtilCompat.SetSize(tex, cornerSize, cornerSize);
             if key == 1 then
-                tex:SetPoint("TOPLEFT", frame, "TOPLEFT", shrink, -shrink);
+                PixelUtilCompat.SetPoint(tex, "TOPLEFT", frame, "TOPLEFT", shrink, -shrink);
                 tex:SetTexCoord(0, coord, 0, coord);
             elseif key == 3 then
-                tex:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -shrink, -shrink);
+                PixelUtilCompat.SetPoint(tex, "TOPRIGHT", frame, "TOPRIGHT", -shrink, -shrink);
                 tex:SetTexCoord(1 - coord, 1, 0, coord);
             elseif key == 7 then
-                tex:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", shrink, shrink);
+                PixelUtilCompat.SetPoint(tex, "BOTTOMLEFT", frame, "BOTTOMLEFT", shrink, shrink);
                 tex:SetTexCoord(0, coord, 1 - coord, 1);
             elseif key == 9 then
-                tex:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -shrink, shrink);
+                PixelUtilCompat.SetPoint(tex, "BOTTOMRIGHT", frame, "BOTTOMRIGHT", -shrink, shrink);
                 tex:SetTexCoord(1 - coord, 1, 1 - coord, 1);
             end
         end
@@ -296,15 +365,28 @@ function BoxxyAuras_SetupGeneralButton(button)
         BoxxyAuras.UIUtils.DrawSlicedBG(button, "BtnBorder", "border", -2)
         BoxxyAuras.UIUtils.ColorBGSlicedFrame(button, "border", 0.1, 0.1, 0.1, 1) -- Default border color
 
-        -- Define methods directly on the button object
+        -- Define helper to set the visible label text
         function button:SetText(text)
-            if self.Text then -- Check if the FontString child exists
+            if self.Text then
                 self.Text:SetText(text)
             end
         end
 
+        -- Preserve native Enable/Disable methods so we can call them
+        local nativeEnable = button.Enable
+        local nativeDisable = button.Disable
+
         function button:SetEnabled(enabled)
-            self.Enabled = enabled -- Use the .Enabled property set in XML OnLoad
+            -- Call the native Blizzard API to properly set the button state (including keybind highlight, etc.)
+            if enabled then
+                if nativeEnable then nativeEnable(self) end
+            else
+                if nativeDisable then nativeDisable(self) end
+            end
+
+            -- Track logical state for our custom scripts
+            self.Enabled = enabled
+
             -- Update appearance based on enabled state
             if enabled then
                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "backdrop", 0.3, 0.3, 0.3, 1)

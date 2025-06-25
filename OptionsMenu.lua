@@ -3,6 +3,68 @@ _G.BoxxyAuras = _G.BoxxyAuras or {} -- Explicitly create/assign the GLOBAL table
 local BoxxyAuras = _G.BoxxyAuras -- Create a convenient local alias to the global table
 BoxxyAuras.Options = {} -- Table to hold options elements
 
+-- PixelUtil Compatibility Layer
+local PixelUtilCompat = {}
+
+-- Standard WoW API fallback functions
+local function FallbackSetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+    frame:SetPoint(point, relativeTo, relativePoint, xOffset or 0, yOffset or 0)
+end
+
+local function FallbackSetSize(frame, width, height)
+    frame:SetSize(width, height)
+end
+
+local function FallbackSetWidth(frame, width)
+    frame:SetWidth(width)
+end
+
+local function FallbackSetHeight(frame, height)
+    frame:SetHeight(height)
+end
+
+if PixelUtil then
+    -- Use native PixelUtil with error handling - fall back to standard methods if they fail
+    function PixelUtilCompat.SetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        local success, err = pcall(PixelUtil.SetPoint, frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        if not success then
+            FallbackSetPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        end
+    end
+    
+    function PixelUtilCompat.SetSize(frame, width, height)
+        local success, err = pcall(PixelUtil.SetSize, frame, width, height)
+        if not success then
+            FallbackSetSize(frame, width, height)
+        end
+    end
+    
+    function PixelUtilCompat.SetWidth(frame, width)
+        local success, err = pcall(PixelUtil.SetWidth, frame, width)
+        if not success then
+            FallbackSetWidth(frame, width)
+        end
+    end
+    
+    function PixelUtilCompat.SetHeight(frame, height)
+        local success, err = pcall(PixelUtil.SetHeight, frame, height)
+        if not success then
+            FallbackSetHeight(frame, height)
+        end
+    end
+else
+    -- Fallback implementations using standard WoW API
+    PixelUtilCompat.SetPoint = FallbackSetPoint
+    PixelUtilCompat.SetSize = FallbackSetSize
+    PixelUtilCompat.SetWidth = FallbackSetWidth
+    PixelUtilCompat.SetHeight = FallbackSetHeight
+end
+
+-- SetAllPoints is not part of PixelUtil - it's a standard frame method
+function PixelUtilCompat.SetAllPoints(frame, relativeTo)
+    frame:SetAllPoints(relativeTo)
+end
+
 -- <<< NEW: Local reference to the profile settings helper >>>
 local function GetCurrentProfileSettings()
     -- Ensure the main addon table and function exist
@@ -137,6 +199,66 @@ function BoxxyAuras.Options:ApplyBorderSizeChange(frameType)
     end
 end
 
+function BoxxyAuras.Options:ApplyNormalBorderColorChange()
+    for frameType, icons in pairs(BoxxyAuras.iconArrays or {}) do
+        for _, icon in ipairs(icons) do
+            if icon and icon.UpdateBorderSize then
+                icon:UpdateBorderSize() -- This function re-evaluates and re-applies the border color
+            end
+        end
+    end
+end
+
+-- Helper function to update the normal border color swatch display
+function BoxxyAuras.Options:UpdateNormalBorderColorSwatch()
+    if not self.NormalBorderColorSwatch or not self.NormalBorderColorSwatch.background then
+        return
+    end
+    
+    local settings = BoxxyAuras:GetCurrentProfileSettings()
+    if not settings then
+        return
+    end
+    
+    local color = settings.normalBorderColor or BoxxyAuras:GetDefaultProfileSettings().normalBorderColor
+    self.NormalBorderColorSwatch.background:SetColorTexture(color.r, color.g, color.b, color.a)
+    
+    if BoxxyAuras.DEBUG then
+        print(string.format("Updated normal border color swatch: r=%.2f, g=%.2f, b=%.2f, a=%.2f", 
+            color.r, color.g, color.b, color.a))
+    end
+end
+
+-- Helper function to update the background color swatch display
+function BoxxyAuras.Options:UpdateBackgroundColorSwatch()
+    if not self.BackgroundColorSwatch or not self.BackgroundColorSwatch.background then
+        return
+    end
+    
+    local settings = BoxxyAuras:GetCurrentProfileSettings()
+    if not settings then
+        return
+    end
+    
+    local color = settings.normalBackgroundColor or BoxxyAuras:GetDefaultProfileSettings().normalBackgroundColor
+    self.BackgroundColorSwatch.background:SetColorTexture(color.r, color.g, color.b, color.a)
+    
+    if BoxxyAuras.DEBUG then
+        print(string.format("Updated background color swatch: r=%.2f, g=%.2f, b=%.2f, a=%.2f", 
+            color.r, color.g, color.b, color.a))
+    end
+end
+
+function BoxxyAuras.Options:ApplyBackgroundColorChange()
+    for frameType, icons in pairs(BoxxyAuras.iconArrays or {}) do
+        for _, icon in ipairs(icons) do
+            if icon and icon.UpdateBorderSize then
+                icon:UpdateBorderSize() -- This function re-evaluates and re-applies the background color
+            end
+        end
+    end
+end
+
 -- Apply global scale changes
 function BoxxyAuras.Options:ApplyScale(scale)
     -- Validate scale value - must be greater than 0
@@ -176,8 +298,8 @@ end
 -- Create Main Options Frame
 --------------------------------------------------------------]]
 local optionsFrame = CreateFrame("Frame", "BoxxyAurasOptionsFrame", UIParent, "BackdropTemplate")
-optionsFrame:SetSize(300, 500) -- Adjusted size
-optionsFrame:SetPoint("CENTER", UIParent, "CENTER")
+PixelUtilCompat.SetSize(optionsFrame, 300, 500) -- Adjusted size
+PixelUtilCompat.SetPoint(optionsFrame, "CENTER", UIParent, "CENTER", 0, 0)
 optionsFrame:SetFrameStrata("MEDIUM")
 optionsFrame:SetMovable(true)
 optionsFrame:EnableMouse(true)
@@ -202,7 +324,7 @@ BoxxyAuras.Options.Frame = optionsFrame
 
 -- >> ADDED: Create and Style Separate Background and Border Frames <<
 local bg = CreateFrame("Frame", nil, optionsFrame);
-bg:SetAllPoints();
+PixelUtilCompat.SetAllPoints(bg, optionsFrame);
 bg:SetFrameLevel(optionsFrame:GetFrameLevel());
 if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG then
     BoxxyAuras.UIUtils.DrawSlicedBG(bg, "OptionsWindowBG", "backdrop", 0)
@@ -212,7 +334,7 @@ else
 end
 
 local border = CreateFrame("Frame", nil, optionsFrame);
-border:SetAllPoints();
+PixelUtilCompat.SetAllPoints(border, optionsFrame);
 border:SetFrameLevel(optionsFrame:GetFrameLevel() + 1);
 if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG then
     BoxxyAuras.UIUtils.DrawSlicedBG(border, "EdgedBorder", "border", 0)
@@ -223,12 +345,12 @@ end
 
 -- Title
 local title = optionsFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Title")
-title:SetPoint("TOPLEFT", optionsFrame, "TOPLEFT", 20, -23)
+PixelUtilCompat.SetPoint(title, "TOPLEFT", optionsFrame, "TOPLEFT", 20, -23)
 title:SetText("BoxxyAuras Options")
 
 -- <<< ADDED: Version Text >>>
 local versionText = optionsFrame:CreateFontString(nil, "ARTWORK", "BAURASFont_Vers") -- Use a smaller font
-versionText:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -2) -- Position below title
+PixelUtilCompat.SetPoint(versionText, "TOPLEFT", title, "BOTTOMLEFT", 0, -2) -- Position below title
 local versionString = "v" .. (BoxxyAuras and BoxxyAuras.Version or "?.?.?") -- Get version safely
 versionText:SetText(versionString)
 versionText:SetTextColor(0.7, 0.7, 0.7, 0.9) -- Slightly greyed out
@@ -237,8 +359,8 @@ BoxxyAuras.Options.VersionText = versionText -- Store reference if needed
 
 -- Close Button
 local closeBtn = CreateFrame("Button", "BoxxyAurasOptionsCloseButton", optionsFrame, "BAURASCloseBtn")
-closeBtn:SetPoint("TOPRIGHT", optionsFrame, "TOPRIGHT", -12, -12)
-closeBtn:SetSize(12, 12)
+PixelUtilCompat.SetPoint(closeBtn, "TOPRIGHT", optionsFrame, "TOPRIGHT", -12, -12)
+PixelUtilCompat.SetSize(closeBtn, 12, 12)
 closeBtn:SetScript("OnClick", function(self)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     
@@ -280,8 +402,8 @@ end
 --------------------------------------------------------------]]
 local scrollFrame = CreateFrame("ScrollFrame", "BoxxyAurasOptionsScrollFrame", optionsFrame,
     "UIPanelScrollFrameTemplate")
-scrollFrame:SetPoint("TOPLEFT", 10, -50)
-scrollFrame:SetPoint("BOTTOMRIGHT", -30, 10)
+PixelUtilCompat.SetPoint(scrollFrame, "TOPLEFT", optionsFrame, "TOPLEFT", 10, -50)
+PixelUtilCompat.SetPoint(scrollFrame, "BOTTOMRIGHT", optionsFrame, "BOTTOMRIGHT", -30, 10)
 
 -- <<< ADDED: Adjust Mouse Wheel Scroll Speed >>>
 local SCROLL_STEP_REDUCTION_FACTOR = 0.9 -- Adjust this value (e.g., 0.5 for half speed)
@@ -299,7 +421,7 @@ end);
 -- <<< END Scroll Speed Adjustment >>>
 
 local contentFrame = CreateFrame("Frame", "BoxxyAurasOptionsContentFrame", scrollFrame)
-contentFrame:SetSize(scrollFrame:GetWidth(), 700) -- <<< Increased height significantly >>>
+PixelUtilCompat.SetSize(contentFrame, scrollFrame:GetWidth(), 700) -- <<< Increased height significantly >>>
 scrollFrame:SetScrollChild(contentFrame)
 
 -- Layout Variables (for container positioning)
@@ -312,7 +434,7 @@ local profileContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Cur
 
 -- Profile Selection Dropdown (manual creation for complex styling)
 local profileDropdown = CreateFrame("Frame", "BoxxyAurasProfileDropdown", profileContainer:GetFrame(), "UIDropDownMenuTemplate")
-profileDropdown:SetWidth(profileContainer:GetFrame():GetWidth() - 24) -- Full width minus padding
+PixelUtilCompat.SetWidth(profileDropdown, profileContainer:GetFrame():GetWidth() - 24) -- Full width minus padding
 profileContainer:AddElement(profileDropdown, 30)
 
 -- >> ADDED: Hide default button textures to allow custom styling <<
@@ -335,7 +457,7 @@ local dropdownText = _G[profileDropdown:GetName() .. "Text"]
 if dropdownText then
     dropdownText:SetJustifyH("CENTER")
     dropdownText:ClearAllPoints()
-    dropdownText:SetPoint("CENTER", profileDropdown, "CENTER", 0, 0)
+    PixelUtilCompat.SetPoint(dropdownText, "CENTER", profileDropdown, "CENTER", 0, 0)
 end
 
 -- Styling for Dropdown
@@ -348,8 +470,8 @@ end
 
 -- Dropdown Arrow Texture
 local arrow = profileDropdown:CreateTexture(nil, "OVERLAY")
-arrow:SetSize(16, 16)
-arrow:SetPoint("RIGHT", profileDropdown, "RIGHT", -8, 0)
+PixelUtilCompat.SetSize(arrow, 16, 16)
+PixelUtilCompat.SetPoint(arrow, "RIGHT", profileDropdown, "RIGHT", -8, 0)
 arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown")
 arrow:SetTexCoord(0, 1, 0, 1)
 
@@ -437,7 +559,8 @@ local profileButtons = profileContainer:AddButtonRow({
             end
             local selectedProfile = BoxxyAurasDB and BoxxyAurasDB.activeProfile
             if selectedProfile then
-                StaticPopup_Show("BOXXYAURAS_DELETE_PROFILE_CONFIRM", selectedProfile)
+                -- Pass profile name both for the text substitution (arg1) *and* as the data param so the OnAccept handler receives it
+                StaticPopup_Show("BOXXYAURAS_DELETE_PROFILE_CONFIRM", selectedProfile, nil, selectedProfile)
             end
             PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
         end
@@ -516,6 +639,242 @@ local demoModeCheck = generalContainer:AddCheckbox("Demo Mode (Show Test Auras)"
 end)
 BoxxyAuras.Options.DemoModeCheck = demoModeCheck
 
+-- Normal Border Color Picker
+generalContainer:AddSpacer()
+local colorPickerContainer = CreateFrame("Frame", nil, generalContainer:GetFrame())
+PixelUtilCompat.SetSize(colorPickerContainer, generalContainer:GetFrame():GetWidth() - 24, 24)
+
+local colorLabel = colorPickerContainer:CreateFontString(nil, "ARTWORK", "BAURASFont_Checkbox")
+PixelUtilCompat.SetPoint(colorLabel, "LEFT", colorPickerContainer, "LEFT", 0, 0)
+colorLabel:SetText("Normal Border Color:")
+
+local colorSwatch = CreateFrame("Button", "BoxxyAurasNormalBorderColorSwatch", colorPickerContainer)
+-- NEW: give the swatch a fixed size and create its background texture so it's always available
+PixelUtilCompat.SetSize(colorSwatch, 20, 20)                       -- reasonable clickable size
+PixelUtilCompat.SetPoint(colorSwatch, "LEFT", colorLabel, "RIGHT", 8, 0) -- place it next to the label
+
+-- Create the color background first
+local swatchBg = colorSwatch:CreateTexture(nil, "BACKGROUND")
+PixelUtilCompat.SetAllPoints(swatchBg, colorSwatch)
+-- Initialize with default border color instead of white
+-- Initialize with default border color from centralized defaults
+local defaultColor = BoxxyAuras:GetDefaultProfileSettings().normalBorderColor
+swatchBg:SetColorTexture(defaultColor.r, defaultColor.g, defaultColor.b, defaultColor.a)
+colorSwatch.background = swatchBg                 -- store for later access by loader / color picker
+
+-- Create a simple clean border outline
+local borderColor = {0.6, 0.6, 0.6, 1}
+local borderThickness = 1
+
+-- Top border
+local borderTop = colorSwatch:CreateTexture(nil, "BORDER")
+borderTop:SetColorTexture(unpack(borderColor))
+PixelUtilCompat.SetPoint(borderTop, "TOPLEFT", colorSwatch, "TOPLEFT", 0, 0)
+PixelUtilCompat.SetPoint(borderTop, "TOPRIGHT", colorSwatch, "TOPRIGHT", 0, 0)
+PixelUtilCompat.SetHeight(borderTop, borderThickness)
+
+-- Bottom border
+local borderBottom = colorSwatch:CreateTexture(nil, "BORDER")
+borderBottom:SetColorTexture(unpack(borderColor))
+PixelUtilCompat.SetPoint(borderBottom, "BOTTOMLEFT", colorSwatch, "BOTTOMLEFT", 0, 0)
+PixelUtilCompat.SetPoint(borderBottom, "BOTTOMRIGHT", colorSwatch, "BOTTOMRIGHT", 0, 0)
+PixelUtilCompat.SetHeight(borderBottom, borderThickness)
+
+-- Left border
+local borderLeft = colorSwatch:CreateTexture(nil, "BORDER")
+borderLeft:SetColorTexture(unpack(borderColor))
+PixelUtilCompat.SetPoint(borderLeft, "TOPLEFT", colorSwatch, "TOPLEFT", 0, 0)
+PixelUtilCompat.SetPoint(borderLeft, "BOTTOMLEFT", colorSwatch, "BOTTOMLEFT", 0, 0)
+PixelUtilCompat.SetWidth(borderLeft, borderThickness)
+
+-- Right border
+local borderRight = colorSwatch:CreateTexture(nil, "BORDER")
+borderRight:SetColorTexture(unpack(borderColor))
+PixelUtilCompat.SetPoint(borderRight, "TOPRIGHT", colorSwatch, "TOPRIGHT", 0, 0)
+PixelUtilCompat.SetPoint(borderRight, "BOTTOMRIGHT", colorSwatch, "BOTTOMRIGHT", 0, 0)
+PixelUtilCompat.SetWidth(borderRight, borderThickness)
+
+generalContainer:AddElement(colorPickerContainer, 32) -- height 24 + 8px padding
+
+colorSwatch:SetScript("OnMouseUp", function(self)
+    -- Show the color picker
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+    local currentColor = (currentSettings and currentSettings.normalBorderColor) or BoxxyAuras:GetDefaultProfileSettings().normalBorderColor
+
+    local options = {
+        swatchFunc = function()
+            local newR, newG, newB = ColorPickerFrame:GetColorRGB()
+            local newA = ColorPickerFrame:GetColorAlpha()
+            if not currentSettings.normalBorderColor then
+                currentSettings.normalBorderColor = {}
+            end
+            currentSettings.normalBorderColor.r = newR
+            currentSettings.normalBorderColor.g = newG
+            currentSettings.normalBorderColor.b = newB
+            currentSettings.normalBorderColor.a = newA
+            -- Update the swatch immediately
+            if BoxxyAuras.Options and BoxxyAuras.Options.UpdateNormalBorderColorSwatch then
+                BoxxyAuras.Options:UpdateNormalBorderColorSwatch()
+            end
+            -- Apply to all aura borders
+            if BoxxyAuras.Options and BoxxyAuras.Options.ApplyNormalBorderColorChange then
+                BoxxyAuras.Options:ApplyNormalBorderColorChange()
+            end
+        end,
+        cancelFunc = function(previousValues)
+            if not currentSettings.normalBorderColor then
+                currentSettings.normalBorderColor = {}
+            end
+            currentSettings.normalBorderColor.r = previousValues.r
+            currentSettings.normalBorderColor.g = previousValues.g
+            currentSettings.normalBorderColor.b = previousValues.b
+            currentSettings.normalBorderColor.a = previousValues.a
+            -- Update the swatch to show canceled color
+            if BoxxyAuras.Options and BoxxyAuras.Options.UpdateNormalBorderColorSwatch then
+                BoxxyAuras.Options:UpdateNormalBorderColorSwatch()
+            end
+            -- Apply to all aura borders
+            if BoxxyAuras.Options and BoxxyAuras.Options.ApplyNormalBorderColorChange then
+                BoxxyAuras.Options:ApplyNormalBorderColorChange()
+            end
+        end,
+        hasOpacity = true,
+        opacity = currentColor.a,
+        r = currentColor.r,
+        g = currentColor.g,
+        b = currentColor.b,
+        -- Pass the swatch itself so the color picker can update it live
+        swatchBg = self.background
+    }
+    ColorPickerFrame:SetupColorPickerAndShow(options)
+end)
+
+BoxxyAuras.Options.NormalBorderColorSwatch = colorSwatch
+
+-- Initialize the swatch with the current color immediately
+C_Timer.After(0.1, function()
+    if BoxxyAuras.Options and BoxxyAuras.Options.UpdateNormalBorderColorSwatch then
+        BoxxyAuras.Options:UpdateNormalBorderColorSwatch()
+    end
+end)
+
+-- Background Color Picker
+generalContainer:AddSpacer()
+local bgColorPickerContainer = CreateFrame("Frame", nil, generalContainer:GetFrame())
+PixelUtilCompat.SetSize(bgColorPickerContainer, generalContainer:GetFrame():GetWidth() - 24, 24)
+
+local bgColorLabel = bgColorPickerContainer:CreateFontString(nil, "ARTWORK", "BAURASFont_Checkbox")
+PixelUtilCompat.SetPoint(bgColorLabel, "LEFT", bgColorPickerContainer, "LEFT", 0, 0)
+bgColorLabel:SetText("Background Color:")
+
+local bgColorSwatch = CreateFrame("Button", "BoxxyAurasBackgroundColorSwatch", bgColorPickerContainer)
+PixelUtilCompat.SetSize(bgColorSwatch, 20, 20)
+PixelUtilCompat.SetPoint(bgColorSwatch, "LEFT", bgColorLabel, "RIGHT", 8, 0)
+
+-- Create the color background
+local bgSwatchBg = bgColorSwatch:CreateTexture(nil, "BACKGROUND")
+PixelUtilCompat.SetAllPoints(bgSwatchBg, bgColorSwatch)
+-- Initialize with default background color from centralized defaults
+local defaultBgColor = BoxxyAuras:GetDefaultProfileSettings().normalBackgroundColor
+bgSwatchBg:SetColorTexture(defaultBgColor.r, defaultBgColor.g, defaultBgColor.b, defaultBgColor.a)
+bgColorSwatch.background = bgSwatchBg
+
+-- Create border for background color swatch (same as border color swatch)
+local bgBorderColor = {0.6, 0.6, 0.6, 1}
+local bgBorderThickness = 1
+
+-- Top border
+local bgBorderTop = bgColorSwatch:CreateTexture(nil, "BORDER")
+bgBorderTop:SetColorTexture(unpack(bgBorderColor))
+PixelUtilCompat.SetPoint(bgBorderTop, "TOPLEFT", bgColorSwatch, "TOPLEFT", 0, 0)
+PixelUtilCompat.SetPoint(bgBorderTop, "TOPRIGHT", bgColorSwatch, "TOPRIGHT", 0, 0)
+PixelUtilCompat.SetHeight(bgBorderTop, bgBorderThickness)
+
+-- Bottom border
+local bgBorderBottom = bgColorSwatch:CreateTexture(nil, "BORDER")
+bgBorderBottom:SetColorTexture(unpack(bgBorderColor))
+PixelUtilCompat.SetPoint(bgBorderBottom, "BOTTOMLEFT", bgColorSwatch, "BOTTOMLEFT", 0, 0)
+PixelUtilCompat.SetPoint(bgBorderBottom, "BOTTOMRIGHT", bgColorSwatch, "BOTTOMRIGHT", 0, 0)
+PixelUtilCompat.SetHeight(bgBorderBottom, bgBorderThickness)
+
+-- Left border
+local bgBorderLeft = bgColorSwatch:CreateTexture(nil, "BORDER")
+bgBorderLeft:SetColorTexture(unpack(bgBorderColor))
+PixelUtilCompat.SetPoint(bgBorderLeft, "TOPLEFT", bgColorSwatch, "TOPLEFT", 0, 0)
+PixelUtilCompat.SetPoint(bgBorderLeft, "BOTTOMLEFT", bgColorSwatch, "BOTTOMLEFT", 0, 0)
+PixelUtilCompat.SetWidth(bgBorderLeft, bgBorderThickness)
+
+-- Right border
+local bgBorderRight = bgColorSwatch:CreateTexture(nil, "BORDER")
+bgBorderRight:SetColorTexture(unpack(bgBorderColor))
+PixelUtilCompat.SetPoint(bgBorderRight, "TOPRIGHT", bgColorSwatch, "TOPRIGHT", 0, 0)
+PixelUtilCompat.SetPoint(bgBorderRight, "BOTTOMRIGHT", bgColorSwatch, "BOTTOMRIGHT", 0, 0)
+PixelUtilCompat.SetWidth(bgBorderRight, bgBorderThickness)
+
+generalContainer:AddElement(bgColorPickerContainer, 32)
+
+bgColorSwatch:SetScript("OnMouseUp", function(self)
+    -- Show the color picker for background color
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+    local currentColor = (currentSettings and currentSettings.normalBackgroundColor) or BoxxyAuras:GetDefaultProfileSettings().normalBackgroundColor
+
+    local options = {
+        swatchFunc = function()
+            local newR, newG, newB = ColorPickerFrame:GetColorRGB()
+            local newA = ColorPickerFrame:GetColorAlpha()
+            if not currentSettings.normalBackgroundColor then
+                currentSettings.normalBackgroundColor = {}
+            end
+            currentSettings.normalBackgroundColor.r = newR
+            currentSettings.normalBackgroundColor.g = newG
+            currentSettings.normalBackgroundColor.b = newB
+            currentSettings.normalBackgroundColor.a = newA
+            -- Update the swatch immediately
+            if BoxxyAuras.Options and BoxxyAuras.Options.UpdateBackgroundColorSwatch then
+                BoxxyAuras.Options:UpdateBackgroundColorSwatch()
+            end
+            -- Apply to all aura backgrounds
+            if BoxxyAuras.Options and BoxxyAuras.Options.ApplyBackgroundColorChange then
+                BoxxyAuras.Options:ApplyBackgroundColorChange()
+            end
+        end,
+        cancelFunc = function(previousValues)
+            if not currentSettings.normalBackgroundColor then
+                currentSettings.normalBackgroundColor = {}
+            end
+            currentSettings.normalBackgroundColor.r = previousValues.r
+            currentSettings.normalBackgroundColor.g = previousValues.g
+            currentSettings.normalBackgroundColor.b = previousValues.b
+            currentSettings.normalBackgroundColor.a = previousValues.a
+            -- Update the swatch to show canceled color
+            if BoxxyAuras.Options and BoxxyAuras.Options.UpdateBackgroundColorSwatch then
+                BoxxyAuras.Options:UpdateBackgroundColorSwatch()
+            end
+            -- Apply to all aura backgrounds
+            if BoxxyAuras.Options and BoxxyAuras.Options.ApplyBackgroundColorChange then
+                BoxxyAuras.Options:ApplyBackgroundColorChange()
+            end
+        end,
+        hasOpacity = true,
+        opacity = currentColor.a,
+        r = currentColor.r,
+        g = currentColor.g,
+        b = currentColor.b,
+        -- Pass the swatch itself so the color picker can update it live
+        swatchBg = self.background
+    }
+    ColorPickerFrame:SetupColorPickerAndShow(options)
+end)
+
+BoxxyAuras.Options.BackgroundColorSwatch = bgColorSwatch
+
+-- Initialize the background color swatch with the current color immediately
+C_Timer.After(0.1, function()
+    if BoxxyAuras.Options and BoxxyAuras.Options.UpdateBackgroundColorSwatch then
+        BoxxyAuras.Options:UpdateBackgroundColorSwatch()
+    end
+end)
+
 -- Update reference for next container
 lastContainer = generalContainer
 
@@ -563,7 +922,7 @@ end)
 BoxxyAuras.Options.BuffTextSizeSlider = buffTextSizeSlider
 
 -- Buff Border Size Slider
-local buffBorderSizeSlider = buffContainer:AddSlider("Buff Border Size", 0, 5, 1, function(value)
+local buffBorderSizeSlider = buffContainer:AddSlider("Buff Border Size", 0, 3, 1, function(value)
     local settings = GetCurrentProfileSettings()
     if not settings.buffFrameSettings then settings.buffFrameSettings = {} end
     settings.buffFrameSettings.borderSize = value
@@ -614,7 +973,7 @@ end)
 BoxxyAuras.Options.DebuffTextSizeSlider = debuffTextSizeSlider
 
 -- Debuff Border Size Slider
-local debuffBorderSizeSlider = debuffContainer:AddSlider("Debuff Border Size", 0, 5, 1, function(value)
+local debuffBorderSizeSlider = debuffContainer:AddSlider("Debuff Border Size", 0, 3, 1, function(value)
     local settings = GetCurrentProfileSettings()
     if not settings.debuffFrameSettings then settings.debuffFrameSettings = {} end
     settings.debuffFrameSettings.borderSize = value
@@ -665,7 +1024,7 @@ end)
 BoxxyAuras.Options.CustomTextSizeSlider = customTextSizeSlider
 
 -- Custom Border Size Slider
-local customBorderSizeSlider = customContainer:AddSlider("Custom Border Size", 0, 5, 1, function(value)
+local customBorderSizeSlider = customContainer:AddSlider("Custom Border Size", 0, 3, 1, function(value)
     local settings = GetCurrentProfileSettings()
     if not settings.customFrameSettings then settings.customFrameSettings = {} end
     settings.customFrameSettings.borderSize = value
@@ -684,8 +1043,6 @@ BoxxyAuras.Options.OpenCustomOptionsButton = customOptionsButton
 
 -- Update reference for next container
 lastContainer = customContainer
-
-
 
 --[[------------------------------------------------------------
 -- Global Settings Container
@@ -739,6 +1096,12 @@ function BoxxyAuras.Options:Load()
     -- Note: Demo mode is transient, not saved, so it's not loaded here.
     -- It should be off by default when opening the panel.
     self.DemoModeCheck:SetChecked(self.demoModeActive or false)
+
+    -- Load Normal Border Color
+    self:UpdateNormalBorderColorSwatch()
+    
+    -- Load Background Color
+    self:UpdateBackgroundColorSwatch()
 
     -- Load Buff Frame Settings
     if settings.buffFrameSettings then
@@ -883,8 +1246,22 @@ function BoxxyAuras.Options:InitializeProfileDropdown()
             info.value = profileName
             info.checked = (profileName == currentProfile)
             info.func = function()
+                -- When a new profile is selected from the dropdown, switch to it first
                 BoxxyAuras:SwitchToProfile(profileName)
-                BoxxyAuras.Options:UpdateProfileUI()
+
+                -- Refresh the entire options UI so every control reflects the new active profile / remaining profiles
+                if BoxxyAuras.Options and BoxxyAuras.Options.Load then
+                    BoxxyAuras.Options:Load()
+                elseif BoxxyAuras.Options then
+                    -- Fallback partial refresh
+                    if BoxxyAuras.Options.UpdateProfileUI then
+                        BoxxyAuras.Options:UpdateProfileUI()
+                    end
+                    if BoxxyAuras.Options.InitializeProfileDropdown then
+                        BoxxyAuras.Options:InitializeProfileDropdown()
+                    end
+                end
+
                 CloseDropDownMenus()
             end
             UIDropDownMenu_AddButton(info, level)
@@ -917,14 +1294,23 @@ function BoxxyAuras.Options:UpdateProfileUI()
             end
         end
         
-        -- Disable delete if only one profile or if current profile is "Default"
         local canDelete = profileCount > 1 and currentProfile ~= "Default"
-        if canDelete then
-            self.DeleteProfileButton:Enable()
+        -- Use custom SetEnabled helper so visual + logical states update together
+        if self.DeleteProfileButton.SetEnabled then
+            self.DeleteProfileButton:SetEnabled(canDelete)
         else
-            self.DeleteProfileButton:Disable()
+            -- Fallback to native
+            if canDelete then
+                self.DeleteProfileButton:Enable()
+            else
+                self.DeleteProfileButton:Disable()
+            end
         end
     end
+    
+    -- Update the color swatches when profile changes
+    self:UpdateNormalBorderColorSwatch()
+    self:UpdateBackgroundColorSwatch()
 end
 
 -- Create a new profile
@@ -954,8 +1340,43 @@ function BoxxyAuras.Options:CreateProfile(profileName)
     
     -- Switch to the new profile
     BoxxyAuras:SwitchToProfile(profileName)
-    self:UpdateProfileUI()
-    self:InitializeProfileDropdown()
+    
+    -- Force all frames to their default positions from the new profile
+    -- (This overrides any LibWindow saved positions that might interfere)
+    local newProfileSettings = BoxxyAuras:GetCurrentProfileSettings()
+    if newProfileSettings and BoxxyAuras.Frames then
+        local frameTypes = {"Buff", "Debuff", "Custom"}
+        for _, frameType in ipairs(frameTypes) do
+            local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
+            local frame = BoxxyAuras.Frames[frameType]
+            
+            if settingsKey and newProfileSettings[settingsKey] and frame then
+                local frameSettings = newProfileSettings[settingsKey]
+                local anchor = frameSettings.anchor or "CENTER"
+                local x = frameSettings.x or 0
+                local y = frameSettings.y or 0
+                
+                -- Clear all existing points and set the default position
+                frame:ClearAllPoints()
+                PixelUtilCompat.SetPoint(frame, anchor, UIParent, anchor, x, y)
+                
+                -- Save this position with LibWindow so it persists
+                if LibWindow and LibWindow.SavePosition then
+                    print("|cFF00FF00BoxxyAuras:|r Saving position for " .. frameType)
+                    LibWindow.SavePosition(frame)
+                end
+            end
+        end
+    end
+    
+    -- Fully reload the options UI so every widget reflects the new profile
+    if self.Load then
+        self:Load()
+    else
+        -- Fallback
+        self:UpdateProfileUI()
+        self:InitializeProfileDropdown()
+    end
 end
 
 -- Copy current profile to a new profile
@@ -989,8 +1410,14 @@ function BoxxyAuras.Options:CopyProfile(profileName)
     
     -- Switch to the new profile
     BoxxyAuras:SwitchToProfile(profileName)
-    self:UpdateProfileUI()
-    self:InitializeProfileDropdown()
+    -- Fully reload the options UI so every widget reflects the new profile
+    if self.Load then
+        self:Load()
+    else
+        -- Fallback
+        self:UpdateProfileUI()
+        self:InitializeProfileDropdown()
+    end
 end
 
 -- Set demo mode on/off
@@ -1196,8 +1623,9 @@ function BoxxyAuras.Options:SetDemoMode(enable)
         end
     end
 
-    -- Finally, trigger a full aura update to reflect the new state
-    BoxxyAuras.UpdateAuras()
+    -- Force a complete refresh to properly reset all icons when demo mode changes
+    -- This ensures any lingering OnUpdate scripts or state from demo auras are cleaned up
+    BoxxyAuras.UpdateAuras(true)
 end
 
 -- Static Popup for Delete Profile Confirmation
@@ -1206,23 +1634,27 @@ StaticPopupDialogs["BOXXYAURAS_DELETE_PROFILE_CONFIRM"] = {
     button1 = "Delete",
     button2 = "Cancel",
     OnAccept = function(self, profileName)
+        if not profileName then
+            profileName = self.data -- use the data field if arg missing
+        end
+
         if profileName and BoxxyAurasDB and BoxxyAurasDB.profiles then
             if BoxxyAurasDB.profiles[profileName] then
+                -- Delete the profile table entry
                 BoxxyAurasDB.profiles[profileName] = nil
                 print("|cff00FF00BoxxyAuras:|r Deleted profile '" .. profileName .. "'.")
-                
-                -- If we deleted the active profile, switch to Default
+
+                -- If we just deleted the active profile, immediately switch to the Default profile
                 if BoxxyAurasDB.activeProfile == profileName then
                     BoxxyAuras:SwitchToProfile("Default")
                 end
-                
-                -- Update the UI
-                if BoxxyAuras.Options then
-                    BoxxyAuras.Options:UpdateProfileUI()
-                    BoxxyAuras.Options:InitializeProfileDropdown()
+
+                -- Fully reload the options UI so every widget reflects the new (or fallback) profile
+                if BoxxyAuras.Options and BoxxyAuras.Options.Load then
+                    BoxxyAuras.Options:Load()
                 end
             else
-                print("|cffFF0000BoxxyAuras:|r Profile '" .. profileName .. "' not found.")
+                print("|cFFFF0000BoxxyAuras:|r Profile '" .. profileName .. "' not found.")
             end
         end
     end,
@@ -1293,7 +1725,7 @@ function SlashCmdList.BOXXYAURAS(msg, editBox)
                 -- === End DB Update ===
 
                 frame:ClearAllPoints()
-                frame:SetPoint(defaultAnchor, UIParent, defaultAnchor, defaultX, defaultY)
+                PixelUtilCompat.SetPoint(frame, defaultAnchor, UIParent, defaultAnchor, defaultX, defaultY)
 
                 -- === Save the new default position with LibWindow ===
                 if LibWindow and LibWindow.SavePosition then
