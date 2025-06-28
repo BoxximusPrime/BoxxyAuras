@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+I prefer PascalCase for my fields/properties and function names, but camelCase is fine within funtions. I also like that my curly bracers are on their own lines.
+
+I also prefer to not use workaroudns, or fallbacks generally (unless they seem incredibly important) - instead I like to just make the code either work, or it doesn't, that way it's easier to debug.
