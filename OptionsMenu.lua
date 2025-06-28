@@ -547,6 +547,7 @@ local tooltipContent = "|cffFFD100BoxxyAuras Controls|r\n\n" ..
     "|cffCCCCFFQuick Access:|r\n" ..
     "• Right-click aura bars to open options"
 
+
 tooltipText:SetText(tooltipContent)
 
 -- Function to show custom tooltip
