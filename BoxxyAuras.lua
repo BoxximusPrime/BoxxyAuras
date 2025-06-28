@@ -2,7 +2,7 @@ local addonNameString, privateTable = ... -- Use different names for the local v
 _G.BoxxyAuras = _G.BoxxyAuras or {}       -- Explicitly create/assign the GLOBAL table
 local BoxxyAuras = _G.BoxxyAuras          -- Create a convenient local alias to the global table
 
-BoxxyAuras.Version = "1.2.1"
+BoxxyAuras.Version = "1.3.1"
 
 BoxxyAuras.AllAuras = {}         -- Global cache for aura info
 BoxxyAuras.recentAuraEvents = {} -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
@@ -904,21 +904,6 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
         -- Update all frames after initialization
         BoxxyAuras.FrameHandler.UpdateAllFramesAuras()
 
-        -- Apply initial lock state after everything is initialized
-        local finalSettings = BoxxyAuras:GetCurrentProfileSettings() -- Get settings again to be sure
-        if finalSettings.lockFrames then
-            -- BoxxyAuras.FrameHandler.ApplyLockState(true) -- Apply immediately (OLD)
-            -- Apply lock state after a short delay to allow UI to settle
-            C_Timer.After(0.1, function()
-                if BoxxyAuras:GetCurrentProfileSettings().lockFrames then -- Re-check in case user unlocked super fast
-                    BoxxyAuras.FrameHandler.ApplyLockState(true)
-                    if BoxxyAuras.DEBUG then
-                        print("Delayed ApplyLockState(true) executed after login.")
-                    end
-                end
-            end)
-        end
-
         return
     end
 
@@ -1449,12 +1434,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         -- Frames and settings are already loaded. Now we can show things.
         local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
         BoxxyAuras.ApplyBlizzardAuraVisibility(currentSettings.hideBlizzardAuras)
-
-        -- Initialize the aura tracking systems
-        local success, err = pcall(InitializeAuras)
-        if not success then
-            BoxxyAuras.DebugLogError("Error in InitializeAuras (pcall): " .. tostring(err))
-        end
 
         -- Force a full update on login to ensure all auras are displayed correctly
         BoxxyAuras.UpdateAuras(true)
