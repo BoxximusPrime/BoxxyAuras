@@ -1,0 +1,401 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/1201/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+    <Button name="BAURASCheckBoxTemplate" virtual="true">
+        <Size x="12.0" y="12.0"/>
+        <Layers>
+            <Layer level="BACKGROUND" textureSubLevel="2">
+                <Texture file="Interface\AddOns\BoxxyAuras\Art\checkbox" Alpha="1" parentKey="NormalBorder" snapToPixelGrid="false" texelSnappingBias="0.0">
+                    <Size x="12.0" y="12.0"/>
+                    <Anchors>
+                        <Anchor point="TOPLEFT"/>
+                    </Anchors>
+                </Texture>
+            </Layer>
+            <Layer level="BORDER">
+                <Texture file="Interface\AddOns\BoxxyAuras\Art\checkbox_hover" Alpha="1" parentKey="Highlight" snapToPixelGrid="false" texelSnappingBias="0.0">
+                    <Size x="12.0" y="12.0"/>
+                    <Anchors>
+                        <Anchor point="TOPLEFT"/>
+                    </Anchors>
+                </Texture>
+            </Layer>
+            <Layer level="OVERLAY" textureSubLevel="4">
+                <FontString inherits="BAURASFont_Checkbox" justifyH="LEFT" justifyV="MIDDLE" parentKey="Label">
+                    <Size x="0" y="12.0"/>
+                    <Anchors>
+                        <Anchor point="LEFT" relativeKey="$parent.NormalBorder" relativePoint="RIGHT" x="4" y="0"/>
+                    </Anchors>
+                </FontString>
+                <Texture file="Interface\AddOns\BoxxyAuras\Art\checkbox_check" parentKey="Tick" hidden="true">
+                    <Size x="12.0" y="12.0"/>
+                    <Anchors>
+                        <Anchor point="TOPLEFT"/>
+                    </Anchors>
+                </Texture>
+            </Layer>
+        </Layers>
+        <Scripts>
+            <OnLoad>
+                self.Checked = false
+                self.r, self.g, self.b, self.a = self.Label:GetTextColor()
+
+                -- Function to update hitbox dynamically
+                function self:UpdateHitRect()
+                    -- Ensure label width is calculated
+                    self.Label:SetWidth(self.Label:GetStringWidth())
+                    -- Calculate the total width needed (checkbox + padding + label)
+                    local checkboxWidth = self.NormalBorder:GetWidth() -- Use the border texture width
+                    local padding = 4 -- Match the label anchor offset
+                    local labelWidth = self.Label:GetWidth()
+                    local totalWidth = checkboxWidth + padding + labelWidth
+
+                    -- Calculate the right inset needed to make the hitbox cover the total width
+                    -- Right inset = ButtonWidth - TotalWidth
+                    -- Since ButtonWidth is 12, this will be negative, extending the hitbox rightwards
+                    local rightInset = self:GetWidth() - totalWidth
+                    
+                    -- Apply the new hit rectangle (left, right, top, bottom)
+                    -- Left = 0 (start at button's left edge)
+                    -- Right = negative value calculated above
+                    -- Top/Bottom = Small values to slightly increase vertical hit area
+                    self:SetHitRectInsets(0, rightInset, -4, -4) 
+                end
+
+                function self:SetChecked(checked)
+                    self.Checked = checked
+                    if checked then
+                        self.Tick:Show()
+                        PlaySound(856)
+                    else
+                        self.Tick:Hide()
+                        PlaySound(857)
+                    end
+                end
+                function self:GetChecked()
+                    return self.Checked
+                end
+                function self:SetText(text)
+                    self.Label:SetText(text)
+                    -- Update hitbox after text changes
+                    self:UpdateHitRect() 
+                end
+
+                -- Initial hitbox update on load
+                self:UpdateHitRect() 
+            </OnLoad>
+            <OnEnter>
+                self.Label:SetTextColor(1, 1, 1)
+                self.Highlight:Show()
+            </OnEnter>
+            <OnLeave>
+                self.Label:SetTextColor(self.r, self.g, self.b, self.a)
+                self.Highlight:Hide()
+            </OnLeave>
+        </Scripts>
+    </Button>
+
+    <Button name="BAURASCloseBtn" virtual="true">
+        <Size x="24" y="24"/>
+        <Anchors>
+            <Anchor point="CENTER" relativePoint="CENTER" y="0"/>
+        </Anchors>
+        <Layers>
+            <Layer level="BACKGROUND" textureSubLevel="4">
+				<Texture file="Interface\AddOns\BoxxyAuras\Art\CloseBtn" parentKey="Btn" hidden="false">
+                    <Color r="0.7" g="0.7" b="0.7" a="1"/>
+					<Anchors>
+						<Anchor point="TOPLEFT" x="0" y="0"/>
+						<Anchor point="BOTTOMRIGHT" x="0" y="0"/>
+					</Anchors>
+				</Texture>
+			</Layer>
+        </Layers>
+        <Scripts>
+            <OnEnter>
+                self.Btn:SetVertexColor(1, 1, 1, 1);
+            </OnEnter>
+            <OnLeave>
+                self.Btn:SetVertexColor(0.7, 0.7, 0.7, 1);
+            </OnLeave>
+        </Scripts>
+    </Button>
+
+    <Button name="BAURASGeneralButton" virtual="true">
+        <Size x="70" y="15"/>
+        <Anchors>
+            <Anchor point="CENTER" relativePoint="CENTER" y="0"/>
+        </Anchors>
+        <Layers>
+            <Layer level="TEXT">
+                <FontString parentKey="Text" inherits="BAURASFont_Checkbox" text="Button" justifyH="CENTER" justifyV="MIDDLE">
+                    <Size x="0" y="0"/>
+                    <Anchors>
+                        <Anchor point="CENTER" relativePoint="CENTER"/>
+                    </Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
+        <Scripts>
+            <OnLoad>
+                self.Enabled = true
+                -- Call the Lua setup function
+                if BoxxyAuras_SetupGeneralButton then
+                    BoxxyAuras_SetupGeneralButton(self)
+                else
+                    print("|cffFF0000BoxxyAuras Error:|r BoxxyAuras_SetupGeneralButton function not found during BAURASGeneralButton OnLoad.")
+                end
+            </OnLoad>
+        </Scripts>
+    </Button>
+
+    <Button name="BAURASInfoBtn" virtual="true">
+        <Size x="24" y="24"/>
+        <Anchors>
+            <Anchor point="CENTER" relativePoint="CENTER" y="0"/>
+        </Anchors>
+        <Layers>
+            <Layer level="BACKGROUND" textureSubLevel="4">
+				<Texture file="Interface\AddOns\BoxxyAuras\Art\InfoButton" parentKey="Btn" hidden="false">
+                    <Color r="0.7" g="0.7" b="0.7" a="1"/>
+					<Anchors>
+						<Anchor point="TOPLEFT" x="0" y="0"/>
+						<Anchor point="BOTTOMRIGHT" x="0" y="0"/>
+					</Anchors>
+				</Texture>
+			</Layer>
+        </Layers>
+        <Scripts>
+            <OnEnter>
+                self.Btn:SetVertexColor(1, 1, 1, 1);
+            </OnEnter>
+            <OnLeave>
+                self.Btn:SetVertexColor(0.7, 0.7, 0.7, 1);
+            </OnLeave>
+        </Scripts>
+    </Button>
+
+    <Frame name="BoxxyAurasLoadingIcon" virtual="true">
+        <Size x="32" y="32"/>
+        <Anchors>
+            <Anchor point="CENTER" relativePoint="CENTER" y="0"/>
+        </Anchors>
+        <Layers>
+            <Layer level="BACKGROUND" textureSubLevel="4">
+				<Texture file="Interface\AddOns\BoxxyAuras\Art\LoadingIcon" parentKey="Icon" hidden="false">
+                    <Color r="1" g="1" b="1" a="0.8"/>
+					<Anchors>
+						<Anchor point="TOPLEFT" x="0" y="0"/>
+						<Anchor point="BOTTOMRIGHT" x="0" y="0"/>
+					</Anchors>
+				</Texture>
+			</Layer>
+        </Layers>
+        <Color r="1" g="1" b="1" a="0.7"/>
+        <Scripts>
+            <OnLoad>
+                self.rotationAngle = 0
+            </OnLoad>
+            <OnShow>
+                if not self:GetScript("OnUpdate") then
+                    self:SetScript("OnUpdate", function(self, elapsed)
+                        self.rotationAngle = self.rotationAngle + elapsed * 3 * -math.pi
+                        self.Icon:SetRotation(self.rotationAngle)
+                    end)
+                end
+            </OnShow>
+            <OnHide>
+                self:SetScript("OnUpdate", nil)
+            </OnHide>
+        </Scripts>
+    </Frame>
+
+    <Button name="BAURASOptionsBtn" virtual="true">
+        <Size x="24" y="24"/>
+        <Anchors>
+            <Anchor point="CENTER" relativePoint="CENTER" y="0"/>
+        </Anchors>
+        <Layers>
+            <Layer level="BACKGROUND" textureSubLevel="4">
+				<Texture file="Interface\AddOns\BoxxyAuras\Art\OptionsGear" parentKey="Btn" hidden="false">
+                    <Color r="1" g="1" b="1" a="0.8"/>
+					<Anchors>
+						<Anchor point="TOPLEFT" x="0" y="0"/>
+						<Anchor point="BOTTOMRIGHT" x="0" y="0"/>
+					</Anchors>
+				</Texture>
+			</Layer>
+        </Layers>
+        <Scripts>
+            <OnLoad>
+                -- Initialize rotation variables
+                self.rotationAngle = 0
+                self.rampDelta = 0
+                self.MouseOver = false
+            </OnLoad>
+            <OnClick>
+                BoxxyAuras:ToggleOptions();
+            </OnClick>
+            <OnEnter>
+				self.MouseOver = true
+				self.Btn:SetVertexColor(1, 1, 1, 1);
+
+				-- Create an update loop that begins spinning the gear
+                -- Check if we've already set up the OnUpdate script
+                if not self:GetScript("OnUpdate") then
+                    self:SetScript("OnUpdate", function(self, elapsed)
+
+                        -- If the mouse is over the button, increase the rotation speed
+                        if self.MouseOver then
+                            self.rampDelta = math.min(self.rampDelta + elapsed * 2, 0.5)
+                        else
+                            self.rampDelta = math.max(self.rampDelta - elapsed * 2, 0)
+                        end
+
+                        -- Update the rotation angle
+                        self.rotationAngle = self.rotationAngle + elapsed * 3 * -math.pi * self.rampDelta
+
+                        -- Update the texture rotation
+                        self.Btn:SetRotation(self.rotationAngle)
+
+                    end)
+                end
+            </OnEnter>
+            <OnLeave>
+                self.MouseOver = false
+                self.Btn:SetVertexColor(1, 1, 1, 0.8);
+            </OnLeave>
+        </Scripts>
+    </Button>
+
+    <Slider name="BAURASSlider" orientation="HORIZONTAL" enableMouse="true" virtual="true">
+		<Size x="160" y="2"/>
+		<HitRectInsets>
+			<AbsInset left="-4" right="-4" top="-8" bottom="-8"/>
+		</HitRectInsets>
+		<ThumbTexture parentKey="Thumb" setAllPoints="true" rotation="0">
+			<Size x="12" y="12"/>
+            <Color r="0" g="0" b="0" a="0.0"/>
+		</ThumbTexture>
+		<Frames>
+	
+		</Frames>
+		<Layers>
+			<Layer level="BACKGROUND" textureSubLevel="1">
+				<Texture setAllPoints="true" snapToPixelGrid="false" hidden="false">
+					<Color r="0.3" g="0.3" b="0.3" a="1"/>
+				</Texture>
+			</Layer>
+			<Layer level="BACKGROUND" textureSubLevel="2">
+				<Texture setAllPoints="true" parentKey="Border" snapToPixelGrid="false" hidden="false">
+					<Color r="0.1" g="0.1" b="0.1" a="1"/>
+					<Anchors>
+						<Anchor point="TOPLEFT" relativePoint="TOPLEFT" x="1" y="-1"/>
+						<Anchor point="BOTTOMRIGHT" relativePoint="BOTTOMRIGHT" x="-1" y="1"/>
+					</Anchors>
+				</Texture>
+			</Layer>
+			<Layer level="OVERLAY" textureSubLevel="4">
+				<Texture parentKey="VirtualThumb" setAllPoints="true" file="Interface\AddOns\BoxxyAuras\Art\SliderThumb2">
+					<Size x="20" y="20"/>
+					<TexCoords left="0" right="1" top="0" bottom="1"/>
+					<Anchors>
+						<Anchor point="CENTER" relativeKey="$parent.Thumb" relativePoint="CENTER"/>
+					</Anchors>
+                    <Color r="0.75" g="0.75" b="0.75" a="1.0"/>
+				</Texture>
+			</Layer>
+			<Layer level="OVERLAY">
+				<FontString parentKey="KeyLabel" inherits="BAURASFont_General" text="0" hidden="false" ignoreParentScale="false" justifyH="CENTER" justifyV="TOP">
+					<Anchors>
+						<Anchor point="TOP" relativeKey="$parent.VirtualThumb" relativePoint="BOTTOM" x="0" y="-4"/>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Scripts>
+            <OnValueChanged>
+                local value = self:GetValue()
+                local roundedValue = math.floor(value * 10 + 0.5) / 10
+                self.KeyLabel:SetText(roundedValue)
+
+                -- Now we need to position the thumb texture
+                local min, max = self:GetMinMaxValues()
+                local range = max - min
+                local thumbPos = (value - min) / range
+                self.VirtualThumb:SetPoint("CENTER", self, "LEFT", thumbPos * self:GetWidth(), 0)
+            </OnValueChanged>
+			<OnEnter>
+				self.VirtualThumb:SetVertexColor(1, 1, 1, 1);
+			</OnEnter>
+			<OnLeave>
+				self.VirtualThumb:SetVertexColor(0.75, 0.75, 0.75, 1);
+			</OnLeave>
+		</Scripts>
+	</Slider>
+
+    <EditBox name="BAURASEditBoxTemplate" virtual="true" autoFocus="false" multiLine="true" ignoreParentScale="true">
+        <Size x="200" y="100"/>
+        <Layers>
+            <Layer level="BACKGROUND">
+                <Texture parentKey="Bg" file="Interface\ChatFrame\ChatFrameBackground">
+                    <Gradient orientation="VERTICAL">
+                        <MinColor r="0.1" g="0.1" b="0.1" a="0.8"/>
+                        <MaxColor r="0.2" g="0.2" b="0.2" a="0.8"/>
+                    </Gradient>
+                </Texture>
+            </Layer>
+            <Layer level="BORDER">
+                 <Texture parentKey="BorderTop" file="Interface\ChatFrame\ChatFrameBackground" >
+                     <Size x="0" y="1"/>
+                     <Anchors>
+                         <Anchor point="TOPLEFT" x="0" y="1"/>
+                         <Anchor point="TOPRIGHT" x="0" y="1"/>
+                     </Anchors>
+                     <Color r="0.5" g="0.5" b="0.5" a="0.8"/>
+                 </Texture>
+                 <Texture parentKey="BorderBottom" file="Interface\ChatFrame\ChatFrameBackground" >
+                     <Size x="0" y="1"/>
+                     <Anchors>
+                         <Anchor point="BOTTOMLEFT" x="0" y="-1"/>
+                         <Anchor point="BOTTOMRIGHT" x="0" y="-1"/>
+                     </Anchors>
+                     <Color r="0.5" g="0.5" b="0.5" a="0.8"/>
+                 </Texture>
+                 <Texture parentKey="BorderLeft" file="Interface\ChatFrame\ChatFrameBackground" >
+                     <Size x="1" y="0"/>
+                     <Anchors>
+                         <Anchor point="TOPLEFT" x="-1" y="0"/>
+                         <Anchor point="BOTTOMLEFT" x="-1" y="0"/>
+                     </Anchors>
+                     <Color r="0.5" g="0.5" b="0.5" a="0.8"/>
+                 </Texture>
+                 <Texture parentKey="BorderRight" file="Interface\ChatFrame\ChatFrameBackground" >
+                     <Size x="1" y="0"/>
+                     <Anchors>
+                         <Anchor point="TOPRIGHT" x="1" y="0"/>
+                         <Anchor point="BOTTOMRIGHT" x="1" y="0"/>
+                     </Anchors>
+                     <Color r="0.5" g="0.5" b="0.5" a="0.8"/>
+                 </Texture>
+             </Layer>
+        </Layers>
+        <Scripts>
+            <OnLoad>
+                self:SetTextInsets(5, 5, 5, 5)
+                self:SetFontObject(ChatFontNormal)
+                self:SetMaxLetters(0)
+            </OnLoad>
+            <OnEscapePressed>
+                self:ClearFocus()
+            </OnEscapePressed>
+            <OnEnterPressed>
+                self:ClearFocus()
+            </OnEnterPressed>
+        </Scripts>
+        <FontString inherits="ChatFontNormal"/>
+    </EditBox>
+
+    <Button name="BAURASButtonTemplate" inherits="BAURASGeneralButton" virtual="true">
+        <!-- Inherits Size, Layers, and CORRECTED Scripts from BAURASGeneralButton -->
+        <!-- No overrides needed here anymore -->
+    </Button>
+</Ui>
