@@ -77,7 +77,8 @@ local function GetCurrentProfileSettings()
         return {
             lockFrames = false,
             hideBlizzardAuras = true,
-            optionsScale = 1.0,
+            auraBarScale = 1.0,
+            optionsWindowScale = 1.0,
             buffFrameSettings = {
                 buffTextAlign = "CENTER",
                 iconSize = 24,
@@ -108,11 +109,13 @@ function BoxxyAuras.Options:ApplyTextAlign(frameType)
 
     if not frameType then
         -- Update all frame types (fallback)
-        for _, fType in ipairs({ "Buff", "Debuff", "Custom" }) do
+        for _, fType in ipairs({ "Buff", "Debuff" }) do
             self:ApplyTextAlign(fType)
         end
         return
     end
+
+
 
     -- Trigger icon repositioning with the new alignment
     if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.UpdateAurasInFrame then
@@ -136,7 +139,7 @@ function BoxxyAuras.Options:ApplyWrapDirection(frameType)
         BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType)
     else
         -- Update all frame types (fallback)
-        for _, fType in ipairs({ "Buff", "Debuff", "Custom" }) do
+        for _, fType in ipairs({ "Buff", "Debuff" }) do
             BoxxyAuras.FrameHandler.UpdateAurasInFrame(fType)
         end
     end
@@ -367,7 +370,12 @@ function BoxxyAuras.Options:ApplyBackgroundColorChange()
 end
 
 -- Apply global scale changes
-function BoxxyAuras.Options:ApplyScale(scale)
+function BoxxyAuras.Options:ApplyAuraBarScale(scale)
+    if BoxxyAuras.DEBUG then
+        local stack = debugstack(2, 1, 0) -- Get calling function
+        print(string.format("ApplyAuraBarScale called with scale: %.2f from: %s", scale or -1, stack:match("([^\n]+)")))
+    end
+
     -- Validate scale value - must be greater than 0
     if not scale or scale <= 0 then
         if BoxxyAuras.DEBUG then
@@ -379,18 +387,72 @@ function BoxxyAuras.Options:ApplyScale(scale)
 
     local settings = GetCurrentProfileSettings()
     if settings then
-        settings.optionsScale = scale
+        -- Check if scale is actually changing
+        if settings.auraBarScale and math.abs(settings.auraBarScale - scale) < 0.001 then
+            if BoxxyAuras.DEBUG then
+                print(string.format("Skipping ApplyAuraBarScale - scale unchanged at %.2f", scale))
+            end
+            return
+        end
+
+        settings.auraBarScale = scale
+
+        if BoxxyAuras.DEBUG then
+            print(string.format("Applying aura bar scale %.2f to %d frames", scale,
+                (BoxxyAuras.Frames and #BoxxyAuras.Frames or 0)))
+        end
 
         -- Apply the scale to all existing frames
         if BoxxyAuras.Frames then
             for frameType, frame in pairs(BoxxyAuras.Frames) do
                 if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.SetFrameScale then
-                    BoxxyAuras.FrameHandler.SetFrameScale(frame, scale)
+                    local currentScale = frame:GetScale()
+                    if math.abs(currentScale - scale) > 0.001 then
+                        if BoxxyAuras.DEBUG then
+                            print(string.format("  - Scaling frame %s from %.2f to %.2f", frameType, currentScale, scale))
+                        end
+                        BoxxyAuras.FrameHandler.SetFrameScale(frame, scale)
+
+                        -- CRITICAL: Update LibWindow's stored scale to prevent conflicts
+                        if LibWindow and LibWindow.windowData and LibWindow.windowData[frame] then
+                            -- Access LibWindow's internal storage system to update scale without double-applying
+                            local function setLibWindowStorage(frame, key, value)
+                                if not LibWindow.windowData[frame].store then
+                                    LibWindow.windowData[frame].store = {}
+                                end
+                                LibWindow.windowData[frame].store[key] = value
+                            end
+
+                            setLibWindowStorage(frame, "scale", scale)
+                            if BoxxyAuras.DEBUG then
+                                print(string.format("  - Updated LibWindow scale storage for %s to %.2f", frameType,
+                                    scale))
+                            end
+                        end
+                    elseif BoxxyAuras.DEBUG then
+                        print(string.format("  - Frame %s already at scale %.2f", frameType, scale))
+                    end
                 end
             end
         end
+    end
+end
 
-        -- Also apply to the options frame itself if desired
+function BoxxyAuras.Options:ApplyOptionsWindowScale(scale)
+    -- Validate scale value - must be greater than 0
+    if not scale or scale <= 0 then
+        if BoxxyAuras.DEBUG then
+            print("|cffFF0000BoxxyAuras Error:|r Invalid scale value: " ..
+                tostring(scale) .. ". Using default scale of 1.0")
+        end
+        scale = 1.0
+    end
+
+    local settings = GetCurrentProfileSettings()
+    if settings then
+        settings.optionsWindowScale = scale
+
+        -- Apply to the options frame itself
         if self.Frame then
             self.Frame:SetScale(scale)
         end
@@ -406,7 +468,7 @@ end
 -- Create Main Options Frame
 --------------------------------------------------------------]]
 local optionsFrame = CreateFrame("Frame", "BoxxyAurasOptionsFrame", UIParent, "BackdropTemplate")
-PixelUtilCompat.SetSize(optionsFrame, 300, 500) -- Adjusted size
+PixelUtilCompat.SetSize(optionsFrame, 650, 600) -- << CHANGED: Increased width from 300 to 650, height from 500 to 600
 PixelUtilCompat.SetPoint(optionsFrame, "CENTER", UIParent, "CENTER", 0, 0)
 optionsFrame:SetFrameStrata("HIGH")             -- Changed from MEDIUM to HIGH to appear above aura bars
 optionsFrame:SetMovable(true)
@@ -496,6 +558,15 @@ closeBtn:SetScript("OnClick", function(self)
         BoxxyAuras.Options:SetDemoMode(false)
         if BoxxyAuras.Options.DemoModeCheck then
             BoxxyAuras.Options.DemoModeCheck:SetChecked(false)
+        end
+    end
+
+    -- Cancel any pending save timers
+    if BoxxyAuras.Options.CustomBars and BoxxyAuras.Options.CustomBars.saveTimers then
+        for barId, timer in pairs(BoxxyAuras.Options.CustomBars.saveTimers) do
+            if timer then
+                timer:Cancel()
+            end
         end
     end
 
@@ -631,22 +702,49 @@ end);
 -- <<< END Scroll Speed Adjustment >>>
 
 local contentFrame = CreateFrame("Frame", "BoxxyAurasOptionsContentFrame", scrollFrame)
-PixelUtilCompat.SetSize(contentFrame, scrollFrame:GetWidth(), 700) -- <<< Increased height significantly >>>
+PixelUtilCompat.SetSize(contentFrame, scrollFrame:GetWidth(), 900) -- <<< CHANGED: Increased height from 700 to 900 for additional sections >>>
 scrollFrame:SetScrollChild(contentFrame)
 
 -- Layout Variables (for container positioning)
 local lastContainer = nil -- Will track the last created container for positioning
 
 --[[------------------------------------------------------------
--- Profile Management Container
+-- Profile Management Container (Two Column Layout)
 --------------------------------------------------------------]]
-local profileContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Current Profile")
+local profileContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Profile Management")
+
+-- <<< NEW: Function to manually update height for columnar layout >>>
+function profileContainer:UpdateHeightFromColumns()
+    local leftColHeight = self.LeftColumn:GetFrame():GetHeight()
+    local rightColHeight = self.RightColumn:GetFrame():GetHeight()
+    local maxHeight = math.max(leftColHeight, rightColHeight)
+
+    -- Set the main container's height.
+    -- This includes the title height (approx. 30), column height, and bottom padding (12).
+    local totalHeight = 30 + maxHeight + 12
+    PixelUtilCompat.SetHeight(self:GetFrame(), totalHeight)
+end
+
+--[[------------------------
+-- Left Column: Current Profile
+--------------------------]]
+local currentProfileContainer = BoxxyAuras.UIBuilder.CreateContainer(profileContainer:GetFrame(), "Current Profile")
+currentProfileContainer:SetParentContainer(profileContainer) -- Set parent relationship
+profileContainer.LeftColumn = currentProfileContainer        -- Store reference for height calculation
+
+currentProfileContainer:SetPosition("TOPLEFT", profileContainer:GetFrame(), "TOPLEFT", 12, -30)
+-- Resize to half width for side-by-side layout
+local currentProfileFrame = currentProfileContainer:GetFrame()
+local parentWidth = profileContainer:GetFrame():GetWidth()
+local innerWidth = parentWidth - 24       -- Account for 12px padding on each side of the parent
+local columnWidth = (innerWidth - 10) / 2 -- Account for 10px spacing between columns
+PixelUtilCompat.SetWidth(currentProfileFrame, columnWidth)
 
 -- Profile Selection Dropdown (manual creation for complex styling)
-local profileDropdown = CreateFrame("Frame", "BoxxyAurasProfileDropdown", profileContainer:GetFrame(),
+local profileDropdown = CreateFrame("Frame", "BoxxyAurasProfileDropdown", currentProfileContainer:GetFrame(),
     "UIDropDownMenuTemplate")
-PixelUtilCompat.SetWidth(profileDropdown, profileContainer:GetFrame():GetWidth() - 24) -- Full width minus padding
-profileContainer:AddElement(profileDropdown, 30)
+PixelUtilCompat.SetWidth(profileDropdown, currentProfileContainer:GetFrame():GetWidth() - 24) -- Full width of left column minus padding
+currentProfileContainer:AddElement(profileDropdown, 30)
 
 -- >> ADDED: Hide default button textures to allow custom styling <<
 local dropdownButton = _G[profileDropdown:GetName() .. "Button"]
@@ -707,11 +805,19 @@ end)
 
 BoxxyAuras.Options.ProfileDropdown = profileDropdown
 
--- Spacer
-profileContainer:AddSpacer()
+--[[--------------------------
+-- Right Column: Profile Actions
+----------------------------]]
+local profileActionsContainer = BoxxyAuras.UIBuilder.CreateContainer(profileContainer:GetFrame(), "Profile Actions")
+profileActionsContainer:SetParentContainer(profileContainer) -- Set parent relationship
+profileContainer.RightColumn = profileActionsContainer       -- Store reference for height calculation
 
--- Profile Actions Header
-profileContainer:AddHeader("Profile Actions")
+-- Position to the right of the current profile container at the same vertical level
+profileActionsContainer:SetPosition("TOPLEFT", currentProfileContainer:GetFrame(), "TOPRIGHT", 10, 0)
+
+-- Resize to half width for side-by-side layout
+local profileActionsFrame = profileActionsContainer:GetFrame()
+PixelUtilCompat.SetWidth(profileActionsFrame, columnWidth)
 
 -- Calculate button row dimensions for edit box alignment
 local buttonRowConfig = {
@@ -719,11 +825,11 @@ local buttonRowConfig = {
     { name = "BoxxyAurasCopyProfileButton",   text = "Copy",   width = 60 },
     { name = "BoxxyAurasDeleteProfileButton", text = "Delete", width = 60 }
 }
-local buttonDimensions = profileContainer:CalculateButtonRowDimensions(buttonRowConfig)
+local buttonDimensions = profileActionsContainer:CalculateButtonRowDimensions(buttonRowConfig)
 
 -- Profile Name EditBox (aligned with button row)
 local editBoxOffset = buttonDimensions.startX + 6 -- Small adjustment to account for edit box visual padding
-local profileNameEditBox = profileContainer:AddEditBox("", 32, function(self)
+local profileNameEditBox = profileActionsContainer:AddEditBox("", 32, function(self)
     local name = self:GetText()
     if name and name ~= "" then
         self:SetText("")
@@ -733,7 +839,7 @@ end, nil, buttonDimensions.totalWidth - 6, editBoxOffset)
 BoxxyAuras.Options.ProfileNameEditBox = profileNameEditBox
 
 -- Profile Action Buttons (centered row)
-local profileButtons = profileContainer:AddButtonRow({
+local profileButtons = profileActionsContainer:AddButtonRow({
     {
         name = "BoxxyAurasCreateProfileButton",
         text = "New",
@@ -783,6 +889,14 @@ BoxxyAuras.Options.CreateProfileButton = profileButtons[1]
 BoxxyAuras.Options.CopyProfileButton = profileButtons[2]
 BoxxyAuras.Options.DeleteProfileButton = profileButtons[3]
 
+-- <<< NEW: Match the height of the left column to the taller right column >>>
+local leftColumnFrame = currentProfileContainer:GetFrame()
+local rightColumnFrame = profileActionsContainer:GetFrame()
+PixelUtilCompat.SetHeight(leftColumnFrame, rightColumnFrame:GetHeight())
+
+-- <<< NEW: Manually trigger height update for the main container >>>
+profileContainer:UpdateHeightFromColumns()
+
 -- Store reference to the container for positioning next section
 lastContainer = profileContainer
 
@@ -813,7 +927,7 @@ end)
 BoxxyAuras.Options.LockFramesCheck = lockFramesCheck
 
 -- Hide Blizzard Auras Checkbox
-local hideBlizzardCheck = generalContainer:AddCheckbox("Hide Default Blizzard Auras", function(self)
+local hideBlizzardCheck = generalContainer:AddCheckbox("Hide Blizzard Auras", function(self)
     local currentSettings = GetCurrentProfileSettings()
     if not currentSettings then
         return
@@ -832,6 +946,26 @@ local hideBlizzardCheck = generalContainer:AddCheckbox("Hide Default Blizzard Au
 end)
 BoxxyAuras.Options.HideBlizzardCheck = hideBlizzardCheck
 
+-- Force a wider width on this specific checkbox to prevent text truncation
+if hideBlizzardCheck and hideBlizzardCheck.Label and hideBlizzardCheck.NormalBorder then
+    -- Set a large visual width for the parent button to ensure no clipping
+    hideBlizzardCheck:SetWidth(300)
+
+    -- Set a large width for the label to ensure text draws fully
+    -- (280 is known to be sufficient and fits within the 300px button)
+    hideBlizzardCheck.Label:SetWidth(280)
+
+    -- Now, calculate the *actual* width of the content to create a precise hitbox
+    local textWidth = hideBlizzardCheck.Label:GetStringWidth()
+    local checkboxGraphicWidth = hideBlizzardCheck.NormalBorder:GetWidth() or 12
+    local padding = 4
+    local contentWidth = checkboxGraphicWidth + padding + textWidth
+
+    -- Shrink the hitbox to match the actual content
+    local rightInset = hideBlizzardCheck:GetWidth() - contentWidth
+    hideBlizzardCheck:SetHitRectInsets(0, rightInset, -4, -4)
+end
+
 -- Show Hover Border Checkbox
 local showHoverBorderCheck = generalContainer:AddCheckbox("Show Hover Border", function(self)
     local currentSettings = GetCurrentProfileSettings()
@@ -849,7 +983,7 @@ end)
 BoxxyAuras.Options.ShowHoverBorderCheck = showHoverBorderCheck
 
 -- Demo Mode Checkbox
-local demoModeCheck = generalContainer:AddCheckbox("Demo Mode (Show Test Auras)", function(self)
+local demoModeCheck = generalContainer:AddCheckbox("Demo Mode", function(self)
     local currentState = self:GetChecked()
     local newState = not currentState
     self:SetChecked(newState)
@@ -865,6 +999,42 @@ local demoModeCheck = generalContainer:AddCheckbox("Demo Mode (Show Test Auras)"
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end)
 BoxxyAuras.Options.DemoModeCheck = demoModeCheck
+
+-- Enable Dot Ticking Animation Checkbox
+local enableDotTickingCheck = generalContainer:AddCheckbox("Enable Dot Ticking Animation", function(self)
+    local currentSettings = GetCurrentProfileSettings()
+    if not currentSettings then
+        return
+    end
+
+    local currentState = currentSettings.enableDotTickingAnimation
+    local newState = not currentState
+    currentSettings.enableDotTickingAnimation = newState
+
+    self:SetChecked(newState)
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+end)
+BoxxyAuras.Options.EnableDotTickingCheck = enableDotTickingCheck
+
+-- Force a wider width on this specific checkbox to prevent text truncation
+if enableDotTickingCheck and enableDotTickingCheck.Label and enableDotTickingCheck.NormalBorder then
+    -- Set a large visual width for the parent button to ensure no clipping
+    enableDotTickingCheck:SetWidth(300)
+
+    -- Set a large width for the label to ensure text draws fully
+    -- (280 is known to be sufficient and fits within the 300px button)
+    enableDotTickingCheck.Label:SetWidth(280)
+
+    -- Now, calculate the *actual* width of the content to create a precise hitbox
+    local textWidth = enableDotTickingCheck.Label:GetStringWidth()
+    local checkboxGraphicWidth = enableDotTickingCheck.NormalBorder:GetWidth() or 12
+    local padding = 4
+    local contentWidth = checkboxGraphicWidth + padding + textWidth
+
+    -- Shrink the hitbox to match the actual content
+    local rightInset = enableDotTickingCheck:GetWidth() - contentWidth
+    enableDotTickingCheck:SetHitRectInsets(0, rightInset, -4, -4)
+end
 
 -- Normal Border Color Picker
 local colorPickerContainer = CreateFrame("Frame", nil, generalContainer:GetFrame())
@@ -1109,11 +1279,18 @@ lastContainer = generalContainer
 -- Display Frame Settings (Alignment & Size)
 --------------------------------------------------------------]]
 
+--[[------------------------------------------------------------
+-- Side-by-Side Frame Settings (Buff and Debuff)
+--------------------------------------------------------------]]
+
 --[[------------------------
--- Buff Settings Container
+-- Buff Settings Container (Left Side)
 --------------------------]]
 local buffContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Buff Settings")
 buffContainer:SetPosition("TOPLEFT", lastContainer:GetFrame(), "BOTTOMLEFT", 0, -15)
+-- Resize to half width for side-by-side layout
+local buffFrame = buffContainer:GetFrame()
+PixelUtilCompat.SetWidth(buffFrame, (contentFrame:GetWidth() / 2) - 17) -- Half width minus margin
 
 -- Buff Text Alignment
 local buffAlignCheckboxes = buffContainer:AddCheckboxRow(
@@ -1146,7 +1323,7 @@ BoxxyAuras.Options.BuffWrapCheckboxes = buffWrapCheckboxes
 buffContainer:AddSpacer()
 
 -- Buff Icon Size Slider
-local buffSizeSlider = buffContainer:AddSlider("Buff Icon Size", 12, 64, 1, function(value)
+local buffSizeSlider = buffContainer:AddSlider("Icon Size", 12, 64, 1, function(value)
     local settings = GetCurrentProfileSettings()
     if not settings.buffFrameSettings then settings.buffFrameSettings = {} end
     settings.buffFrameSettings.iconSize = value
@@ -1155,7 +1332,7 @@ end)
 BoxxyAuras.Options.BuffSizeSlider = buffSizeSlider
 
 -- Buff Text Size Slider
-local buffTextSizeSlider = buffContainer:AddSlider("Buff Text Size", 6, 20, 1, function(value)
+local buffTextSizeSlider = buffContainer:AddSlider("Text Size", 6, 20, 1, function(value)
     local settings = GetCurrentProfileSettings()
     if not settings.buffFrameSettings then settings.buffFrameSettings = {} end
     settings.buffFrameSettings.textSize = value
@@ -1164,7 +1341,7 @@ end)
 BoxxyAuras.Options.BuffTextSizeSlider = buffTextSizeSlider
 
 -- Buff Border Size Slider
-local buffBorderSizeSlider = buffContainer:AddSlider("Buff Border Size", 0, 3, 1, function(value)
+local buffBorderSizeSlider = buffContainer:AddSlider("Border Size", 0, 3, 1, function(value)
     local settings = GetCurrentProfileSettings()
     if not settings.buffFrameSettings then settings.buffFrameSettings = {} end
     settings.buffFrameSettings.borderSize = value
@@ -1173,7 +1350,7 @@ end)
 BoxxyAuras.Options.BuffBorderSizeSlider = buffBorderSizeSlider
 
 -- Buff Icon Spacing Slider
-local buffSpacingSlider = buffContainer:AddSlider("Buff Icon Spacing", -10, 20, 1, function(value)
+local buffSpacingSlider = buffContainer:AddSlider("Icon Spacing", -10, 20, 1, function(value)
     local settings = GetCurrentProfileSettings()
     if not settings.buffFrameSettings then settings.buffFrameSettings = {} end
     settings.buffFrameSettings.iconSpacing = value
@@ -1181,14 +1358,16 @@ local buffSpacingSlider = buffContainer:AddSlider("Buff Icon Spacing", -10, 20, 
 end)
 BoxxyAuras.Options.BuffSpacingSlider = buffSpacingSlider
 
--- Update reference for next container
-lastContainer = buffContainer
-
 --[[--------------------------
--- Debuff Settings Container
+-- Debuff Settings Container (Right Side)
 ----------------------------]]
 local debuffContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Debuff Settings")
-debuffContainer:SetPosition("TOPLEFT", lastContainer:GetFrame(), "BOTTOMLEFT", 0, -15)
+-- Position to the right of the buff container at the same vertical level
+debuffContainer:SetPosition("TOPLEFT", buffContainer:GetFrame(), "TOPRIGHT", 10, 0)
+
+-- Resize to half width for side-by-side layout
+local debuffFrame = debuffContainer:GetFrame()
+PixelUtilCompat.SetWidth(debuffFrame, (contentFrame:GetWidth() / 2) - 17) -- Half width minus margin
 
 -- Debuff Text Alignment
 local debuffAlignCheckboxes = debuffContainer:AddCheckboxRow(
@@ -1221,7 +1400,7 @@ BoxxyAuras.Options.DebuffWrapCheckboxes = debuffWrapCheckboxes
 debuffContainer:AddSpacer()
 
 -- Debuff Icon Size Slider
-local debuffSizeSlider = debuffContainer:AddSlider("Debuff Icon Size", 12, 64, 1, function(value)
+local debuffSizeSlider = debuffContainer:AddSlider("Icon Size", 12, 64, 1, function(value)
     local settings = GetCurrentProfileSettings()
     if not settings.debuffFrameSettings then settings.debuffFrameSettings = {} end
     settings.debuffFrameSettings.iconSize = value
@@ -1230,7 +1409,7 @@ end)
 BoxxyAuras.Options.DebuffSizeSlider = debuffSizeSlider
 
 -- Debuff Text Size Slider
-local debuffTextSizeSlider = debuffContainer:AddSlider("Debuff Text Size", 6, 20, 1, function(value)
+local debuffTextSizeSlider = debuffContainer:AddSlider("Text Size", 6, 20, 1, function(value)
     local settings = GetCurrentProfileSettings()
     if not settings.debuffFrameSettings then settings.debuffFrameSettings = {} end
     settings.debuffFrameSettings.textSize = value
@@ -1239,7 +1418,7 @@ end)
 BoxxyAuras.Options.DebuffTextSizeSlider = debuffTextSizeSlider
 
 -- Debuff Border Size Slider
-local debuffBorderSizeSlider = debuffContainer:AddSlider("Debuff Border Size", 0, 3, 1, function(value)
+local debuffBorderSizeSlider = debuffContainer:AddSlider("Border Size", 0, 3, 1, function(value)
     local settings = GetCurrentProfileSettings()
     if not settings.debuffFrameSettings then settings.debuffFrameSettings = {} end
     settings.debuffFrameSettings.borderSize = value
@@ -1248,7 +1427,7 @@ end)
 BoxxyAuras.Options.DebuffBorderSizeSlider = debuffBorderSizeSlider
 
 -- Debuff Icon Spacing Slider
-local debuffSpacingSlider = debuffContainer:AddSlider("Debuff Icon Spacing", -10, 20, 1, function(value)
+local debuffSpacingSlider = debuffContainer:AddSlider("Icon Spacing", -10, 20, 1, function(value)
     local settings = GetCurrentProfileSettings()
     if not settings.debuffFrameSettings then settings.debuffFrameSettings = {} end
     settings.debuffFrameSettings.iconSpacing = value
@@ -1256,119 +1435,858 @@ local debuffSpacingSlider = debuffContainer:AddSlider("Debuff Icon Spacing", -10
 end)
 BoxxyAuras.Options.DebuffSpacingSlider = debuffSpacingSlider
 
--- Update reference for next container
-lastContainer = debuffContainer
-
---[[--------------------------
--- Custom Settings Container
-----------------------------]]
-local customContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Custom Settings")
-customContainer:SetPosition("TOPLEFT", lastContainer:GetFrame(), "BOTTOMLEFT", 0, -15)
-
--- Custom Text Alignment
-local customAlignCheckboxes = customContainer:AddCheckboxRow(
-    { { text = "Left", value = "LEFT" }, { text = "Center", value = "CENTER" }, { text = "Right", value = "RIGHT" } },
-    function(value)
-        local settings = GetCurrentProfileSettings()
-        if not settings.customFrameSettings then settings.customFrameSettings = {} end
-        settings.customFrameSettings.customTextAlign = value
-        BoxxyAuras.Options:ApplyTextAlign("Custom")
-    end
-)
-BoxxyAuras.Options.CustomAlignCheckboxes = customAlignCheckboxes
-
--- Add spacer before wrap direction
-customContainer:AddSpacer()
-
--- Custom Wrap Direction
-local customWrapCheckboxes = customContainer:AddCheckboxRow(
-    { { text = "Wrap Down", value = "DOWN" }, { text = "Wrap Up", value = "UP" } },
-    function(value)
-        local settings = GetCurrentProfileSettings()
-        if not settings.customFrameSettings then settings.customFrameSettings = {} end
-        settings.customFrameSettings.wrapDirection = value
-        BoxxyAuras.Options:ApplyWrapDirection("Custom")
-    end
-)
-BoxxyAuras.Options.CustomWrapCheckboxes = customWrapCheckboxes
-
--- Add spacer between alignment and sliders
-customContainer:AddSpacer()
-
--- Custom Icon Size Slider
-local customSizeSlider = customContainer:AddSlider("Custom Icon Size", 12, 64, 1, function(value)
-    local settings = GetCurrentProfileSettings()
-    if not settings.customFrameSettings then settings.customFrameSettings = {} end
-    settings.customFrameSettings.iconSize = value
-    BoxxyAuras.Options:ApplyIconSizeChange("Custom")
-end)
-BoxxyAuras.Options.CustomSizeSlider = customSizeSlider
-
--- Custom Text Size Slider
-local customTextSizeSlider = customContainer:AddSlider("Custom Text Size", 6, 20, 1, function(value)
-    local settings = GetCurrentProfileSettings()
-    if not settings.customFrameSettings then settings.customFrameSettings = {} end
-    settings.customFrameSettings.textSize = value
-    BoxxyAuras.Options:ApplyTextSizeChange("Custom")
-end)
-BoxxyAuras.Options.CustomTextSizeSlider = customTextSizeSlider
-
--- Custom Border Size Slider
-local customBorderSizeSlider = customContainer:AddSlider("Custom Border Size", 0, 3, 1, function(value)
-    local settings = GetCurrentProfileSettings()
-    if not settings.customFrameSettings then settings.customFrameSettings = {} end
-    settings.customFrameSettings.borderSize = value
-    BoxxyAuras.Options:ApplyBorderSizeChange("Custom")
-end)
-BoxxyAuras.Options.CustomBorderSizeSlider = customBorderSizeSlider
-
--- Custom Icon Spacing Slider
-local customSpacingSlider = customContainer:AddSlider("Custom Icon Spacing", -10, 20, 1, function(value)
-    local settings = GetCurrentProfileSettings()
-    if not settings.customFrameSettings then settings.customFrameSettings = {} end
-    settings.customFrameSettings.iconSpacing = value
-    BoxxyAuras.Options:ApplyIconSpacingChange("Custom")
-end)
-BoxxyAuras.Options.CustomSpacingSlider = customSpacingSlider
-
--- Button to Open Custom Aura Options
-local customOptionsButton = customContainer:AddButton("Set Custom Auras", nil, function()
-    if _G.BoxxyAuras and _G.BoxxyAuras.CustomOptions and _G.BoxxyAuras.CustomOptions.Toggle then
-        _G.BoxxyAuras.CustomOptions:Toggle()
-    end
-    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-end)
-BoxxyAuras.Options.OpenCustomOptionsButton = customOptionsButton
-
--- Update reference for next container
-lastContainer = customContainer
+-- Update reference for next container (use the buff container since both are at same level)
+lastContainer = buffContainer
 
 --[[------------------------------------------------------------
--- Global Settings Container
+-- Custom Aura Bars Management Section
 --------------------------------------------------------------]]
-local globalContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Global Scale")
-globalContainer:SetPosition("TOPLEFT", lastContainer:GetFrame(), "BOTTOMLEFT", 0, -15)
 
--- Global Scale Slider
-local scaleSlider = globalContainer:AddSlider("", 0.5, 2.0, 0.05, function(value)
-    -- Update saved variable but do NOT immediately rescale the options window.
-    local currentSettings = GetCurrentProfileSettings()
-    if currentSettings then
-        currentSettings.optionsScale = value
-    end
-end, false) -- instantCallback: false (debounced)
+-- Main container for custom bars (spans full width like profile section)
+local customBarsContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Custom Aura Bars")
+customBarsContainer:SetPosition("TOPLEFT", lastContainer:GetFrame(), "BOTTOMLEFT", 0, -15)
 
-BoxxyAuras.Options.ScaleSlider = scaleSlider
+-- Create New Bar Container
+local createBarContainer = BoxxyAuras.UIBuilder.CreateContainer(customBarsContainer:GetFrame(), "Create New Bar")
+createBarContainer:SetPosition("TOPLEFT", customBarsContainer:GetFrame(), "TOPLEFT", 12, -30)
+createBarContainer:SetParentContainer(customBarsContainer) -- Set parent relationship
 
--- Apply the scale only when the user releases the mouse button on the slider
-if scaleSlider then
-    scaleSlider:HookScript("OnMouseUp", function(self)
-        local val = self:GetValue()
-        if BoxxyAuras.Options and BoxxyAuras.Options.ApplyScale then
-            BoxxyAuras.Options:ApplyScale(val)
+-- Add warning label for bar limit
+local limitWarningLabel = createBarContainer:GetFrame():CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+limitWarningLabel:SetText("You can only create a maximum of 5 custom bars.")
+limitWarningLabel:SetTextColor(1, 0.8, 0, 1) -- Warning yellow color
+limitWarningLabel:SetPoint("TOPRIGHT", createBarContainer:GetFrame(), "TOPRIGHT", -12, -12)
+limitWarningLabel:Hide()
+BoxxyAuras.Options.CustomBarLimitWarning = limitWarningLabel
+
+-- Add bar creation controls to the create container using the new AddRow method
+local creationControls = createBarContainer:AddRow({
+    {
+        type = "EditBox",
+        placeholder = "Enter bar name...",
+        width = 400,
+        height = 20,
+        xOffset = 5, -- Add a little padding for the input box
+        onEnterPressed = function(self)
+            local barName = self:GetText()
+            if barName and barName ~= "" then
+                BoxxyAuras.Options:CreateCustomBar(barName)
+                self:SetText("")
+                self:ClearFocus()
+            end
         end
+    },
+    {
+        type = "Button",
+        text = "Create Bar",
+        width = 120,
+        -- The onClick handler is now set *after* the row is created
+        -- to correctly capture the edit box reference.
+    }
+}, 35) -- A bit more height for the row
+
+-- Store references if needed
+local addBarEditBox = creationControls[1]
+local createBarButton = creationControls[2]
+
+-- Now that we have references, set the button's OnClick script
+if createBarButton and addBarEditBox then
+    createBarButton:SetScript("OnClick", function()
+        local barName = addBarEditBox:GetText()
+        if barName and barName ~= "" then
+            BoxxyAuras.Options:CreateCustomBar(barName)
+            addBarEditBox:SetText("")
+            addBarEditBox:ClearFocus()
+        end
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
 end
+
+
+-- Configure Bar Container (will hold the tabs and content)
+local configureBarContainer = BoxxyAuras.UIBuilder.CreateContainer(customBarsContainer:GetFrame(), "Configure Bars")
+configureBarContainer:SetPosition("TOPLEFT", createBarContainer:GetFrame(), "BOTTOMLEFT", 0, -15)
+configureBarContainer:SetParentContainer(customBarsContainer) -- Set parent relationship
+
+-- Tab system for custom bars (inside the configure container)
+local tabFrameContainer = CreateFrame("Frame", nil, configureBarContainer:GetFrame())
+-- The tab container only needs to be as tall as the tabs themselves (25px). Using a larger height left an undesired gap.
+PixelUtilCompat.SetSize(tabFrameContainer, configureBarContainer:GetFrame():GetWidth() - 24, 20)
+PixelUtilCompat.SetPoint(tabFrameContainer, "TOPLEFT", configureBarContainer:GetFrame(), "TOPLEFT", 12, -44)
+
+-- Initialize custom bars management
+BoxxyAuras.Options.CustomBars = {
+    tabs = {},
+    activeTab = nil,
+    tabContainer = tabFrameContainer,
+    contentFrames = {},
+    createBarContainer = createBarContainer,
+    configureBarContainer = configureBarContainer
+}
+
+-- Function to create a new custom bar
+function BoxxyAuras.Options:CreateCustomBar(barName)
+    if not barName or barName == "" then
+        print("|cffFF0000BoxxyAuras:|r Please enter a valid bar name.")
+        return
+    end
+
+    -- Sanitize name for use as frame ID
+    local barId = barName:gsub("[^%w]", "")
+    if barId == "" then
+        print("|cffFF0000BoxxyAuras:|r Bar name must contain at least one letter or number.")
+        return
+    end
+
+    -- Check if bar already exists
+    local settings = GetCurrentProfileSettings()
+    if settings.customFrameProfiles and settings.customFrameProfiles[barId] then
+        print("|cffFF0000BoxxyAuras:|r A custom bar with that name already exists.")
+        return
+    end
+
+    -- Check for bar limit
+    local customBarCount = 0
+    if settings.customFrameProfiles then
+        for _ in pairs(settings.customFrameProfiles) do
+            customBarCount = customBarCount + 1
+        end
+    end
+
+    if customBarCount >= 5 then
+        local warningLabel = self.CustomBarLimitWarning
+        if warningLabel then
+            warningLabel:Show()
+            C_Timer.After(6, function()
+                if warningLabel then
+                    warningLabel:Hide()
+                end
+            end)
+        end
+        return
+    end
+
+    -- Create the bar using the core function
+    if BoxxyAuras:CreateCustomBar(barName) then
+        print("|cff00FF00BoxxyAuras:|r Created custom bar '" .. barName .. "'")
+
+        local barId = barName:gsub("[^%w]", "") -- Same sanitization as in core function
+
+        -- If demo mode is active, generate demo auras for the new bar
+        if self.demoModeActive and BoxxyAuras.demoAuras then
+            self:GenerateDemoAurasForBar(barId, barName)
+
+            -- Trigger an update to show the new demo auras
+            C_Timer.After(0.1, function()
+                BoxxyAuras.UpdateAuras(false)
+            end)
+        end
+
+        self:RefreshCustomBarTabs()
+
+        -- Auto-select the newly created bar's tab
+        C_Timer.After(0.1, function()
+            if self.CustomBars and self.CustomBars.tabs and self.CustomBars.tabs[barId] then
+                self:SelectCustomBarTab(barId)
+            end
+        end)
+    else
+        print("|cffFF0000BoxxyAuras:|r Failed to create custom bar.")
+    end
+end
+
+-- Function to delete a custom bar
+function BoxxyAuras.Options:DeleteCustomBar(barId)
+    local success = BoxxyAuras:DeleteCustomBar(barId)
+
+    if success then
+        print("|cff00FF00BoxxyAuras:|r Deleted custom bar '" .. barId .. "'")
+
+        -- If demo mode is active, clean up demo auras for the deleted bar
+        if self.demoModeActive and BoxxyAuras.demoAuras and BoxxyAuras.demoAuras[barId] then
+            BoxxyAuras.demoAuras[barId] = nil
+
+            -- Trigger an update to remove the demo auras from display
+            C_Timer.After(0.1, function()
+                BoxxyAuras.UpdateAuras(false)
+            end)
+        end
+    else
+        print("|cffFF0000BoxxyAuras:|r Failed to delete custom bar '" .. barId .. "'.")
+    end
+
+    -- Always refresh the UI after a delete attempt. This ensures that even if a
+    -- bar can't be deleted (like the default "Custom" bar), the UI will update
+    -- to reflect its new (potentially empty) state.
+    self:RefreshCustomBarTabs()
+end
+
+-- Function to refresh the tab display
+function BoxxyAuras.Options:RefreshCustomBarTabs()
+    -- Clear existing tabs
+    for _, tab in pairs(self.CustomBars.tabs) do
+        tab:Hide()
+        tab:SetParent(nil)
+    end
+    wipe(self.CustomBars.tabs)
+
+    -- Clear existing content frames
+    for _, frame in pairs(self.CustomBars.contentFrames) do
+        frame:Hide()
+        frame:SetParent(nil)
+    end
+    wipe(self.CustomBars.contentFrames)
+
+    -- Cancel and clear any pending save timers
+    if self.CustomBars.saveTimers then
+        for barId, timer in pairs(self.CustomBars.saveTimers) do
+            if timer then
+                timer:Cancel()
+            end
+        end
+        wipe(self.CustomBars.saveTimers)
+    end
+
+    -- Get all custom bars from settings
+    local settings = GetCurrentProfileSettings()
+    local customBars = {}
+
+    if settings.customFrameProfiles then
+        for barId, barConfig in pairs(settings.customFrameProfiles) do
+            table.insert(customBars, { id = barId, name = barConfig.name or barId })
+        end
+    end
+
+
+
+    -- Sort bars alphabetically
+    table.sort(customBars, function(a, b) return a.name < b.name end)
+
+    if #customBars == 0 then
+        -- Hide configure container when no bars exist
+        if self.CustomBars.configureBarContainer then
+            self.CustomBars.configureBarContainer:GetFrame():Hide()
+        end
+
+        -- Show placeholder text
+        if not self.CustomBars.placeholderText then
+            self.CustomBars.placeholderText = self.CustomBars.createBarContainer:GetFrame():CreateFontString(nil,
+                "OVERLAY", "GameFontNormalSmall")
+            self.CustomBars.placeholderText:SetPoint("TOP", self.CustomBars.createBarContainer:GetFrame(), "BOTTOM", 0,
+                -20)
+            self.CustomBars.placeholderText:SetTextColor(0.7, 0.7, 0.7, 1)
+            self.CustomBars.placeholderText:SetText("Create your first custom bar above to get started!")
+        end
+        self.CustomBars.placeholderText:Show()
+
+        -- Reposition subsequent sections
+        if BoxxyAuras.Options.RepositionGlobalContainer then
+            BoxxyAuras.Options.RepositionGlobalContainer()
+        end
+    else
+        -- Show configure container when bars exist
+        if self.CustomBars.configureBarContainer then
+            self.CustomBars.configureBarContainer:GetFrame():Show()
+        end
+
+        -- Hide placeholder text
+        if self.CustomBars.placeholderText then
+            self.CustomBars.placeholderText:Hide()
+        end
+
+        -- Create tabs for each custom bar
+        local tabSpacing = 2
+        local lastTab = nil
+        local horizontalOffset = 10 -- Initial indent from the left edge
+
+        for i, barInfo in ipairs(customBars) do
+            local tab = self:CreateCustomBarTab(barInfo.id, barInfo.name)
+            self.CustomBars.tabs[barInfo.id] = tab
+
+            -- Dynamically position the tab
+            tab:ClearAllPoints()
+            if lastTab then
+                PixelUtilCompat.SetPoint(tab, "TOPLEFT", lastTab, "TOPRIGHT", tabSpacing, 0)
+            else
+                PixelUtilCompat.SetPoint(tab, "TOPLEFT", self.CustomBars.tabContainer, "TOPLEFT", horizontalOffset, 0)
+            end
+            lastTab = tab
+        end
+
+        -- Select the first tab if available
+        if customBars[1] then
+            self:SelectCustomBarTab(customBars[1].id)
+        end
+
+        -- Update parent container size after showing/hiding content
+        C_Timer.After(0.2, function()
+            if customBars[1] and self.CustomBars.activeTab then
+                self:UpdateTabContentHeight(self.CustomBars.activeTab)
+            end
+        end)
+
+        -- Reposition subsequent sections
+        if BoxxyAuras.Options.RepositionGlobalContainer then
+            BoxxyAuras.Options.RepositionGlobalContainer()
+        end
+    end
+
+    -- Force update of main custom bars container size after all changes
+    if customBarsContainer and customBarsContainer.UpdateHeightFromChildren then
+        customBarsContainer:UpdateHeightFromChildren()
+    end
+end
+
+-- Function to create a tab for a custom bar
+function BoxxyAuras.Options:CreateCustomBarTab(barId, barName)
+    local tab = CreateFrame("Button", nil, self.CustomBars.tabContainer, "BAURASTabTemplate")
+
+    tab:SetText(barName)
+    -- The sound is now played by the template's OnClick script.
+    -- We hook our logic to run after the template's script.
+    tab:HookScript("OnClick", function()
+        BoxxyAuras.Options:SelectCustomBarTab(barId)
+    end)
+
+    -- Apply initial inactive tab styling
+    tab:SetActive(false)
+
+    -- Create content frame for this tab (positioned within the configure container, not constrained by tab container height)
+    local contentFrame = CreateFrame("Frame", nil, self.CustomBars.configureBarContainer:GetFrame())
+    PixelUtilCompat.SetSize(contentFrame, self.CustomBars.configureBarContainer:GetFrame():GetWidth() - 24, 50) -- Start small, will grow
+    PixelUtilCompat.SetPoint(contentFrame, "TOPLEFT", self.CustomBars.tabContainer, "BOTTOMLEFT", 0, 0)
+
+    -- No background styling needed - the mainBarContainer inside will provide its own styling
+
+    contentFrame:Hide()
+
+    self.CustomBars.contentFrames[barId] = contentFrame
+    self:CreateCustomBarContent(barId, contentFrame)
+
+    return tab
+end
+
+-- Function to select a tab
+function BoxxyAuras.Options:SelectCustomBarTab(barId)
+    -- Update tab appearances
+    for id, tab in pairs(self.CustomBars.tabs) do
+        if id == barId then
+            -- Active tab styling
+            tab:SetActive(true)
+            self.CustomBars.activeTab = barId
+        else
+            -- Inactive tab styling
+            tab:SetActive(false)
+        end
+    end
+
+    -- Show/hide content frames
+    for id, frame in pairs(self.CustomBars.contentFrames) do
+        if id == barId then
+            frame:Show()
+        else
+            frame:Hide()
+        end
+    end
+
+    -- Force update of parent containers after showing/hiding content
+    C_Timer.After(0.1, function()
+        self:UpdateTabContentHeight(barId)
+    end)
+end
+
+-- Function to update tab content height dynamically
+function BoxxyAuras.Options:UpdateTabContentHeight(barId)
+    if not self.CustomBars.contentFrames or not self.CustomBars.contentFrames[barId] then
+        return
+    end
+
+    local contentFrame = self.CustomBars.contentFrames[barId]
+    if not contentFrame:IsVisible() then
+        return -- Don't update hidden content frames
+    end
+
+    -- Calculate required height based on deepest descendant using absolute coordinates
+    local top = contentFrame:GetTop() or 0
+    local lowestBottom = top
+
+    local function Scan(frame)
+        for _, child in ipairs({ frame:GetChildren() }) do
+            if child:IsShown() then
+                local childBottom = child:GetBottom()
+                if childBottom and childBottom < lowestBottom then
+                    lowestBottom = childBottom
+                end
+                Scan(child)
+            end
+        end
+    end
+
+    Scan(contentFrame)
+
+    local newHeight = math.max(50, (top - lowestBottom) + 20) -- Minimum 50, plus padding
+
+    -- Update configure container to encompass tabs + content
+    local tabHeight = 25        -- Tab area height (should match BAURASTabTemplate height)
+    local spacing = 0           -- No space between tabs and content (connected directly)
+    local containerPadding = 40 -- Container padding
+    local totalConfigureHeight = tabHeight + spacing + newHeight + containerPadding
+
+    -- Update the configure container height
+    if self.CustomBars.configureBarContainer then
+        PixelUtilCompat.SetHeight(self.CustomBars.configureBarContainer:GetFrame(), totalConfigureHeight)
+
+        -- Update main custom bars container as well
+        if self.CustomBars.configureBarContainer.parentContainer and
+            self.CustomBars.configureBarContainer.parentContainer.UpdateHeightFromChildren then
+            self.CustomBars.configureBarContainer.parentContainer:UpdateHeightFromChildren()
+        end
+    end
+end
+
+-- Function to create content for a custom bar tab
+function BoxxyAuras.Options:CreateCustomBarContent(barId, contentFrame)
+    -- Create main container for the entire bar with an empty title to remove the header
+    local mainBarContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "")
+    mainBarContainer:SetPosition("TOPLEFT", contentFrame, "TOPLEFT", 0, 0)
+
+    -- Create nested containers for organized sections
+
+    -- Appearance Settings Container (now on the left side)
+    local appearanceContainer = BoxxyAuras.UIBuilder.CreateContainer(mainBarContainer:GetFrame(), "Appearance Settings")
+    appearanceContainer:SetPosition("TOPLEFT", mainBarContainer:GetFrame(), "TOPLEFT", 12, -12)
+    local appearanceFrame = appearanceContainer:GetFrame()
+    local parentWidth = mainBarContainer:GetFrame():GetWidth()
+    PixelUtilCompat.SetWidth(appearanceFrame, (parentWidth / 2) - 17)
+
+    -- Create alignment options as checkboxes
+    local alignmentOptions = {
+        { text = "Left",   value = "LEFT" },
+        { text = "Center", value = "CENTER" },
+        { text = "Right",  value = "RIGHT" }
+    }
+
+    local alignButtons = appearanceContainer:AddCheckboxRow(alignmentOptions, function(value)
+        -- Update settings
+        local settings = GetCurrentProfileSettings()
+
+        -- Save to customFrameProfiles for all custom frames
+        if not settings.customFrameProfiles then settings.customFrameProfiles = {} end
+        if not settings.customFrameProfiles[barId] then settings.customFrameProfiles[barId] = {} end
+        settings.customFrameProfiles[barId].customTextAlign = value
+
+        -- Apply changes
+        BoxxyAuras.Options:ApplyTextAlign(barId)
+    end)
+
+    -- Wrap Direction
+    local wrapOptions = {
+        { text = "Wrap Down", value = "DOWN" },
+        { text = "Wrap Up",   value = "UP" }
+    }
+
+    local wrapButtons = appearanceContainer:AddCheckboxRow(wrapOptions, function(value)
+        local settings = GetCurrentProfileSettings()
+
+        -- Save to customFrameProfiles for all custom frames
+        if not settings.customFrameProfiles then settings.customFrameProfiles = {} end
+        if not settings.customFrameProfiles[barId] then settings.customFrameProfiles[barId] = {} end
+        settings.customFrameProfiles[barId].wrapDirection = value
+
+        BoxxyAuras.Options:ApplyWrapDirection(barId)
+    end)
+
+    -- Icon Size Slider
+    local iconSizeSlider = appearanceContainer:AddSlider("Icon Size", 12, 64, 1, function(value)
+        local settings = GetCurrentProfileSettings()
+
+        -- Save to customFrameProfiles for all custom frames
+        if not settings.customFrameProfiles then settings.customFrameProfiles = {} end
+        if not settings.customFrameProfiles[barId] then settings.customFrameProfiles[barId] = {} end
+        settings.customFrameProfiles[barId].iconSize = value
+
+        BoxxyAuras.Options:ApplyIconSizeChange(barId)
+    end)
+
+    -- Text Size Slider
+    local textSizeSlider = appearanceContainer:AddSlider("Text Size", 6, 20, 1, function(value)
+        local settings = GetCurrentProfileSettings()
+
+        -- Save to customFrameProfiles for all custom frames
+        if not settings.customFrameProfiles then settings.customFrameProfiles = {} end
+        if not settings.customFrameProfiles[barId] then settings.customFrameProfiles[barId] = {} end
+        settings.customFrameProfiles[barId].textSize = value
+
+        BoxxyAuras.Options:ApplyTextSizeChange(barId)
+    end)
+
+    -- Border Size Slider
+    local borderSizeSlider = appearanceContainer:AddSlider("Border Size", 0, 3, 1, function(value)
+        local settings = GetCurrentProfileSettings()
+
+        -- Save to customFrameProfiles for all custom frames
+        if not settings.customFrameProfiles then settings.customFrameProfiles = {} end
+        if not settings.customFrameProfiles[barId] then settings.customFrameProfiles[barId] = {} end
+        settings.customFrameProfiles[barId].borderSize = value
+
+        BoxxyAuras.Options:ApplyBorderSizeChange(barId)
+    end)
+
+    -- Icon Spacing Slider
+    local spacingSlider = appearanceContainer:AddSlider("Icon Spacing", -10, 20, 1, function(value)
+        local settings = GetCurrentProfileSettings()
+
+        -- Save to customFrameProfiles for all custom frames
+        if not settings.customFrameProfiles then settings.customFrameProfiles = {} end
+        if not settings.customFrameProfiles[barId] then settings.customFrameProfiles[barId] = {} end
+        settings.customFrameProfiles[barId].iconSpacing = value
+
+        BoxxyAuras.Options:ApplyIconSpacingChange(barId)
+    end)
+
+    appearanceContainer:AddSpacer(10)
+
+    -- Delete button (now anchored inside the appearance container)
+    local deleteButton = appearanceContainer:AddButton("Delete Bar", 100, function()
+        self:DeleteCustomBar(barId)
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    end, "LEFT")
+
+    -- Aura Assignment Container (now on the right side)
+    local auraContainer = BoxxyAuras.UIBuilder.CreateContainer(mainBarContainer:GetFrame(), "Aura Assignments")
+    auraContainer:SetPosition("TOPLEFT", appearanceContainer:GetFrame(), "TOPRIGHT", 10, 0)
+    local auraFrame = auraContainer:GetFrame()
+    PixelUtilCompat.SetWidth(auraFrame, (parentWidth / 2) - 17)
+
+    -- Instructions text
+    local instructLabel = auraContainer:GetFrame():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    PixelUtilCompat.SetPoint(instructLabel, "TOPLEFT", auraContainer:GetFrame(), "TOPLEFT", 12, -35)
+    PixelUtilCompat.SetPoint(instructLabel, "TOPRIGHT", auraContainer:GetFrame(), "TOPRIGHT", -12, -35)
+    instructLabel:SetText("Enter exact spell names, separated by commas. Case-insensitive.")
+    instructLabel:SetJustifyH("LEFT")
+    instructLabel:SetWordWrap(true)
+    instructLabel:SetTextColor(0.8, 0.8, 0.8, 1)
+
+    -- Adjust container height to account for instructions
+    local currentHeight = auraContainer:GetFrame():GetHeight()
+    PixelUtilCompat.SetHeight(auraContainer:GetFrame(), currentHeight + 25)
+
+    -- Helper to clear and redraw the background and border for the edit box container
+    local function RestyleEditBoxContainer(container)
+        -- Remove old backdrop and border textures if present
+        if container.backdropTextures then
+            for _, tex in pairs(container.backdropTextures) do
+                if tex and tex.Hide then tex:Hide() end
+                if tex and tex.SetParent then tex:SetParent(nil) end
+            end
+            container.backdropTextures = nil
+        end
+        if container.borderTextures then
+            for _, tex in pairs(container.borderTextures) do
+                if tex and tex.Hide then tex:Hide() end
+                if tex and tex.SetParent then tex:SetParent(nil) end
+            end
+            container.borderTextures = nil
+        end
+        -- Redraw
+        if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
+            BoxxyAuras.UIUtils.DrawSlicedBG(container, "OptionsWindowBG", "backdrop", 0)
+            BoxxyAuras.UIUtils.ColorBGSlicedFrame(container, "backdrop", 0.05, 0.05, 0.05, 0.8)
+            BoxxyAuras.UIUtils.DrawSlicedBG(container, "EdgedBorder", "border", 0)
+            BoxxyAuras.UIUtils.ColorBGSlicedFrame(container, "border", 0.4, 0.4, 0.4, 1)
+        end
+    end
+
+    local padding = 12
+    -- Create a hidden FontString for measuring text height (for robust auto-sizing)
+    local editBoxFontString = auraContainer:GetFrame():CreateFontString(nil, "OVERLAY", "BAURASFont_General")
+    editBoxFontString:SetWidth(auraContainer:GetFrame():GetWidth() - 34 - (padding * 2)) -- Match edit box width minus padding
+    editBoxFontString:SetWordWrap(true)
+    editBoxFontString:SetNonSpaceWrap(false)
+    editBoxFontString:Hide()
+
+    -- Create the actual EditBox, which will serve as its own container
+    local editBox = CreateFrame("EditBox", nil, auraContainer:GetFrame())
+    PixelUtilCompat.SetSize(editBox, auraContainer:GetFrame():GetWidth() - 34, 28)
+    PixelUtilCompat.SetPoint(editBox, "TOPLEFT", instructLabel, "BOTTOMLEFT", 8, -8)
+    editBox:SetMultiLine(true)
+    editBox:SetAutoFocus(false)
+    editBox:SetFontObject("BAURASFont_General")
+    editBox:SetTextColor(1, 1, 1, 1)
+    editBox:SetTextInsets(padding, padding, padding, padding) -- Increased padding
+    editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+    -- Initial style applied directly to the edit box
+    RestyleEditBoxContainer(editBox)
+
+    -- OnTextChanged handler for auto-saving and resizing the container
+    editBox:SetScript("OnTextChanged", function(self, userInput)
+        if not userInput then return end -- Only respond to user input
+
+        -- Debounced auto-save logic
+        if BoxxyAuras.Options.CustomBars.saveTimers[barId] then
+            BoxxyAuras.Options.CustomBars.saveTimers[barId]:Cancel()
+        end
+        BoxxyAuras.Options.CustomBars.saveTimers[barId] = C_Timer.NewTimer(1.0, function()
+            BoxxyAuras.Options:SaveCustomBarAuras(barId, self:GetText())
+            BoxxyAuras.Options.CustomBars.saveTimers[barId] = nil
+        end)
+
+        -- Robust auto-expand using FontString measurement
+        editBoxFontString:SetWidth(self:GetWidth() - (padding * 2))
+        editBoxFontString:SetText(self:GetText())
+        editBoxFontString:Show()
+        local measuredHeight = editBoxFontString:GetStringHeight() + (padding * 2)
+        editBoxFontString:Hide()
+
+        PixelUtilCompat.SetHeight(self, measuredHeight)
+
+        -- Redraw background and border at new size
+        RestyleEditBoxContainer(self)
+
+        -- After resizing, we need to update the parent container's layout
+        C_Timer.After(0.01, function()
+            if BoxxyAuras.Options and BoxxyAuras.Options.UpdateTabContentHeight then
+                BoxxyAuras.Options:UpdateTabContentHeight(barId)
+            end
+        end)
+    end)
+
+    -- Adjust final container height to include all elements (now handled by the expanding container)
+    -- local finalHeight = auraContainer:GetFrame():GetHeight() + 75
+    -- PixelUtilCompat.SetHeight(auraContainer:GetFrame(), finalHeight)
+
+    -- Store references for loading/saving
+    if not self.CustomBars.editBoxes then
+        self.CustomBars.editBoxes = {}
+    end
+    if not self.CustomBars.alignButtons then
+        self.CustomBars.alignButtons = {}
+    end
+    if not self.CustomBars.iconSizeSliders then
+        self.CustomBars.iconSizeSliders = {}
+    end
+    if not self.CustomBars.textSizeSliders then
+        self.CustomBars.textSizeSliders = {}
+    end
+    if not self.CustomBars.borderSizeSliders then
+        self.CustomBars.borderSizeSliders = {}
+    end
+    if not self.CustomBars.spacingSliders then
+        self.CustomBars.spacingSliders = {}
+    end
+    if not self.CustomBars.wrapButtons then
+        self.CustomBars.wrapButtons = {}
+    end
+    if not self.CustomBars.saveTimers then
+        self.CustomBars.saveTimers = {}
+    end
+
+    self.CustomBars.editBoxes[barId] = editBox
+    self.CustomBars.alignButtons[barId] = alignButtons
+    self.CustomBars.iconSizeSliders[barId] = iconSizeSlider
+    self.CustomBars.textSizeSliders[barId] = textSizeSlider
+    self.CustomBars.borderSizeSliders[barId] = borderSizeSlider
+    self.CustomBars.spacingSliders[barId] = spacingSlider
+    self.CustomBars.wrapButtons[barId] = wrapButtons
+
+    -- Store container references for potential future updates
+    if not self.CustomBars.containers then
+        self.CustomBars.containers = {}
+    end
+    self.CustomBars.containers[barId] = {
+        main = mainBarContainer,
+        appearance = appearanceContainer,
+        aura = auraContainer
+    }
+
+    -- Load current data
+    self:LoadCustomBarData(barId)
+
+    -- Force update of parent containers after adding all content
+    C_Timer.After(0.1, function()
+        -- Update child containers first
+        if auraContainer and auraContainer.UpdateHeightFromChildren then
+            auraContainer:UpdateHeightFromChildren()
+        end
+        if appearanceContainer and appearanceContainer.UpdateHeightFromChildren then
+            appearanceContainer:UpdateHeightFromChildren()
+        end
+        -- Then update the main container to encompass all children
+        if mainBarContainer and mainBarContainer.UpdateHeightFromChildren then
+            mainBarContainer:UpdateHeightFromChildren()
+        end
+        self:UpdateTabContentHeight(barId)
+    end)
+
+    -- Store meta info so LoadCustomBarData can resize correctly on initial load
+    if not self.CustomBars.editBoxMeta then
+        self.CustomBars.editBoxMeta = {}
+    end
+    self.CustomBars.editBoxMeta[barId] = {
+        fontString = editBoxFontString,
+        padding = padding,
+        restyle = RestyleEditBoxContainer
+    }
+end
+
+-- Function to save aura assignments for a custom bar
+function BoxxyAuras.Options:SaveCustomBarAuras(barId, auraText)
+    local settings = GetCurrentProfileSettings()
+    if not settings.customAuraAssignments then
+        settings.customAuraAssignments = {}
+    end
+
+    -- Clear existing assignments for this bar
+    for auraName, assignedBarId in pairs(settings.customAuraAssignments) do
+        if assignedBarId == barId then
+            settings.customAuraAssignments[auraName] = nil
+        end
+    end
+
+    -- Parse new assignments
+    if auraText and auraText ~= "" then
+        for name in string.gmatch(auraText .. ',', "([^,]*),") do
+            local trimmedName = string.match(name, "^%s*(.-)%s*$")
+            if trimmedName and trimmedName ~= "" then
+                settings.customAuraAssignments[trimmedName] = barId
+            end
+        end
+    end
+
+    -- Trigger aura update
+    if BoxxyAuras.UpdateAuras then
+        BoxxyAuras.UpdateAuras()
+    end
+end
+
+-- Function to load data for a custom bar tab
+function BoxxyAuras.Options:LoadCustomBarData(barId)
+    local settings = GetCurrentProfileSettings()
+
+    -- Load aura assignments
+    if self.CustomBars.editBoxes and self.CustomBars.editBoxes[barId] then
+        local auraNames = {}
+        if settings.customAuraAssignments then
+            for auraName, assignedBarId in pairs(settings.customAuraAssignments) do
+                if assignedBarId == barId then
+                    table.insert(auraNames, auraName)
+                end
+            end
+        end
+        table.sort(auraNames)
+        local editBox = self.CustomBars.editBoxes[barId]
+        editBox:SetText(table.concat(auraNames, ", "))
+
+        -- Resize/restyle based on stored meta after a short delay to allow layout pass
+        local meta = self.CustomBars.editBoxMeta and self.CustomBars.editBoxMeta[barId]
+        if editBox and meta and meta.fontString and meta.padding and meta.restyle then
+            C_Timer.After(0.05, function()
+                meta.fontString:SetWidth(editBox:GetWidth() - (meta.padding * 2))
+                meta.fontString:SetText(editBox:GetText())
+                meta.fontString:Show()
+                local measuredHeight = meta.fontString:GetStringHeight() + (meta.padding * 2)
+                meta.fontString:Hide()
+
+                editBox:SetHeight(measuredHeight)
+                meta.restyle(editBox)
+            end)
+        end
+    end
+
+    -- Load alignment setting
+    if self.CustomBars.alignButtons and self.CustomBars.alignButtons[barId] then
+        local currentAlign = "CENTER" -- Default
+
+        -- Read from customFrameProfiles for all custom frames
+        if settings.customFrameProfiles and settings.customFrameProfiles[barId] then
+            currentAlign = settings.customFrameProfiles[barId].customTextAlign or "CENTER"
+        end
+
+        -- Set the checkbox row value using the UIBuilder helper
+        BoxxyAuras.UIBuilder.SetCheckboxRowValue(self.CustomBars.alignButtons[barId], currentAlign)
+    end
+
+    -- Load icon size setting
+    if self.CustomBars.iconSizeSliders and self.CustomBars.iconSizeSliders[barId] then
+        local currentIconSize = 24 -- Default
+
+        if settings.customFrameProfiles and settings.customFrameProfiles[barId] then
+            currentIconSize = settings.customFrameProfiles[barId].iconSize or 24
+        end
+
+        self.CustomBars.iconSizeSliders[barId]:SetValue(currentIconSize)
+    end
+
+    -- Load text size setting
+    if self.CustomBars.textSizeSliders and self.CustomBars.textSizeSliders[barId] then
+        local currentTextSize = 8 -- Default
+
+        if settings.customFrameProfiles and settings.customFrameProfiles[barId] then
+            currentTextSize = settings.customFrameProfiles[barId].textSize or 8
+        end
+
+        self.CustomBars.textSizeSliders[barId]:SetValue(currentTextSize)
+    end
+
+    -- Load border size setting
+    if self.CustomBars.borderSizeSliders and self.CustomBars.borderSizeSliders[barId] then
+        local currentBorderSize = 1 -- Default
+
+        if settings.customFrameProfiles and settings.customFrameProfiles[barId] then
+            currentBorderSize = settings.customFrameProfiles[barId].borderSize or 1
+        end
+
+        self.CustomBars.borderSizeSliders[barId]:SetValue(currentBorderSize)
+    end
+
+    -- Load icon spacing setting
+    if self.CustomBars.spacingSliders and self.CustomBars.spacingSliders[barId] then
+        local currentSpacing = 0 -- Default
+
+        if settings.customFrameProfiles and settings.customFrameProfiles[barId] then
+            currentSpacing = settings.customFrameProfiles[barId].iconSpacing or 0
+        end
+
+        self.CustomBars.spacingSliders[barId]:SetValue(currentSpacing)
+    end
+
+    -- Load wrap direction setting
+    if self.CustomBars.wrapButtons and self.CustomBars.wrapButtons[barId] then
+        local currentWrap = "DOWN" -- Default
+
+        if settings.customFrameProfiles and settings.customFrameProfiles[barId] then
+            currentWrap = settings.customFrameProfiles[barId].wrapDirection or "DOWN"
+        end
+
+        BoxxyAuras.UIBuilder.SetCheckboxRowValue(self.CustomBars.wrapButtons[barId], currentWrap)
+    end
+end
+
+-- Initialize the custom bars display
+C_Timer.After(0.1, function()
+    if BoxxyAuras.Options and BoxxyAuras.Options.RefreshCustomBarTabs then
+        BoxxyAuras.Options:RefreshCustomBarTabs()
+    end
+end)
+
+-- Update reference for next container - use the configure container if it exists and is visible, otherwise the create container
+local function GetLastCustomBarContainer()
+    if BoxxyAuras.Options.CustomBars and BoxxyAuras.Options.CustomBars.configureBarContainer then
+        local configFrame = BoxxyAuras.Options.CustomBars.configureBarContainer:GetFrame()
+        if configFrame and configFrame:IsVisible() then
+            return BoxxyAuras.Options.CustomBars.configureBarContainer
+        end
+    end
+    if BoxxyAuras.Options.CustomBars and BoxxyAuras.Options.CustomBars.createBarContainer then
+        return BoxxyAuras.Options.CustomBars.createBarContainer
+    end
+    return customBarsContainer
+end
+
+-- Store a function to get the proper last container for subsequent sections
+BoxxyAuras.Options.GetCustomBarsLastContainer = GetLastCustomBarContainer
+lastContainer = customBarsContainer -- Default fallback
 
 --[[------------------------------------------------------------
 -- Load, Save, and Toggle Functions
@@ -1392,6 +2310,12 @@ function BoxxyAuras.Options:Load()
     self.LockFramesCheck:SetChecked(settings.lockFrames)
     self.HideBlizzardCheck:SetChecked(settings.hideBlizzardAuras)
     self.ShowHoverBorderCheck:SetChecked(settings.showHoverBorder)
+    -- Use default value (true) if enableDotTickingAnimation is nil
+    local enableDotTicking = settings.enableDotTickingAnimation
+    if enableDotTicking == nil then
+        enableDotTicking = true -- Default to enabled
+    end
+    self.EnableDotTickingCheck:SetChecked(enableDotTicking)
 
     -- Note: Demo mode is transient, not saved, so it's not loaded here.
     -- It should be off by default when opening the panel.
@@ -1471,62 +2395,46 @@ function BoxxyAuras.Options:Load()
         end
     end
 
-    -- Load Custom Frame Settings
-    if settings.customFrameSettings then
-        -- Custom Icon Size
-        if self.CustomSizeSlider and settings.customFrameSettings.iconSize then
-            self.CustomSizeSlider:SetValue(settings.customFrameSettings.iconSize)
-        end
-
-        -- Custom Text Size
-        if self.CustomTextSizeSlider and settings.customFrameSettings.textSize then
-            self.CustomTextSizeSlider:SetValue(settings.customFrameSettings.textSize)
-        end
-
-        -- Custom Border Size
-        if self.CustomBorderSizeSlider and settings.customFrameSettings.borderSize then
-            self.CustomBorderSizeSlider:SetValue(settings.customFrameSettings.borderSize)
-        end
-
-        -- Custom Icon Spacing
-        if self.CustomSpacingSlider and settings.customFrameSettings.iconSpacing then
-            self.CustomSpacingSlider:SetValue(settings.customFrameSettings.iconSpacing)
-        end
-
-        -- Custom Text Alignment
-        if self.CustomAlignCheckboxes and settings.customFrameSettings.customTextAlign then
-            BoxxyAuras.UIBuilder.SetCheckboxRowValue(self.CustomAlignCheckboxes,
-                settings.customFrameSettings.customTextAlign)
-        end
-
-        -- Custom Wrap Direction
-        if self.CustomWrapCheckboxes and settings.customFrameSettings.wrapDirection then
-            BoxxyAuras.UIBuilder.SetCheckboxRowValue(self.CustomWrapCheckboxes,
-                settings.customFrameSettings.wrapDirection)
-        end
+    -- Load Custom Bars Data
+    if self.RefreshCustomBarTabs then
+        self:RefreshCustomBarTabs()
     end
 
-    -- Load Global Settings
-    if self.ScaleSlider and settings.optionsScale then
-        -- Ensure scale value is valid (greater than 0)
-        local scaleValue = settings.optionsScale
-        if scaleValue <= 0 then
-            scaleValue = 1.0                   -- Default to 1.0 if invalid
-            settings.optionsScale = scaleValue -- Update the settings too
+    -- Load Aura Bar Scale (note: this only updates the slider, actual scale should already be applied to frames)
+    if self.AuraBarScaleSlider and settings.auraBarScale then
+        local scaleValue = settings.auraBarScale
+        if scaleValue <= 0 then scaleValue = 1.0 end
+        settings.auraBarScale = scaleValue
+        if BoxxyAuras.DEBUG then
+            print(string.format("Loading aura bar scale from settings: %.2f", scaleValue))
         end
-        self.ScaleSlider:SetValue(scaleValue)
+        self.AuraBarScaleSlider:SetValue(scaleValue)
+    elseif self.AuraBarScaleSlider then
+        if BoxxyAuras.DEBUG then
+            print("No aura bar scale in settings, setting default 1.0")
+        end
+        self.AuraBarScaleSlider:SetValue(1.0)
+        if settings then settings.auraBarScale = 1.0 end
+    end
+
+    -- Load Options Window Scale
+    if self.OptionsWindowScaleSlider and settings.optionsWindowScale then
+        local scaleValue = settings.optionsWindowScale
+        if scaleValue <= 0 then scaleValue = 1.0 end
+        settings.optionsWindowScale = scaleValue
+        self.OptionsWindowScaleSlider:SetValue(scaleValue)
         -- Apply the saved scale immediately on load so the UI reflects the correct size
-        if self.ApplyScale then
-            self:ApplyScale(scaleValue)
+        if self.ApplyOptionsWindowScale then
+            self:ApplyOptionsWindowScale(scaleValue)
         end
-    elseif self.ScaleSlider then
+    elseif self.OptionsWindowScaleSlider then
         -- If no scale setting exists, set default value
-        self.ScaleSlider:SetValue(1.0)
-        if self.ApplyScale then
-            self:ApplyScale(1.0)
+        self.OptionsWindowScaleSlider:SetValue(1.0)
+        if self.ApplyOptionsWindowScale then
+            self:ApplyOptionsWindowScale(1.0)
         end
         if settings then
-            settings.optionsScale = 1.0
+            settings.optionsWindowScale = 1.0
         end
     end
 
@@ -1679,7 +2587,7 @@ function BoxxyAuras.Options:CreateProfile(profileName)
     -- (This overrides any LibWindow saved positions that might interfere)
     local newProfileSettings = BoxxyAuras:GetCurrentProfileSettings()
     if newProfileSettings and BoxxyAuras.Frames then
-        local frameTypes = { "Buff", "Debuff", "Custom" }
+        local frameTypes = { "Buff", "Debuff" }
         for _, frameType in ipairs(frameTypes) do
             local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
             local frame = BoxxyAuras.Frames[frameType]
@@ -1768,6 +2676,62 @@ function BoxxyAuras.Options:CancelAllUpdateTimers()
     BoxxyAuras.Options.updateTimers = {}
 end
 
+-- Helper function to generate demo auras for a specific bar
+function BoxxyAuras.Options:GenerateDemoAurasForBar(barId, barName)
+    if not BoxxyAuras.demoAuras then
+        BoxxyAuras.demoAuras = {}
+    end
+
+    local customDemoAuraTemplate = {
+        {
+            name = "Custom Aura",
+            icon = "Interface\\Icons\\Spell_Arcane_TeleportStormwind",
+            duration = 0, -- Permanent for demo
+            applications = 1,
+            spellId = 32345
+        },
+        {
+            name = "Tracking",
+            icon = "Interface\\Icons\\Spell_Nature_FaerieFire",
+            duration = 0, -- Permanent for demo
+            applications = 1,
+            spellId = 32346
+        },
+        {
+            name = "Enchant",
+            icon = "Interface\\Icons\\Spell_Holy_GreaterHeal",
+            duration = 0, -- Permanent for demo
+            applications = 1,
+            spellId = 32347
+        },
+        {
+            name = "Proc",
+            icon = "Interface\\Icons\\Spell_Lightning_LightningBolt01",
+            duration = 0, -- Permanent for demo
+            applications = 5,
+            spellId = 32348
+        }
+    }
+
+    BoxxyAuras.demoAuras[barId] = {}
+    for i, templateAura in ipairs(customDemoAuraTemplate) do
+        -- Deep copy to avoid modifying the template
+        local newAura = BoxxyAuras:DeepCopyTable(templateAura)
+
+        -- Customize for the specific bar
+        newAura.name = barName .. " - " .. templateAura.name
+        newAura.auraInstanceID = "demo_" .. barId .. "_" .. i
+        newAura.expirationTime = 0 -- Always permanent for demo mode
+        newAura.isDemoAura = true  -- Mark as demo aura
+        table.insert(BoxxyAuras.demoAuras[barId], newAura)
+    end
+
+    if BoxxyAuras.DEBUG then
+        print("|cff00FF00BoxxyAuras:|r Generated " ..
+            #BoxxyAuras.demoAuras[barId] .. " demo auras for bar '" .. barName .. "'")
+    end
+end
+
 -- Set demo mode on/off
 function BoxxyAuras.Options:SetDemoMode(enable)
     -- Cancel any pending layout updates to prevent conflicts
@@ -1778,189 +2742,204 @@ function BoxxyAuras.Options:SetDemoMode(enable)
     if enable then
         print("|cff00FF00BoxxyAuras:|r Demo mode enabled - showing test auras.")
 
-        -- Create some test auras for each frame type
-        if not BoxxyAuras.demoAuras then
-            BoxxyAuras.demoAuras = {
-                Buff = {
-                    {
-                        name = "Demo Blessing",
-                        icon = "Interface\\Icons\\Spell_Holy_GreaterBlessofKings",
-                        duration = 300,
-                        expirationTime = GetTime() + 300,
-                        applications = 1,
-                        spellId = 12345,
-                        auraInstanceID = "demo_buff_1"
-                    },
-                    {
-                        name = "Demo Shield",
-                        icon = "Interface\\Icons\\Spell_Holy_PowerWordShield",
-                        duration = 0, -- Permanent
-                        expirationTime = 0,
-                        applications = 3,
-                        spellId = 12346,
-                        auraInstanceID = "demo_buff_2"
-                    },
-                    {
-                        name = "Demo Haste",
-                        icon = "Interface\\Icons\\Spell_Nature_Bloodlust",
-                        duration = 120,
-                        expirationTime = GetTime() + 120,
-                        applications = 1,
-                        spellId = 12347,
-                        auraInstanceID = "demo_buff_3"
-                    },
-                    {
-                        name = "Demo Strength",
-                        icon = "Interface\\Icons\\Spell_Holy_GreaterBlessofWisdom",
-                        duration = 600,
-                        expirationTime = GetTime() + 600,
-                        applications = 1,
-                        spellId = 12348,
-                        auraInstanceID = "demo_buff_4"
-                    },
-                    {
-                        name = "Demo Intellect",
-                        icon = "Interface\\Icons\\Spell_Holy_MindVision",
-                        duration = 450,
-                        expirationTime = GetTime() + 450,
-                        applications = 1,
-                        spellId = 12349,
-                        auraInstanceID = "demo_buff_5"
-                    },
-                    {
-                        name = "Demo Regeneration",
-                        icon = "Interface\\Icons\\Spell_Nature_Rejuvenation",
-                        duration = 90,
-                        expirationTime = GetTime() + 90,
-                        applications = 1,
-                        spellId = 12350,
-                        auraInstanceID = "demo_buff_6"
-                    },
-                    {
-                        name = "Demo Fortitude",
-                        icon = "Interface\\Icons\\Spell_Holy_PrayerofFortitude",
-                        duration = 1800,
-                        expirationTime = GetTime() + 1800,
-                        applications = 1,
-                        spellId = 12351,
-                        auraInstanceID = "demo_buff_7"
-                    },
-                    {
-                        name = "Demo Spirit",
-                        icon = "Interface\\Icons\\Spell_Holy_PrayerofSpirit",
-                        duration = 1200,
-                        expirationTime = GetTime() + 1200,
-                        applications = 1,
-                        spellId = 12352,
-                        auraInstanceID = "demo_buff_8"
-                    }
+        -- Dynamically create demo auras
+        BoxxyAuras.demoAuras = {
+            Buff = {
+                {
+                    name = "Demo Blessing",
+                    icon = "Interface\\Icons\\Spell_Holy_GreaterBlessofKings",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 1,
+                    spellId = 12345,
+                    auraInstanceID = "demo_buff_1",
+                    isDemoAura = true
                 },
-                Debuff = {
-                    {
-                        name = "Demo Curse",
-                        icon = "Interface\\Icons\\Spell_Shadow_CurseOfTounges",
-                        duration = 60,
-                        expirationTime = GetTime() + 60,
-                        applications = 1,
-                        spellId = 22345,
-                        auraInstanceID = "demo_debuff_1",
-                        dispelName = "CURSE"
-                    },
-                    {
-                        name = "Demo Poison",
-                        icon = "Interface\\Icons\\Spell_Nature_CorrosiveBreath",
-                        duration = 45,
-                        expirationTime = GetTime() + 45,
-                        applications = 2,
-                        spellId = 22346,
-                        auraInstanceID = "demo_debuff_2",
-                        dispelName = "POISON"
-                    },
-                    {
-                        name = "Demo Disease",
-                        icon = "Interface\\Icons\\Spell_Shadow_AbominationExplosion",
-                        duration = 30,
-                        expirationTime = GetTime() + 30,
-                        applications = 1,
-                        spellId = 22347,
-                        auraInstanceID = "demo_debuff_3",
-                        dispelName = "DISEASE"
-                    },
-                    {
-                        name = "Demo Magic Debuff",
-                        icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain",
-                        duration = 25,
-                        expirationTime = GetTime() + 25,
-                        applications = 1,
-                        spellId = 22348,
-                        auraInstanceID = "demo_debuff_4",
-                        dispelName = "MAGIC"
-                    },
-                    {
-                        name = "Demo Weakness",
-                        icon = "Interface\\Icons\\Spell_Shadow_CurseOfMannoroth",
-                        duration = 40,
-                        expirationTime = GetTime() + 40,
-                        applications = 1,
-                        spellId = 22349,
-                        auraInstanceID = "demo_debuff_5"
-                    },
-                    {
-                        name = "Demo Slow",
-                        icon = "Interface\\Icons\\Spell_Frost_FrostShock",
-                        duration = 15,
-                        expirationTime = GetTime() + 15,
-                        applications = 1,
-                        spellId = 22350,
-                        auraInstanceID = "demo_debuff_6"
-                    }
+                {
+                    name = "Demo Shield",
+                    icon = "Interface\\Icons\\Spell_Holy_PowerWordShield",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 3,
+                    spellId = 12346,
+                    auraInstanceID = "demo_buff_2",
+                    isDemoAura = true
                 },
-                Custom = {
-                    {
-                        name = "Demo Custom Aura",
-                        icon = "Interface\\Icons\\Spell_Arcane_TeleportStormwind",
-                        duration = 180,
-                        expirationTime = GetTime() + 180,
-                        applications = 1,
-                        spellId = 32345,
-                        auraInstanceID = "demo_custom_1"
-                    },
-                    {
-                        name = "Demo Tracking",
-                        icon = "Interface\\Icons\\Spell_Nature_FaerieFire",
-                        duration = 0, -- Permanent
-                        expirationTime = 0,
-                        applications = 1,
-                        spellId = 32346,
-                        auraInstanceID = "demo_custom_2"
-                    },
-                    {
-                        name = "Demo Enchant",
-                        icon = "Interface\\Icons\\Spell_Holy_GreaterHeal",
-                        duration = 300,
-                        expirationTime = GetTime() + 300,
-                        applications = 1,
-                        spellId = 32347,
-                        auraInstanceID = "demo_custom_3"
-                    },
-                    {
-                        name = "Demo Proc",
-                        icon = "Interface\\Icons\\Spell_Lightning_LightningBolt01",
-                        duration = 12,
-                        expirationTime = GetTime() + 12,
-                        applications = 5,
-                        spellId = 32348,
-                        auraInstanceID = "demo_custom_4"
-                    }
+                {
+                    name = "Demo Haste",
+                    icon = "Interface\\Icons\\Spell_Nature_Bloodlust",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 1,
+                    spellId = 12347,
+                    auraInstanceID = "demo_buff_3",
+                    isDemoAura = true
+                },
+                {
+                    name = "Demo Strength",
+                    icon = "Interface\\Icons\\Spell_Holy_GreaterBlessofWisdom",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 1,
+                    spellId = 12348,
+                    auraInstanceID = "demo_buff_4",
+                    isDemoAura = true
+                },
+                {
+                    name = "Demo Intellect",
+                    icon = "Interface\\Icons\\Spell_Holy_MindVision",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 1,
+                    spellId = 12349,
+                    auraInstanceID = "demo_buff_5",
+                    isDemoAura = true
+                },
+                {
+                    name = "Demo Regeneration",
+                    icon = "Interface\\Icons\\Spell_Nature_Rejuvenation",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 1,
+                    spellId = 12350,
+                    auraInstanceID = "demo_buff_6",
+                    isDemoAura = true
+                },
+                {
+                    name = "Demo Fortitude",
+                    icon = "Interface\\Icons\\Spell_Holy_PrayerofFortitude",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 1,
+                    spellId = 12351,
+                    auraInstanceID = "demo_buff_7",
+                    isDemoAura = true
+                },
+                {
+                    name = "Demo Spirit",
+                    icon = "Interface\\Icons\\Spell_Holy_PrayerofSpirit",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 1,
+                    spellId = 12352,
+                    auraInstanceID = "demo_buff_8",
+                    isDemoAura = true
+                }
+            },
+            Debuff = {
+                {
+                    name = "Demo Curse",
+                    icon = "Interface\\Icons\\Spell_Shadow_CurseOfTounges",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 1,
+                    spellId = 22345,
+                    auraInstanceID = "demo_debuff_1",
+                    dispelName = "CURSE",
+                    isDemoAura = true
+                },
+                {
+                    name = "Demo Poison",
+                    icon = "Interface\\Icons\\Spell_Nature_CorrosiveBreath",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 2,
+                    spellId = 22346,
+                    auraInstanceID = "demo_debuff_2",
+                    dispelName = "POISON",
+                    isDemoAura = true
+                },
+                {
+                    name = "Demo Disease",
+                    icon = "Interface\\Icons\\Spell_Shadow_AbominationExplosion",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 1,
+                    spellId = 22347,
+                    auraInstanceID = "demo_debuff_3",
+                    dispelName = "DISEASE",
+                    isDemoAura = true
+                },
+                {
+                    name = "Demo Magic Debuff",
+                    icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 1,
+                    spellId = 22348,
+                    auraInstanceID = "demo_debuff_4",
+                    dispelName = "MAGIC",
+                    isDemoAura = true
+                },
+                {
+                    name = "Demo Weakness",
+                    icon = "Interface\\Icons\\Spell_Shadow_CurseOfMannoroth",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 1,
+                    spellId = 22349,
+                    auraInstanceID = "demo_debuff_5",
+                    isDemoAura = true
+                },
+                {
+                    name = "Demo Slow",
+                    icon = "Interface\\Icons\\Spell_Frost_FrostShock",
+                    duration = 0, -- Permanent for demo
+                    expirationTime = 0,
+                    applications = 1,
+                    spellId = 22350,
+                    auraInstanceID = "demo_debuff_6",
+                    isDemoAura = true
                 }
             }
-        end
+        }
 
-        -- Update expiration times for demo auras
-        for frameType, auras in pairs(BoxxyAuras.demoAuras) do
-            for _, aura in ipairs(auras) do
-                if aura.duration > 0 then
-                    aura.expirationTime = GetTime() + aura.duration
+        -- Generate demo auras for all custom bars
+        local settings = GetCurrentProfileSettings()
+        if settings and settings.customFrameProfiles then
+            local customDemoAuraTemplate = {
+                {
+                    name = "Custom Aura",
+                    icon = "Interface\\Icons\\Spell_Arcane_TeleportStormwind",
+                    duration = 0, -- Make permanent for demo
+                    applications = 1,
+                    spellId = 32345
+                },
+                {
+                    name = "Tracking",
+                    icon = "Interface\\Icons\\Spell_Nature_FaerieFire",
+                    duration = 0, -- Make permanent for demo
+                    applications = 1,
+                    spellId = 32346
+                },
+                {
+                    name = "Enchant",
+                    icon = "Interface\\Icons\\Spell_Holy_GreaterHeal",
+                    duration = 0, -- Make permanent for demo
+                    applications = 1,
+                    spellId = 32347
+                },
+                {
+                    name = "Proc",
+                    icon = "Interface\\Icons\\Spell_Lightning_LightningBolt01",
+                    duration = 0, -- Make permanent for demo
+                    applications = 5,
+                    spellId = 32348
+                }
+            }
+
+            for barId, barConfig in pairs(settings.customFrameProfiles) do
+                BoxxyAuras.demoAuras[barId] = {}
+                for i, templateAura in ipairs(customDemoAuraTemplate) do
+                    -- Deep copy to avoid modifying the template
+                    local newAura = BoxxyAuras:DeepCopyTable(templateAura)
+
+                    -- Customize for the specific bar
+                    newAura.name = (barConfig.name or "Custom") .. " - " .. templateAura.name
+                    newAura.auraInstanceID = "demo_" .. barId .. "_" .. i
+                    newAura.expirationTime = 0 -- Always permanent for demo mode
+                    newAura.isDemoAura = true  -- Mark as demo aura
+                    table.insert(BoxxyAuras.demoAuras[barId], newAura)
                 end
             end
         end
@@ -1978,6 +2957,27 @@ function BoxxyAuras.Options:SetDemoMode(enable)
     -- Add a small delay to prevent performance issues when creating many demo auras
     C_Timer.After(0.1, function()
         BoxxyAuras.UpdateAuras(true)
+
+        -- If enabling demo mode, set up a timer to prevent normal updates from interfering
+        if enable then
+            -- Cancel any existing demo update timer
+            if BoxxyAuras.Options.demoUpdateTimer then
+                BoxxyAuras.Options.demoUpdateTimer:Cancel()
+            end
+
+            -- Set up a repeating timer to maintain demo auras (less frequent to prevent flicker)
+            BoxxyAuras.Options.demoUpdateTimer = C_Timer.NewTicker(5.0, function()
+                if BoxxyAuras.Options.demoModeActive then
+                    BoxxyAuras.UpdateAuras(false) -- Refresh demo auras
+                end
+            end)
+        else
+            -- Cancel the demo update timer when disabling demo mode
+            if BoxxyAuras.Options.demoUpdateTimer then
+                BoxxyAuras.Options.demoUpdateTimer:Cancel()
+                BoxxyAuras.Options.demoUpdateTimer = nil
+            end
+        end
     end)
 end
 
@@ -2052,7 +3052,7 @@ function SlashCmdList.BOXXYAURAS(msg, editBox)
             return
         end
 
-        local frameTypes = { "Buff", "Debuff", "Custom" }
+        local frameTypes = { "Buff", "Debuff" }
         for _, frameType in ipairs(frameTypes) do
             local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
             local frame = BoxxyAuras.Frames and BoxxyAuras.Frames[frameType]
@@ -2106,4 +3106,46 @@ function SlashCmdList.BOXXYAURAS(msg, editBox)
         print("BoxxyAuras: Unknown command '/ba " ..
             command .. "'. Use '/ba options', '/ba lock', '/ba reset', or '/ba debug'.")
     end
+end
+
+-- === Aura Bar Scale Slider ===
+local auraBarScaleSlider = generalContainer:AddSlider("Aura Bar Scale", 0.5, 2.0, 0.05, function(value)
+    -- Update saved variable but do NOT immediately rescale the aura bars.
+    local currentSettings = GetCurrentProfileSettings()
+    if currentSettings then
+        currentSettings.auraBarScale = value
+    end
+end, false, { labelWidth = 140 }) -- use debounced callback
+
+BoxxyAuras.Options.AuraBarScaleSlider = auraBarScaleSlider
+
+-- Apply the scale only when the user releases the mouse button on the slider
+if auraBarScaleSlider then
+    auraBarScaleSlider:HookScript("OnMouseUp", function(self)
+        local val = self:GetValue()
+        if BoxxyAuras.Options and BoxxyAuras.Options.ApplyAuraBarScale then
+            BoxxyAuras.Options:ApplyAuraBarScale(val)
+        end
+    end)
+end
+
+-- === Options Window Scale Slider ===
+local optionsWindowScaleSlider = generalContainer:AddSlider("Options Window Scale", 0.5, 2.0, 0.05, function(value)
+    -- Update saved variable but do NOT immediately rescale the options window.
+    local currentSettings = GetCurrentProfileSettings()
+    if currentSettings then
+        currentSettings.optionsWindowScale = value
+    end
+end, false, { labelWidth = 140 }) -- use debounced callback
+
+BoxxyAuras.Options.OptionsWindowScaleSlider = optionsWindowScaleSlider
+
+-- Apply the scale only when the user releases the mouse button on the slider
+if optionsWindowScaleSlider then
+    optionsWindowScaleSlider:HookScript("OnMouseUp", function(self)
+        local val = self:GetValue()
+        if BoxxyAuras.Options and BoxxyAuras.Options.ApplyOptionsWindowScale then
+            BoxxyAuras.Options:ApplyOptionsWindowScale(val)
+        end
+    end)
 end

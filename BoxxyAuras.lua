@@ -2,7 +2,7 @@ local addonNameString, privateTable = ... -- Use different names for the local v
 _G.BoxxyAuras = _G.BoxxyAuras or {}       -- Explicitly create/assign the GLOBAL table
 local BoxxyAuras = _G.BoxxyAuras          -- Create a convenient local alias to the global table
 
-BoxxyAuras.Version = "1.3.1"
+BoxxyAuras.Version = "1.4.0"
 
 BoxxyAuras.AllAuras = {}         -- Global cache for aura info
 BoxxyAuras.recentAuraEvents = {} -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
@@ -315,11 +315,35 @@ function BoxxyAuras:GetDefaultProfileSettings()
     return {
         lockFrames = false,
         hideBlizzardAuras = true,
-        showHoverBorder = true,                                            -- Enable hover border by default
-        optionsScale = 1.0,
+        showHoverBorder = true,           -- Enable hover border by default
+        enableDotTickingAnimation = true, -- Enable dot ticking animation by default
+        auraBarScale = 1.0,
+        optionsWindowScale = 1.0,
         normalBorderColor = { r = 0.498, g = 0.498, b = 0.498, a = 1.0 },  -- Default normal border color (127,127,127)
         normalBackgroundColor = { r = 0.15, g = 0.15, b = 0.15, a = 1.0 }, -- Default background color (25,25,25)
+
+        -- NEW: Multiple custom bar support
+        customFrameProfiles = {},
+        customAuraAssignments = {}, -- Maps aura name -> custom bar ID
+
+        -- Keep legacy fields for backwards compatibility during migration
         customAuraNames = {},
+        customFrameSettings = {
+            -- Highest bar in the default stack
+            x = 0,
+            y = -60,
+            anchor = "TOP",
+            height = defaultMinHeight,
+            numIconsWide = defaultIconsWide_Reset,
+            customTextAlign = "CENTER",
+            iconSize = 24,
+            textSize = 8,
+            borderSize = 1,
+            iconSpacing = 0,
+            wrapDirection = "DOWN",
+            width = defaultWidth
+        },
+
         buffFrameSettings = {
             -- Default: lower of the three bars, roughly top-middle of the screen
             x = 0,
@@ -343,21 +367,6 @@ function BoxxyAuras:GetDefaultProfileSettings()
             height = defaultMinHeight,
             numIconsWide = defaultIconsWide_Reset,
             debuffTextAlign = "CENTER",
-            iconSize = 24,
-            textSize = 8,
-            borderSize = 1,
-            iconSpacing = 0,
-            wrapDirection = "DOWN",
-            width = defaultWidth
-        },
-        customFrameSettings = {
-            -- Highest bar in the default stack
-            x = 0,
-            y = -60,
-            anchor = "TOP",
-            height = defaultMinHeight,
-            numIconsWide = defaultIconsWide_Reset,
-            customTextAlign = "CENTER",
             iconSize = 24,
             textSize = 8,
             borderSize = 1,
@@ -391,6 +400,76 @@ function BoxxyAuras:GetActiveProfileName()
     return BoxxyAurasDB.characterProfileMap[charKey] or "Default"
 end
 
+-- <<< NEW: Migration function for multiple custom bars >>>
+function BoxxyAuras:MigrateProfileToMultipleCustomBars(profile)
+    if not profile then
+        return
+    end
+
+    -- Check if migration is needed (old format exists but new format doesn't)
+    local needsMigration = profile.customAuraNames and
+        next(profile.customAuraNames) and
+        (not profile.customFrameProfiles or not next(profile.customFrameProfiles))
+
+    if needsMigration then
+        if BoxxyAuras.DEBUG then
+            print("BoxxyAuras: Migrating profile to multiple custom bars format")
+        end
+
+        -- Initialize new structures if they don't exist
+        profile.customFrameProfiles = profile.customFrameProfiles or {}
+        profile.customAuraAssignments = profile.customAuraAssignments or {}
+
+        -- Clear old customAuraNames since we're not migrating them to a Custom bar anymore
+        if profile.customAuraNames then
+            profile.customAuraNames = {}
+        end
+
+        if BoxxyAuras.DEBUG then
+            print(string.format("BoxxyAuras: Migrated %d auras to Custom bar",
+                profile.customAuraNames and self:TableCount(profile.customAuraNames) or 0))
+        end
+    end
+end
+
+-- Helper function to count table entries
+function BoxxyAuras:TableCount(t)
+    local count = 0
+    if t then
+        for _ in pairs(t) do
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- Helper function to determine if a frame type is a custom frame
+function BoxxyAuras:IsCustomFrameType(frameType)
+    -- Check if it's a custom frame
+    local currentSettings = self:GetCurrentProfileSettings()
+    if currentSettings.customFrameProfiles then
+        return currentSettings.customFrameProfiles[frameType] ~= nil
+    end
+
+    return false
+end
+
+-- Helper function to get all active frame types (including dynamic custom frames)
+function BoxxyAuras:GetAllActiveFrameTypes()
+    local frameTypes = { "Buff", "Debuff" }
+
+    local currentSettings = self:GetCurrentProfileSettings()
+    if currentSettings.customFrameProfiles then
+        for customFrameId, _ in pairs(currentSettings.customFrameProfiles) do
+            table.insert(frameTypes, customFrameId)
+        end
+    end
+
+
+
+    return frameTypes
+end
+
 -- Helper to get the active profile's settings table
 function BoxxyAuras:GetCurrentProfileSettings()
     if not BoxxyAurasDB then
@@ -415,17 +494,29 @@ function BoxxyAuras:GetCurrentProfileSettings()
 
     local profile = BoxxyAurasDB.profiles[activeKey]
 
+    -- <<< NEW: Migration logic for multiple custom bars >>>
+    self:MigrateProfileToMultipleCustomBars(profile)
+
     -- <<< Ensure nested tables and default values exist (existing logic) >>>
     profile.buffFrameSettings = profile.buffFrameSettings or {}
     profile.debuffFrameSettings = profile.debuffFrameSettings or {}
+
+    -- Ensure new data structures exist
+    profile.customFrameProfiles = profile.customFrameProfiles or {}
+    profile.customAuraAssignments = profile.customAuraAssignments or {}
+
+    -- Keep legacy fields for backwards compatibility
     profile.customFrameSettings = profile.customFrameSettings or {}
     profile.customAuraNames = profile.customAuraNames or {}
 
     if profile.lockFrames == nil then
         profile.lockFrames = false
     end
-    if profile.optionsScale == nil then
-        profile.optionsScale = 1.0
+    if profile.auraBarScale == nil then
+        profile.auraBarScale = 1.0
+    end
+    if profile.optionsWindowScale == nil then
+        profile.optionsWindowScale = 1.0
     end
     if profile.hideBlizzardAuras == nil then
         profile.hideBlizzardAuras = true
@@ -710,7 +801,7 @@ local function InitializeAuras()
         local auraFilter = "HELPFUL"
         if frameType == "Debuff" then
             auraFilter = "HARMFUL"
-        elseif frameType == "Custom" then
+        elseif BoxxyAuras:IsCustomFrameType(frameType) then
             auraFilter = "CUSTOM"
         end
 
@@ -745,6 +836,16 @@ BoxxyAuras.UpdateSingleFrameAuras = function(frameType)
         end
         return
     end
+
+    -- << NEW: Demo Mode Handling >>
+    if BoxxyAuras.Options and BoxxyAuras.Options.demoModeActive and BoxxyAuras.demoAuras then
+        -- In demo mode, don't update individual frames - demo auras are stable
+        if BoxxyAuras.DEBUG then
+            print("UpdateSingleFrameAuras: Skipping update for " .. frameType .. " - demo mode active")
+        end
+        return
+    end
+    -- << END Demo Mode Handling >>
 
     -- Initialize necessary collections if they don't exist
     if not BoxxyAuras.auraTracking then
@@ -868,9 +969,121 @@ BoxxyAuras.UpdateSingleFrameAuras = function(frameType)
     BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType)
 end
 
+-- Helper function to update a specific frame with provided auras (used for demo mode)
+function BoxxyAuras:UpdateFrameWithAuras(frameType, auraList)
+    local frame = BoxxyAuras.Frames[frameType]
+    if not frame then
+        return
+    end
+
+    local AuraIcon = BoxxyAuras.AuraIcon
+    if not AuraIcon then
+        return
+    end
+
+    -- Initialize collections if they don't exist
+    if not BoxxyAuras.auraTracking then
+        BoxxyAuras.auraTracking = {}
+    end
+    if not BoxxyAuras.iconArrays then
+        BoxxyAuras.iconArrays = {}
+    end
+    if not BoxxyAuras.iconPools then
+        BoxxyAuras.iconPools = {}
+    end
+
+    -- Initialize for this frame type
+    if not BoxxyAuras.auraTracking[frameType] then
+        BoxxyAuras.auraTracking[frameType] = {}
+    end
+    if not BoxxyAuras.iconArrays[frameType] then
+        BoxxyAuras.iconArrays[frameType] = {}
+    end
+    if not BoxxyAuras.iconPools[frameType] then
+        BoxxyAuras.iconPools[frameType] = {}
+    end
+
+    local iconArray = BoxxyAuras.iconArrays[frameType]
+    local iconPool = BoxxyAuras.iconPools[frameType]
+
+    -- Check if we need to update (only if aura count changed or this is the first time)
+    local existingAuraCount = #iconArray
+    local newAuraCount = #auraList
+
+    -- For demo mode, only update if the count has changed to prevent unnecessary re-sorting
+    if existingAuraCount == newAuraCount and BoxxyAuras.Options and BoxxyAuras.Options.demoModeActive then
+        -- Verify the auras are the same by checking instance IDs
+        local needsUpdate = false
+        for i, auraData in ipairs(auraList) do
+            local existingAura = BoxxyAuras.auraTracking[frameType] and BoxxyAuras.auraTracking[frameType][i]
+            if not existingAura or existingAura.auraInstanceID ~= auraData.auraInstanceID then
+                needsUpdate = true
+                break
+            end
+        end
+
+        if not needsUpdate then
+            return -- Skip update if demo auras haven't changed
+        end
+    end
+
+    local newIconArray = {}
+    local newTrackedAuras = {}
+
+    -- Clear existing icons only if we're changing the count
+    if existingAuraCount ~= newAuraCount then
+        for i, icon in ipairs(iconArray) do
+            BoxxyAuras.ReturnIconToPool(iconPool, icon)
+        end
+        iconArray = {} -- Clear the array
+    end
+
+    -- Create or reuse icons for the provided auras
+    for i, auraData in ipairs(auraList) do
+        local icon = iconArray[i] or BoxxyAuras.GetOrCreateIcon(iconPool, i, frame, "BoxxyAuras" .. frameType .. "Icon")
+        if icon then
+            local auraFilter = (frameType == "Debuff") and "HARMFUL" or "HELPFUL"
+            icon:Update(auraData, i, auraFilter)
+            icon.frame:Show()
+            newIconArray[i] = icon
+        end
+        newTrackedAuras[i] = auraData
+    end
+
+    -- Update the tracking arrays
+    BoxxyAuras.auraTracking[frameType] = newTrackedAuras
+    BoxxyAuras.iconArrays[frameType] = newIconArray
+end
+
 -- Function to update displayed auras using cache comparison and stable order
 BoxxyAuras.UpdateAuras = function(forceRefresh)
     local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+
+    -- << NEW: Demo Mode Handling >>
+    if BoxxyAuras.Options and BoxxyAuras.Options.demoModeActive and BoxxyAuras.demoAuras then
+        -- In demo mode, use demo auras instead of real auras
+        -- Process demo auras by frame type directly from the stored demo auras
+        for frameId, demoAuras in pairs(BoxxyAuras.demoAuras) do
+            if BoxxyAuras.Frames[frameId] then
+                -- Create a stable copy of demo auras to prevent modifications
+                local stableDemoAuras = {}
+                for i, aura in ipairs(demoAuras) do
+                    local stableAura = BoxxyAuras:DeepCopyTable(aura)
+                    stableAura.frameType = frameId
+                    stableAura.isDemoAura = true
+                    stableAura.forceExpired = false -- Ensure demo auras are never treated as expired
+                    table.insert(stableDemoAuras, stableAura)
+                end
+
+                BoxxyAuras:UpdateFrameWithAuras(frameId, stableDemoAuras)
+            end
+        end
+
+        -- Update layout for all frames
+        BoxxyAuras.FrameHandler.UpdateAllFramesAuras()
+        return
+    end
+    -- << END Demo Mode Handling >>
 
     -- Clean up recent aura events older than 0.5 seconds
     local cleanupTime = GetTime() - 0.5
@@ -1103,8 +1316,11 @@ function BoxxyAuras:GetSortedAurasForFrame(frameType)
         end
     else
         -- Fetch live auras from the game
-        if frameType == "Custom" then
-            -- For Custom, we need to check both buffs and debuffs
+        -- For any custom frame type, we need to check both buffs and debuffs
+        local isCustomFrame = self:IsCustomFrameType(frameType)
+
+        if isCustomFrame then
+            -- For Custom frames, we need to check both buffs and debuffs
             local filters = { "HELPFUL", "HARMFUL" }
             for _, filter in ipairs(filters) do
                 if C_UnitAuras and C_UnitAuras.GetAuraSlots then
@@ -1138,26 +1354,51 @@ function BoxxyAuras:GetSortedAurasForFrame(frameType)
         end
     end
 
-    -- For Buff and Debuff frames, we need to filter out auras designated for the Custom frame
-    local customNamesLookup = {}
-    if currentSettings.customAuraNames then
-        for name, _ in pairs(currentSettings.customAuraNames) do
-            customNamesLookup[string.lower(name)] = true
+    -- Build lookup tables for aura assignments
+    local customAuraAssignments = {}
+    local legacyCustomNamesLookup = {}
+
+    -- NEW: Use customAuraAssignments for multiple custom bars
+    if currentSettings.customAuraAssignments then
+        for auraName, assignedFrameType in pairs(currentSettings.customAuraAssignments) do
+            customAuraAssignments[string.lower(auraName)] = assignedFrameType
         end
     end
 
+    -- LEGACY: Also check old customAuraNames for backwards compatibility
+    if currentSettings.customAuraNames then
+        for name, _ in pairs(currentSettings.customAuraNames) do
+            legacyCustomNamesLookup[string.lower(name)] = true
+            -- If not already assigned via new system, assign to "Custom"
+            if not customAuraAssignments[string.lower(name)] then
+                customAuraAssignments[string.lower(name)] = "Custom"
+            end
+        end
+    end
+
+    -- Filter auras based on frame type
     if frameType == "Buff" or frameType == "Debuff" then
+        -- For Buff/Debuff frames, exclude auras assigned to any custom frame
         local filteredAuras = {}
         for _, auraData in ipairs(allAuras) do
-            if not customNamesLookup[string.lower(auraData.name or "")] then
+            local auraNameLower = string.lower(auraData.name or "")
+            local assignedTo = customAuraAssignments[auraNameLower]
+
+            -- Include aura if it's not assigned to any custom frame
+            if not assignedTo then
                 table.insert(filteredAuras, auraData)
             end
         end
         allAuras = filteredAuras
-    elseif frameType == "Custom" then
+    elseif self:IsCustomFrameType(frameType) then
+        -- For custom frames, include only auras assigned to this specific frame
         local filteredAuras = {}
         for _, auraData in ipairs(allAuras) do
-            if customNamesLookup[string.lower(auraData.name or "")] then
+            local auraNameLower = string.lower(auraData.name or "")
+            local assignedTo = customAuraAssignments[auraNameLower]
+
+            -- Include aura if it's assigned to this specific custom frame
+            if assignedTo == frameType then
                 table.insert(filteredAuras, auraData)
             end
         end
@@ -1508,35 +1749,44 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                 end
 
                 if targetAuraInstanceID then
-                    -- Iterate over the correct icon array
-                    if BoxxyAuras.iconArrays and BoxxyAuras.iconArrays["Debuff"] then
-                        for _, auraIcon in ipairs(BoxxyAuras.iconArrays["Debuff"]) do
-                            if auraIcon and auraIcon.auraInstanceID == targetAuraInstanceID then
-                                if auraIcon.Shake then
-                                    local shakeScale = 1.0
-                                    local maxHealth = UnitHealthMax("player")
-                                    if maxHealth and maxHealth > 0 then
-                                        local damagePercent = amount / maxHealth
-                                        local minScale = BoxxyAuras.Config.MinShakeScale or 0.5
-                                        local maxScale = BoxxyAuras.Config.MaxShakeScale or 2.0
-                                        local minPercent = BoxxyAuras.Config.MinDamagePercentForShake or 0.01
-                                        local maxPercent = BoxxyAuras.Config.MaxDamagePercentForShake or 0.10
-                                        if minPercent >= maxPercent then
-                                            maxPercent = minPercent + 0.01
+                    -- Check if dot ticking animation is enabled
+                    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+                    local animationEnabled = currentSettings and currentSettings.enableDotTickingAnimation
+                    if animationEnabled == nil then
+                        animationEnabled = true -- Default to enabled if setting doesn't exist
+                    end
+
+                    if animationEnabled then
+                        -- Iterate over the correct icon array
+                        if BoxxyAuras.iconArrays and BoxxyAuras.iconArrays["Debuff"] then
+                            for _, auraIcon in ipairs(BoxxyAuras.iconArrays["Debuff"]) do
+                                if auraIcon and auraIcon.auraInstanceID == targetAuraInstanceID then
+                                    if auraIcon.Shake then
+                                        local shakeScale = 1.0
+                                        local maxHealth = UnitHealthMax("player")
+                                        if maxHealth and maxHealth > 0 then
+                                            local damagePercent = amount / maxHealth
+                                            local minScale = BoxxyAuras.Config.MinShakeScale or 0.5
+                                            local maxScale = BoxxyAuras.Config.MaxShakeScale or 2.0
+                                            local minPercent = BoxxyAuras.Config.MinDamagePercentForShake or 0.01
+                                            local maxPercent = BoxxyAuras.Config.MaxDamagePercentForShake or 0.10
+                                            if minPercent >= maxPercent then
+                                                maxPercent = minPercent + 0.01
+                                            end
+                                            if damagePercent <= minPercent then
+                                                shakeScale = minScale
+                                            elseif damagePercent >= maxPercent then
+                                                shakeScale = maxScale
+                                            else
+                                                local percentInRange =
+                                                    (damagePercent - minPercent) / (maxPercent - minPercent)
+                                                shakeScale = minScale + (maxScale - minScale) * percentInRange
+                                            end
                                         end
-                                        if damagePercent <= minPercent then
-                                            shakeScale = minScale
-                                        elseif damagePercent >= maxPercent then
-                                            shakeScale = maxScale
-                                        else
-                                            local percentInRange =
-                                                (damagePercent - minPercent) / (maxPercent - minPercent)
-                                            shakeScale = minScale + (maxScale - minScale) * percentInRange
-                                        end
+                                        auraIcon:Shake(shakeScale)
                                     end
-                                    auraIcon:Shake(shakeScale)
+                                    break
                                 end
-                                break
                             end
                         end
                     end
@@ -1631,10 +1881,15 @@ function BoxxyAuras:SwitchToProfile(profileName)
     local currentSettings = self:GetCurrentProfileSettings() or {}
 
     ------------------------------------------------------------------
+    -- NEW: Reconcile custom frames to match the new profile
+    ------------------------------------------------------------------
+    self:ReconcileCustomFrames(currentSettings)
+
+    ------------------------------------------------------------------
     -- 1. Apply frame-level settings (width/scale/icon layout etc.)
     ------------------------------------------------------------------
     if self.FrameHandler and self.FrameHandler.ApplySettings then
-        local frameTypes = { "Buff", "Debuff", "Custom" }
+        local frameTypes = self:GetAllActiveFrameTypes()
         for _, frameType in ipairs(frameTypes) do
             self.FrameHandler.ApplySettings(frameType)
         end
@@ -1646,16 +1901,11 @@ function BoxxyAuras:SwitchToProfile(profileName)
     if LibWindow and self.Frames then
         for frameType, frame in pairs(self.Frames) do
             if frame then
-                -- Re-register the frame with the correct settings path for this profile
-                local settingsKey = self.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-                if settingsKey then
-                    -- Ensure the settings table exists
-                    if not currentSettings[settingsKey] then
-                        currentSettings[settingsKey] = {}
-                    end
-
+                -- Get the correct settings table for this frame type
+                local settingsTable = self.FrameHandler.GetFrameSettingsTable(frameType)
+                if settingsTable then
                     -- Re-register with LibWindow using the correct settings table
-                    LibWindow.RegisterConfig(frame, currentSettings[settingsKey])
+                    LibWindow.RegisterConfig(frame, settingsTable)
 
                     -- Now restore the position
                     LibWindow.RestorePosition(frame)
@@ -1664,7 +1914,7 @@ function BoxxyAuras:SwitchToProfile(profileName)
                         print(string.format("Re-registered and restored position for %s frame", frameType))
                     end
                 else
-                    BoxxyAuras.DebugLogError("Could not determine settings key for frame type: " .. tostring(frameType))
+                    BoxxyAuras.DebugLogError("Could not get settings table for frame type: " .. tostring(frameType))
                 end
             end
         end
@@ -1704,6 +1954,147 @@ function BoxxyAuras:SwitchToProfile(profileName)
     end
 
     return true
+end
+
+function BoxxyAuras:ReconcileCustomFrames(profileSettings)
+    if not self.FrameHandler or not self.FrameHandler.SetupDisplayFrame then
+        return
+    end
+
+    -- 1. Get custom frames required by the new profile
+    local requiredCustomFrames = {}
+    if profileSettings.customFrameProfiles then
+        for frameId, _ in pairs(profileSettings.customFrameProfiles) do
+            requiredCustomFrames[frameId] = true
+        end
+    end
+
+    -- 2. Find existing custom frames to delete
+    local framesToDelete = {}
+    if self.Frames then
+        for frameId, frame in pairs(self.Frames) do
+            -- Only consider custom frames
+            if frameId ~= "Buff" and frameId ~= "Debuff" then
+                if not requiredCustomFrames[frameId] then
+                    table.insert(framesToDelete, frameId)
+                end
+            end
+        end
+    end
+
+    -- 3. Delete them
+    for _, frameId in ipairs(framesToDelete) do
+        local frame = self.Frames[frameId]
+        if frame then
+            -- A simplified version of DeleteCustomBar's cleanup, without modifying the profile
+            if LibWindow and LibWindow.SavePosition then
+                LibWindow.SavePosition(frame)
+            end -- Mimic existing logic
+            frame:Hide()
+            frame:SetParent(nil)
+            self.Frames[frameId] = nil
+
+            -- Clean up associated data
+            if self.auraTracking then
+                self.auraTracking[frameId] = nil
+            end
+            if self.iconArrays then
+                -- Return icons to pool before clearing
+                if self.iconPools and self.iconPools[frameId] and self.iconArrays[frameId] then
+                    for _, icon in ipairs(self.iconArrays[frameId]) do
+                        self.ReturnIconToPool(self.iconPools[frameId], icon)
+                    end
+                end
+                self.iconArrays[frameId] = nil
+            end
+            if self.iconPools then
+                self.iconPools[frameId] = nil
+            end
+            if self.FrameHoverStates then
+                self.FrameHoverStates[frameId] = nil
+            end
+            if self.FrameVisualHoverStates then
+                self.FrameVisualHoverStates[frameId] = nil
+            end
+
+            if self.DEBUG then
+                print("BoxxyAuras: Removed stale custom frame '" .. frameId .. "' on profile switch.")
+            end
+        end
+    end
+
+    -- 4. Create missing custom frames
+    if profileSettings.customFrameProfiles then
+        for frameId, _ in pairs(profileSettings.customFrameProfiles) do
+            if not self.Frames[frameId] then
+                -- A simplified version of CreateCustomBar's frame setup
+                local frame = self.FrameHandler.SetupDisplayFrame(frameId)
+                if frame then
+                    self.Frames = self.Frames or {}
+                    self.Frames[frameId] = frame
+
+                    -- Initialize hover states
+                    if self.FrameHoverStates then
+                        self.FrameHoverStates[frameId] = false
+                    end
+                    if self.FrameVisualHoverStates then
+                        self.FrameVisualHoverStates[frameId] = false
+                    end
+
+                    -- Initialize tracking arrays
+                    if not self.auraTracking then
+                        self.auraTracking = {}
+                    end
+                    if not self.iconArrays then
+                        self.iconArrays = {}
+                    end
+                    if not self.iconPools then
+                        self.iconPools = {}
+                    end
+
+                    self.auraTracking[frameId] = {}
+                    self.iconArrays[frameId] = {}
+                    self.iconPools[frameId] = {}
+
+                    -- Apply settings to the new frame
+                    if self.FrameHandler.ApplySettings then
+                        self.FrameHandler.ApplySettings(frameId)
+                    end
+
+                    -- Show the frame initially (it will be hidden by ApplyLockState if needed)
+                    frame:Show()
+
+                    -- Force center position for new bars to make them easy to spot
+                    frame:ClearAllPoints()
+                    frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+
+                    -- Restore position from settings if LibWindow is available (but after we've centered it)
+                    if LibWindow and LibWindow.RestorePosition then
+                        LibWindow.RestorePosition(frame)
+                    end
+
+                    -- Apply current lock state to the new frame
+                    if self.FrameHandler and self.FrameHandler.ApplyLockState then
+                        local currentSettings = self:GetCurrentProfileSettings()
+                        if currentSettings and currentSettings.lockFrames then
+                            if frame.Lock then
+                                frame:Lock()
+                            end
+                        else
+                            if frame.Unlock then
+                                frame:Unlock()
+                            end
+                        end
+                    end
+
+                    if self.DEBUG then
+                        print("BoxxyAuras: Created new custom frame '" .. frameId .. "' on profile switch.")
+                    end
+                    -- Settings and positions will be applied later in SwitchToProfile
+                end
+            end
+        end
+    end
 end
 
 -- Deep copy a table (recursive)
@@ -1900,3 +2291,330 @@ hoverCheckFrame:SetScript("OnUpdate", function(self, elapsed)
     end
     -- === End Cache Cleanup ===
 end)
+
+-- Function to create a new custom bar
+function BoxxyAuras:CreateCustomBar(barName)
+    if not barName or barName == "" then
+        if self.DEBUG then
+            print("BoxxyAuras: Cannot create custom bar with empty name")
+        end
+        return false
+    end
+
+    -- Sanitize the bar name (remove special characters, spaces, etc.)
+    local sanitizedName = barName:gsub("[^%w]", "")
+    if sanitizedName == "" then
+        if self.DEBUG then
+            print("BoxxyAuras: Bar name contains no valid characters")
+        end
+        return false
+    end
+
+    -- Check if bar already exists
+    if self.Frames and self.Frames[sanitizedName] then
+        if self.DEBUG then
+            print("BoxxyAuras: Custom bar '" .. sanitizedName .. "' already exists")
+        end
+        return false
+    end
+
+    local currentSettings = self:GetCurrentProfileSettings()
+
+    -- Check if it already exists in customFrameProfiles
+    if currentSettings.customFrameProfiles and currentSettings.customFrameProfiles[sanitizedName] then
+        if self.DEBUG then
+            print("BoxxyAuras: Custom bar '" .. sanitizedName .. "' already exists in profile")
+        end
+        return false
+    end
+
+    -- Create the settings for the new custom bar
+    currentSettings.customFrameProfiles = currentSettings.customFrameProfiles or {}
+    currentSettings.customFrameProfiles[sanitizedName] = {
+        name = barName, -- Store the original display name
+        x = 0,
+        y = 0,          -- Center of screen
+        anchor = "CENTER",
+        height = 50,
+        numIconsWide = 6,
+        customTextAlign = "CENTER",
+        iconSize = 24,
+        textSize = 8,
+        borderSize = 1,
+        iconSpacing = 0,
+        wrapDirection = "DOWN",
+        width = 200
+    }
+
+    -- Create the frame
+    if self.FrameHandler and self.FrameHandler.SetupDisplayFrame then
+        local frame = self.FrameHandler.SetupDisplayFrame(sanitizedName)
+        if frame then
+            self.Frames = self.Frames or {}
+            self.Frames[sanitizedName] = frame
+
+            -- Initialize hover states
+            if self.FrameHoverStates then
+                self.FrameHoverStates[sanitizedName] = false
+            end
+            if self.FrameVisualHoverStates then
+                self.FrameVisualHoverStates[sanitizedName] = false
+            end
+
+            -- Initialize tracking arrays
+            if not self.auraTracking then
+                self.auraTracking = {}
+            end
+            if not self.iconArrays then
+                self.iconArrays = {}
+            end
+            if not self.iconPools then
+                self.iconPools = {}
+            end
+
+            self.auraTracking[sanitizedName] = {}
+            self.iconArrays[sanitizedName] = {}
+            self.iconPools[sanitizedName] = {}
+
+            -- Apply settings to the new frame
+            if self.FrameHandler.ApplySettings then
+                self.FrameHandler.ApplySettings(sanitizedName)
+            end
+
+            -- Show the frame initially (it will be hidden by ApplyLockState if needed)
+            frame:Show()
+
+            -- Force center position for new bars to make them easy to spot
+            frame:ClearAllPoints()
+            frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+
+            -- Restore position from settings if LibWindow is available (but after we've centered it)
+            if LibWindow and LibWindow.RestorePosition then
+                LibWindow.RestorePosition(frame)
+            end
+
+            -- Apply current lock state to the new frame
+            if self.FrameHandler and self.FrameHandler.ApplyLockState then
+                local currentSettings = self:GetCurrentProfileSettings()
+                if currentSettings and currentSettings.lockFrames then
+                    if frame.Lock then
+                        frame:Lock()
+                    end
+                else
+                    if frame.Unlock then
+                        frame:Unlock()
+                    end
+                end
+            end
+
+            if self.DEBUG then
+                print("BoxxyAuras: Created custom bar '" .. sanitizedName .. "'")
+            end
+
+            return true
+        end
+    end
+
+    if self.DEBUG then
+        print("BoxxyAuras: Failed to create frame for custom bar '" .. sanitizedName .. "'")
+    end
+    return false
+end
+
+-- Function to delete a custom bar
+function BoxxyAuras:DeleteCustomBar(barId)
+    if not barId or barId == "" then
+        if self.DEBUG then
+            print("BoxxyAuras: Cannot delete custom bar with empty ID")
+        end
+        return false
+    end
+
+    -- Don't allow deleting standard frames
+    if barId == "Buff" or barId == "Debuff" then
+        if self.DEBUG then
+            print("BoxxyAuras: Cannot delete standard frame: " .. barId)
+        end
+        return false
+    end
+
+    local currentSettings = self:GetCurrentProfileSettings()
+
+
+
+    -- Check if the bar exists
+    if not currentSettings.customFrameProfiles or not currentSettings.customFrameProfiles[barId] then
+        if self.DEBUG then
+            print("BoxxyAuras: Custom bar '" .. barId .. "' does not exist in profile")
+        end
+        return false
+    end
+
+    -- Remove any aura assignments to this bar
+    if currentSettings.customAuraAssignments then
+        local aurasToReassign = {}
+        for auraName, assignedBarId in pairs(currentSettings.customAuraAssignments) do
+            if assignedBarId == barId then
+                table.insert(aurasToReassign, auraName)
+            end
+        end
+
+        -- Remove the assignments
+        for _, auraName in ipairs(aurasToReassign) do
+            currentSettings.customAuraAssignments[auraName] = nil
+            if self.DEBUG then
+                print("BoxxyAuras: Removed assignment for aura '" .. auraName .. "' from deleted bar")
+            end
+        end
+    end
+
+    -- Remove the frame
+    if self.Frames and self.Frames[barId] then
+        local frame = self.Frames[barId]
+
+        -- Clean up LibWindow registration
+        if LibWindow and LibWindow.SavePosition then
+            LibWindow.SavePosition(frame)
+        end
+
+        -- Hide and clean up the frame
+        frame:Hide()
+        frame:SetParent(nil)
+        self.Frames[barId] = nil
+    end
+
+    -- Clean up tracking data
+    if self.auraTracking and self.auraTracking[barId] then
+        -- Return any active icons to the pool before clearing
+        if self.iconArrays and self.iconArrays[barId] and self.iconPools and self.iconPools[barId] then
+            for _, icon in ipairs(self.iconArrays[barId]) do
+                if icon and icon.Reset then
+                    icon:Reset()
+                end
+                table.insert(self.iconPools[barId], icon)
+            end
+        end
+
+        self.auraTracking[barId] = nil
+        if self.iconArrays then
+            self.iconArrays[barId] = nil
+        end
+        if self.iconPools then
+            self.iconPools[barId] = nil
+        end
+    end
+
+    -- Clean up hover states
+    if self.FrameHoverStates then
+        self.FrameHoverStates[barId] = nil
+    end
+    if self.FrameVisualHoverStates then
+        self.FrameVisualHoverStates[barId] = nil
+    end
+
+    -- Remove from profile
+    currentSettings.customFrameProfiles[barId] = nil
+
+    -- Trigger aura update to move orphaned auras back to their original frames
+    if self.UpdateAuras then
+        self.UpdateAuras()
+    end
+
+    if self.DEBUG then
+        print("BoxxyAuras: Deleted custom bar '" .. barId .. "'")
+    end
+
+    return true
+end
+
+-- Function to assign an aura to a specific custom bar
+function BoxxyAuras:AssignAuraToCustomBar(auraName, barId)
+    if not auraName or auraName == "" then
+        return false
+    end
+
+    local currentSettings = self:GetCurrentProfileSettings()
+    currentSettings.customAuraAssignments = currentSettings.customAuraAssignments or {}
+
+    if barId and barId ~= "" then
+        -- Assign to specific bar
+        currentSettings.customAuraAssignments[auraName] = barId
+        if self.DEBUG then
+            print("BoxxyAuras: Assigned aura '" .. auraName .. "' to bar '" .. barId .. "'")
+        end
+    else
+        -- Remove assignment (aura goes back to buff/debuff frames)
+        currentSettings.customAuraAssignments[auraName] = nil
+        if self.DEBUG then
+            print("BoxxyAuras: Removed assignment for aura '" .. auraName .. "'")
+        end
+    end
+
+    -- Trigger aura update to reflect the change
+    self.UpdateAuras()
+
+    return true
+end
+
+-- Debug function to test multiple custom bars functionality
+function BoxxyAuras:TestMultipleCustomBars()
+    if not self.DEBUG then
+        print("BoxxyAuras: Enable DEBUG mode first (BoxxyAuras.DEBUG = true)")
+        return
+    end
+
+    print("=== BoxxyAuras Multiple Custom Bars Test ===")
+
+    -- Test creating custom bars
+    print("Creating test custom bars...")
+    local success1 = self:CreateCustomBar("Defensives")
+    local success2 = self:CreateCustomBar("Offensives")
+    local success3 = self:CreateCustomBar("Utilities")
+
+    print("Create results:", success1, success2, success3)
+
+    -- Show current frame list
+    print("Current frames:")
+    for frameType, frame in pairs(self.Frames or {}) do
+        print("  " .. frameType .. ": " .. tostring(frame:GetName()))
+    end
+
+    -- Show current profile structure
+    local currentSettings = self:GetCurrentProfileSettings()
+    print("Custom frame profiles:")
+    if currentSettings.customFrameProfiles then
+        for barId, settings in pairs(currentSettings.customFrameProfiles) do
+            print("  " .. barId .. ": " .. (settings.name or "unnamed"))
+        end
+    else
+        print("  None")
+    end
+
+    -- Test assigning some auras (these might not exist but that's ok for testing)
+    print("Testing aura assignments...")
+    self:AssignAuraToCustomBar("Power Infusion", "Offensives")
+    self:AssignAuraToCustomBar("Pain Suppression", "Defensives")
+    self:AssignAuraToCustomBar("Levitate", "Utilities")
+
+    print("Current aura assignments:")
+    if currentSettings.customAuraAssignments then
+        for auraName, barId in pairs(currentSettings.customAuraAssignments) do
+            print("  '" .. auraName .. "' -> " .. barId)
+        end
+    else
+        print("  None")
+    end
+
+    print("=== Test Complete ===")
+    print("To clean up, you can use:")
+    print("  BoxxyAuras:DeleteCustomBar('Defensives')")
+    print("  BoxxyAuras:DeleteCustomBar('Offensives')")
+    print("  BoxxyAuras:DeleteCustomBar('Utilities')")
+end
+
+-- Add this at the end of the file
+local widgetIDCounter = 0
+function BoxxyAuras:GetNextWidgetID()
+    widgetIDCounter = widgetIDCounter + 1
+    return widgetIDCounter
+end

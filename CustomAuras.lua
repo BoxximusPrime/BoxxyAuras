@@ -1,7 +1,7 @@
 -- <<< Standardize Initialization >>>
 local addonNameString, privateTable = ... -- Get addon name (optional)
-_G.BoxxyAuras = _G.BoxxyAuras or {} -- Ensure global table exists
-local BoxxyAuras = _G.BoxxyAuras -- Create local alias
+_G.BoxxyAuras = _G.BoxxyAuras or {}       -- Ensure global table exists
+local BoxxyAuras = _G.BoxxyAuras          -- Create local alias
 
 -- Remove the previous debug print for definition
 BoxxyAuras.CustomOptions = {} -- Table to hold custom options elements
@@ -24,9 +24,9 @@ end
 -- Create Custom Aura Options Frame
 --------------------------------------------------------------]]
 local customOptionsFrame = CreateFrame("Frame", "BoxxyAurasCustomOptionsFrame", UIParent, "BackdropTemplate")
-customOptionsFrame:SetSize(300, 250) -- Slightly wider for text area
+customOptionsFrame:SetSize(300, 250)                              -- Slightly wider for text area
 customOptionsFrame:SetPoint("CENTER", UIParent, "CENTER", 50, 50) -- Offset slightly from main options
-customOptionsFrame:SetFrameStrata("DIALOG") -- Use DIALOG strata to appear above main options (which uses HIGH)
+customOptionsFrame:SetFrameStrata("DIALOG")                       -- Use DIALOG strata to appear above main options (which uses HIGH)
 customOptionsFrame:SetMovable(true)
 customOptionsFrame:EnableMouse(true)
 customOptionsFrame:RegisterForDrag("LeftButton")
@@ -64,7 +64,8 @@ title:SetText("Custom Aura List")
 local instructionLabel = customOptionsFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
 instructionLabel:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -15) -- Below title
 instructionLabel:SetPoint("RIGHT", customOptionsFrame, "RIGHT", -10, 0)
-instructionLabel:SetText("Enter exact spell names, separated by commas.\nCase-insensitive. Spacing after commas doesn't matter.")
+instructionLabel:SetText(
+    "Enter exact spell names, separated by commas.\nCase-insensitive. Spacing after commas doesn't matter.")
 instructionLabel:SetJustifyH("LEFT")
 instructionLabel:SetWordWrap(true)
 
@@ -173,7 +174,7 @@ function BoxxyAuras.CustomOptions:LoadCustomAuras()
     end
 
     self.EditBox:SetText(loadedText)
-    self.initialText = loadedText -- Store the loaded text
+    self.initialText = loadedText     -- Store the loaded text
     self.SaveButton:SetEnabled(false) -- Use SetEnabled(false) initially
 end
 
@@ -227,10 +228,10 @@ function BoxxyAuras.CustomOptions:Toggle()
     if frame:IsShown() then
         frame:Hide()
     else
-        -- Apply the current global scale to match the main options window
+        -- Apply the current options window scale to match the main options window
         local currentSettings = GetCurrentProfileSettings()
-        if currentSettings and currentSettings.optionsScale then
-            local scaleValue = currentSettings.optionsScale
+        if currentSettings and currentSettings.optionsWindowScale then
+            local scaleValue = currentSettings.optionsWindowScale
             if scaleValue <= 0 then
                 scaleValue = 1.0 -- Fallback to default if invalid
             end
@@ -238,7 +239,7 @@ function BoxxyAuras.CustomOptions:Toggle()
         else
             frame:SetScale(1.0) -- Default scale if no setting found
         end
-        
+
         -- Positioning Logic Start
         local mainOptions = BoxxyAuras.Options and BoxxyAuras.Options.Frame
         if mainOptions and mainOptions:IsShown() then

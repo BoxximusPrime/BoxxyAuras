@@ -266,6 +266,33 @@
         </Scripts>
     </Button>
 
+    <Frame name="BAURASSliderContainer" virtual="true">
+        <Size x="208" y="20"/>
+        <Frames>
+            <Slider name="$parentSlider" inherits="BAURASSlider">
+                <Anchors>
+                    <Anchor point="LEFT" relativePoint="LEFT" x="88" y="0"/>
+                    <Anchor point="RIGHT" relativePoint="RIGHT" x="-44" y="0"/>
+                </Anchors>
+            </Slider>
+        </Frames>
+        <Layers>
+            <Layer level="OVERLAY">
+                <FontString parentKey="Label" inherits="BAURASFont_General" text="Slider" justifyH="LEFT" justifyV="MIDDLE">
+                    <Size x="80" y="20"/>
+                    <Anchors>
+                        <Anchor point="LEFT" x="0" y="0"/>
+                    </Anchors>
+                </FontString>
+                <FontString parentKey="ValueLabel" inherits="BAURASFont_General" text="0px" justifyH="LEFT" justifyV="MIDDLE">
+                    <Size x="35" y="20"/>
+                    <Anchors>
+                        <Anchor point="RIGHT" x="0" y="0"/>
+                    </Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
+    </Frame>
     <Slider name="BAURASSlider" orientation="HORIZONTAL" enableMouse="true" virtual="true">
 		<Size x="160" y="2"/>
 		<HitRectInsets>
@@ -295,20 +322,13 @@
 			</Layer>
 			<Layer level="OVERLAY" textureSubLevel="4">
 				<Texture parentKey="VirtualThumb" setAllPoints="true" file="Interface\AddOns\BoxxyAuras\Art\SliderThumb2">
-					<Size x="20" y="20"/>
+					<Size x="15" y="15"/>
 					<TexCoords left="0" right="1" top="0" bottom="1"/>
 					<Anchors>
 						<Anchor point="CENTER" relativeKey="$parent.Thumb" relativePoint="CENTER"/>
 					</Anchors>
                     <Color r="0.75" g="0.75" b="0.75" a="1.0"/>
 				</Texture>
-			</Layer>
-			<Layer level="OVERLAY">
-				<FontString parentKey="KeyLabel" inherits="BAURASFont_General" text="0" hidden="false" ignoreParentScale="false" justifyH="CENTER" justifyV="TOP">
-					<Anchors>
-						<Anchor point="TOP" relativeKey="$parent.VirtualThumb" relativePoint="BOTTOM" x="0" y="-4"/>
-					</Anchors>
-				</FontString>
 			</Layer>
 		</Layers>
 		<Scripts>
@@ -393,6 +413,112 @@
         </Scripts>
         <FontString inherits="ChatFontNormal"/>
     </EditBox>
+
+    <!-- New Template for a stylable, scalable container for our EditBox -->
+    <Frame name="BAURASStyledEditBoxContainerTemplate" virtual="true"/>
+
+    <Button name="BAURASTabTemplate" virtual="true">
+        <Size y="25"/>
+        <Layers>
+            <Layer level="BACKGROUND" textureSubLevel="1">
+                <!-- Left edge texture -->
+                <Texture file="Interface\AddOns\BoxxyAuras\Art\TabBackground_Left" parentKey="BackgroundLeft" hidden="false">
+                    <Color r="0.7" g="0.7" b="0.7" a="1"/>
+                    <Size x="6" y="25"/>
+                    <TexCoords left="0" right="1" top="0" bottom="0.5"/>
+                    <Anchors>
+                        <Anchor point="TOPLEFT" x="0" y="0"/>
+                    </Anchors>
+                </Texture>
+                <!-- Right edge texture -->
+                <Texture file="Interface\AddOns\BoxxyAuras\Art\TabBackground_Right" parentKey="BackgroundRight" hidden="false">
+                    <Color r="0.7" g="0.7" b="0.7" a="1"/>
+                    <Size x="6" y="25"/>
+                    <TexCoords left="0" right="1" top="0" bottom="0.5"/>
+                    <Anchors>
+                        <Anchor point="TOPRIGHT" x="0" y="0"/>
+                    </Anchors>
+                </Texture>
+                <!-- Center repeating texture -->
+                <Texture file="Interface\AddOns\BoxxyAuras\Art\TabBackground_Center" parentKey="BackgroundCenter" hidden="false" horizTile="true">
+                    <Color r="0.7" g="0.7" b="0.7" a="1"/>
+                    <TexCoords left="0" right="1" top="0" bottom="0.5"/>
+                    <Anchors>
+                        <Anchor point="TOPLEFT" relativeKey="$parent.BackgroundLeft" relativePoint="TOPRIGHT" x="0" y="0"/>
+                        <Anchor point="BOTTOMRIGHT" relativeKey="$parent.BackgroundRight" relativePoint="BOTTOMLEFT" x="0" y="0"/>
+                    </Anchors>
+                </Texture>
+            </Layer>
+            <Layer level="OVERLAY">
+                <FontString parentKey="Text" inherits="BAURASFont_Checkbox" text="Tab" justifyH="CENTER" justifyV="MIDDLE">
+                    <Color r="0.8" g="0.8" b="0.8" a="1"/>
+                    <Anchors>
+                        <Anchor point="CENTER" relativePoint="CENTER" x="0" y="-5"/>
+                    </Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
+        <Scripts>
+            <OnLoad>
+                self.Active = false
+                self.originalTextColor = {r = 0.8, g = 0.8, b = 0.8, a = 1}
+                self.originalBgColor = {r = 0.4, g = 0.4, b = 0.4, a = 1}
+                
+                function self:SetText(text)
+                    self.Text:SetText(text)
+                    local textWidth = self.Text:GetStringWidth()
+                    if textWidth > 0 then
+                        local horizontalPadding = 24 -- 12px padding on each side
+                        self:SetWidth(textWidth + horizontalPadding)
+                    end
+                end
+                
+                function self:SetActive(active)
+                    self.Active = active
+                    if active then
+                        -- Active tab styling - brighter
+                        self.BackgroundLeft:SetVertexColor(1, 1, 1, 1)
+                        self.BackgroundCenter:SetVertexColor(1, 1, 1, 1)
+                        self.BackgroundRight:SetVertexColor(1, 1, 1, 1)
+                        self.Text:SetTextColor(1, 1, 1, 1)
+                    else
+                        -- Inactive tab styling - dimmed
+                        self.BackgroundLeft:SetVertexColor(self.originalBgColor.r, self.originalBgColor.g, self.originalBgColor.b, self.originalBgColor.a)
+                        self.BackgroundCenter:SetVertexColor(self.originalBgColor.r, self.originalBgColor.g, self.originalBgColor.b, self.originalBgColor.a)
+                        self.BackgroundRight:SetVertexColor(self.originalBgColor.r, self.originalBgColor.g, self.originalBgColor.b, self.originalBgColor.a)
+                        self.Text:SetTextColor(self.originalTextColor.r, self.originalTextColor.g, self.originalTextColor.b, self.originalTextColor.a)
+                    end
+                end
+                
+                function self:GetActive()
+                    return self.Active
+                end
+                
+                self:SetText(self.Text:GetText())
+            </OnLoad>
+            <OnEnter>
+                if not self.Active then
+                    -- Hover effect for inactive tabs - brighten slightly
+                    self.BackgroundLeft:SetVertexColor(0.9, 0.9, 0.9, 1)
+                    self.BackgroundCenter:SetVertexColor(0.9, 0.9, 0.9, 1)
+                    self.BackgroundRight:SetVertexColor(0.9, 0.9, 0.9, 1)
+                    self.Text:SetTextColor(0.95, 0.95, 0.95, 1)
+                end
+            </OnEnter>
+            <OnLeave>
+                if not self.Active then
+                    -- Return to normal inactive styling when not hovering
+                    self.BackgroundLeft:SetVertexColor(self.originalBgColor.r, self.originalBgColor.g, self.originalBgColor.b, self.originalBgColor.a)
+                    self.BackgroundCenter:SetVertexColor(self.originalBgColor.r, self.originalBgColor.g, self.originalBgColor.b, self.originalBgColor.a)
+                    self.BackgroundRight:SetVertexColor(self.originalBgColor.r, self.originalBgColor.g, self.originalBgColor.b, self.originalBgColor.a)
+                    self.Text:SetTextColor(self.originalTextColor.r, self.originalTextColor.g, self.originalTextColor.b, self.originalTextColor.a)
+                end
+            </OnLeave>
+            <OnClick>
+                PlaySound(856);
+            </OnClick>
+        </Scripts>
+    </Button>
 
     <Button name="BAURASButtonTemplate" inherits="BAURASGeneralButton" virtual="true">
         <!-- Inherits Size, Layers, and CORRECTED Scripts from BAURASGeneralButton -->

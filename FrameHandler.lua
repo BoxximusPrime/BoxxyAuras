@@ -125,11 +125,12 @@ local function HandleOnMouseDown(self, button)
                 end
                 if not frameType then return end
 
-                local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-                local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
-                if not currentSettings or not settingsKey or not currentSettings[settingsKey] then return end
+                local frameSettings = BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+                if not frameSettings then return end
 
-                local frameSettings = currentSettings[settingsKey]
+                local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+                if not currentSettings or not frameSettings then return end
+
                 local iconSize = frameSettings.iconSize or BoxxyAuras.Config.IconSize
                 local userIconSpacing = frameSettings.iconSpacing
                 local baseIconSpacing = userIconSpacing ~= nil and userIconSpacing or
@@ -237,10 +238,8 @@ local function HandleOnMouseUp(self, button)
             end
 
             if frameType then
-                local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-                local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
-                if settingsKey and currentSettings[settingsKey] then
-                    local frameSettings = currentSettings[settingsKey]
+                local frameSettings = BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+                if frameSettings then
                     local iconSize = frameSettings.iconSize or BoxxyAuras.Config.IconSize
                     local userIconSpacing = frameSettings.iconSpacing
                     local baseIconSpacing = userIconSpacing ~= nil and userIconSpacing or
@@ -353,9 +352,41 @@ function BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
         return "buffFrameSettings"
     elseif frameType == "Debuff" then
         return "debuffFrameSettings"
-    elseif frameType == "Custom" then
-        return "customFrameSettings"
     else
+        -- Check if it's a custom frame
+        if BoxxyAuras and BoxxyAuras.GetCurrentProfileSettings then
+            local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+            if currentSettings.customFrameProfiles and currentSettings.customFrameProfiles[frameType] then
+                -- For custom frames, the settings are stored directly in customFrameProfiles[frameType]
+                return "customFrameProfiles." .. frameType
+            end
+        end
+        return nil
+    end
+end
+
+-- Helper function to get the actual settings table for a frame type
+function BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+    if not BoxxyAuras or not BoxxyAuras.GetCurrentProfileSettings then
+        return nil
+    end
+
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+    if not currentSettings then
+        return nil
+    end
+
+    if frameType == "Buff" then
+        currentSettings.buffFrameSettings = currentSettings.buffFrameSettings or {}
+        return currentSettings.buffFrameSettings
+    elseif frameType == "Debuff" then
+        currentSettings.debuffFrameSettings = currentSettings.debuffFrameSettings or {}
+        return currentSettings.debuffFrameSettings
+    else
+        -- Check if it's a custom frame
+        if currentSettings.customFrameProfiles and currentSettings.customFrameProfiles[frameType] then
+            return currentSettings.customFrameProfiles[frameType]
+        end
         return nil
     end
 end
@@ -399,16 +430,11 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
     local frame = CreateFrame("Frame", "BoxxyAuraPanel_" .. frameName, UIParent)
     frame:SetFrameStrata("MEDIUM") -- Explicitly set parent strata
 
-    -- Get the correct settings key for this frame type
-    local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameName)
-    if not settingsKey then
-        BoxxyAuras.DebugLogError("Unable to determine settings key for frame: " .. tostring(frameName))
+    -- Get the correct settings for this frame type
+    local settingsTable = BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameName)
+    if not settingsTable then
+        BoxxyAuras.DebugLogError("Unable to get settings table for frame: " .. tostring(frameName))
         return nil
-    end
-
-    -- Ensure we have a profile for this frame using the correct settings key
-    if not BoxxyAurasDB.profiles[BoxxyAurasDB.activeProfile][settingsKey] then
-        BoxxyAurasDB.profiles[BoxxyAurasDB.activeProfile][settingsKey] = {}
     end
 
     -- Migration: Check if position data was saved under the old incorrect key and migrate it
@@ -418,10 +444,9 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
         -- Check if this looks like LibWindow position data (has x, y, point, etc.)
         if oldPositionData.x or oldPositionData.y or oldPositionData.point then
             if BoxxyAuras.DEBUG then
-                print(string.format("Migrating position data from old key '%s' to new key '%s'", oldKey, settingsKey))
+                print(string.format("Migrating position data from old key '%s' to settings table", oldKey))
             end
             -- Copy position data to the correct location
-            local settingsTable = BoxxyAurasDB.profiles[BoxxyAurasDB.activeProfile][settingsKey]
             for key, value in pairs(oldPositionData) do
                 if key == "x" or key == "y" or key == "point" or key == "anchor" or key == "scale" then
                     settingsTable[key] = value
@@ -450,8 +475,8 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
     -- Create handles
     CreateHandles(frame)
 
-    -- Prepare LibWindow for dragging - use the correct settings key
-    LibWindow.RegisterConfig(frame, BoxxyAurasDB.profiles[BoxxyAurasDB.activeProfile][settingsKey])
+    -- Prepare LibWindow for dragging - use the settings table directly
+    LibWindow.RegisterConfig(frame, settingsTable)
     frame:EnableMouse(true)
     frame:SetMovable(true)
     frame:RegisterForDrag("LeftButton")
@@ -744,24 +769,17 @@ function BoxxyAuras.FrameHandler.UpdateFrame(frame)
         return
     end
 
-    -- Get settings key
-    local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-    if not settingsKey then
-        BoxxyAuras.DebugLogError("No settings key for frame type: " .. frameType)
+    -- Get frame settings table directly (works for custom frames too)
+    local frameSettings = BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+    if not frameSettings then
+        BoxxyAuras.DebugLogError("No settings found for frame type: " .. frameType)
         return
     end
 
-    -- Get current settings
-    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
-    if not currentSettings[settingsKey] then
-        currentSettings[settingsKey] = {}
-    end
-
     -- Calculate frame width
-    local iconSize = currentSettings[settingsKey].iconSize or BoxxyAuras.Config.IconSize
-    local numIconsWide = currentSettings[settingsKey].numIconsWide or 1
-    local borderSize = currentSettings[settingsKey].borderSize or 0
-    local frameSettings = currentSettings[settingsKey]
+    local iconSize = frameSettings.iconSize or BoxxyAuras.Config.IconSize
+    local numIconsWide = frameSettings.numIconsWide or 1
+    local borderSize = frameSettings.borderSize or 0
     local frameWidth = BoxxyAuras.FrameHandler.CalculateFrameWidth(numIconsWide, iconSize, borderSize, frameSettings)
 
     -- Set the frame size
@@ -786,18 +804,12 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, overrideNumIconsW
         return
     end
 
-    -- Get Settings
-    local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-    if not settingsKey then
-        BoxxyAuras.DebugLogError("UpdateAurasInFrame: Could not find settings key for frame type: " ..
-            tostring(frameType))
-        return
-    end
-
-    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
-    local frameSettings = currentSettings[settingsKey]
+    -- Get frame settings using the new helper
+    local frameSettings = BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
     if not frameSettings then
-        BoxxyAuras.DebugLogError("UpdateAurasInFrame: No settings found for key: " .. tostring(settingsKey))
+        if BoxxyAuras.DEBUG then
+            print("UpdateAurasInFrame: No settings found for frame type: " .. tostring(frameType))
+        end
         return
     end
 
@@ -891,7 +903,8 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, overrideNumIconsW
         alignment = frameSettings.buffTextAlign
     elseif frameType == "Debuff" and frameSettings.debuffTextAlign then
         alignment = frameSettings.debuffTextAlign
-    elseif frameType == "Custom" and frameSettings.customTextAlign then
+    elseif BoxxyAuras:IsCustomFrameType(frameType) and frameSettings.customTextAlign then
+        -- For custom frames, use customTextAlign
         alignment = frameSettings.customTextAlign
     end
 
@@ -927,7 +940,6 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, overrideNumIconsW
 
     startX = framePadding * xMult
     startY = framePadding * yMult
-
 
     -- Loop through auras and place them
     for i, icon in ipairs(iconsToDisplay) do
@@ -1016,10 +1028,13 @@ function BoxxyAuras.FrameHandler.InitializeFrames()
         BoxxyAurasDB.profiles[BoxxyAurasDB.activeProfile] = {}
     end
 
-    -- Create the three main frame types if they don't exist yet
-    local frameTypes = { "Buff", "Debuff", "Custom" }
+    -- Get current settings to check for custom frames
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
 
-    for _, frameType in ipairs(frameTypes) do
+    -- Create the standard frame types first
+    local standardFrameTypes = { "Buff", "Debuff" }
+
+    for _, frameType in ipairs(standardFrameTypes) do
         if not BoxxyAuras.Frames[frameType] then
             -- Create frame
             local frame = BoxxyAuras.FrameHandler.SetupDisplayFrame(frameType)
@@ -1037,8 +1052,40 @@ function BoxxyAuras.FrameHandler.InitializeFrames()
         end
     end
 
+    -- Create dynamic custom frames from customFrameProfiles
+    if currentSettings.customFrameProfiles then
+        for customFrameId, customFrameSettings in pairs(currentSettings.customFrameProfiles) do
+            if not BoxxyAuras.Frames[customFrameId] then
+                -- Create the custom frame
+                local frame = BoxxyAuras.FrameHandler.SetupDisplayFrame(customFrameId)
+                BoxxyAuras.Frames[customFrameId] = frame
+
+                -- Initialize hover states for this custom frame
+                if BoxxyAuras.FrameHoverStates then
+                    BoxxyAuras.FrameHoverStates[customFrameId] = false
+                end
+                if BoxxyAuras.FrameVisualHoverStates then
+                    BoxxyAuras.FrameVisualHoverStates[customFrameId] = false
+                end
+
+                -- Show the frame initially
+                frame:Show()
+
+                -- Restore position from settings if LibWindow is available
+                if LibWindow and LibWindow.RestorePosition then
+                    LibWindow.RestorePosition(frame)
+                end
+
+                if BoxxyAuras.DEBUG then
+                    print(string.format("Created dynamic custom frame: %s", customFrameId))
+                end
+            end
+        end
+    end
+
     -- Apply current settings to all frames
-    for _, frameType in ipairs(frameTypes) do
+    local allFrameTypes = BoxxyAuras:GetAllActiveFrameTypes()
+    for _, frameType in ipairs(allFrameTypes) do
         BoxxyAuras.FrameHandler.ApplySettings(frameType)
     end
 end
@@ -1050,31 +1097,64 @@ function BoxxyAuras.FrameHandler.ApplySettings(frameType, resetPosition_IGNORED)
         return
     end
 
-    -- Apply frame width based on current settings
-    local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
+    -- Get frame settings using the new helper
+    local frameSettings = BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+    if not frameSettings then
+        if BoxxyAuras.DEBUG then
+            print("ApplySettings: No settings found for frame type: " .. tostring(frameType))
+        end
+        return
+    end
+
     local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
 
-    if currentSettings and settingsKey and currentSettings[settingsKey] then
-        local frameSettings = currentSettings[settingsKey]
+    -- Apply frame scale if specified using our helper method
+    if frameSettings.scale then
+        BoxxyAuras.FrameHandler.SetFrameScale(frame, frameSettings.scale)
+    end
 
-        -- Apply frame scale if specified using our helper method
-        if frameSettings.scale then
-            BoxxyAuras.FrameHandler.SetFrameScale(frame, frameSettings.scale)
+    -- Apply global scale if specified - this overrides individual frame scale
+    if currentSettings.auraBarScale then
+        local currentScale = frame:GetScale()
+        local targetScale = currentSettings.auraBarScale
+        -- Only apply scale if it has actually changed (with small tolerance for floating point comparison)
+        if math.abs(currentScale - targetScale) > 0.001 then
+            if BoxxyAuras.DEBUG then
+                print(string.format("Applying auraBarScale %.2f to frame %s (was %.2f)", targetScale, frameType,
+                    currentScale))
+            end
+            BoxxyAuras.FrameHandler.SetFrameScale(frame, targetScale)
+
+            -- CRITICAL: After changing the scale, we must tell LibWindow to save this new state.
+            -- This updates its database and prevents it from restoring the old scale later.
+            if LibWindow and LibWindow.SavePosition then
+                if BoxxyAuras.DEBUG then
+                    print(string.format("  -> Saving new state for %s to LibWindow", frameType))
+                end
+                LibWindow.SavePosition(frame)
+            end
+        elseif BoxxyAuras.DEBUG then
+            print(string.format("Skipping auraBarScale application for %s - already at %.2f", frameType, targetScale))
         end
-
-        -- Apply global scale if specified - this overrides individual frame scale
-        if currentSettings.optionsScale then
-            BoxxyAuras.FrameHandler.SetFrameScale(frame, currentSettings.optionsScale)
+    else
+        if BoxxyAuras.DEBUG then
+            print(string.format("No auraBarScale found for frame %s", frameType))
         end
+    end
 
-        -- Calculate frame width based on config
-        local iconSize = frameSettings.iconSize or BoxxyAuras.Config.IconSize
-        local numIconsWide = frameSettings.numIconsWide or 1
-        local borderSize = frameSettings.borderSize or 0
-        local frameWidth = BoxxyAuras.FrameHandler.CalculateFrameWidth(numIconsWide, iconSize, borderSize, frameSettings)
+    -- Calculate frame width based on config
+    local iconSize = frameSettings.iconSize or BoxxyAuras.Config.IconSize
+    local numIconsWide = frameSettings.numIconsWide or 1
+    local borderSize = frameSettings.borderSize or 0
+    local frameWidth = BoxxyAuras.FrameHandler.CalculateFrameWidth(numIconsWide, iconSize, borderSize, frameSettings)
 
-        -- Set frame width
-        frame:SetWidth(frameWidth)
+    -- Set frame width
+    frame:SetWidth(frameWidth)
+
+    -- Ensure frame is visible unless explicitly locked
+    local isLocked = currentSettings and currentSettings.lockFrames
+    if not isLocked then
+        frame:Show()
     end
 
     -- Layout auras in the frame
@@ -1137,12 +1217,11 @@ end
 function BoxxyAuras.FrameHandler.ForceResizeAllIcons()
     -- Loop through each frame type
     for frameType, frame in pairs(BoxxyAuras.Frames or {}) do
-        -- Get current settings
-        local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-        local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+        -- Get frame-specific settings directly
+        local frameSettings = BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
 
-        if currentSettings and settingsKey and currentSettings[settingsKey] then
-            local iconSize = currentSettings[settingsKey].iconSize or BoxxyAuras.Config.IconSize
+        if frameSettings then
+            local iconSize = frameSettings.iconSize or BoxxyAuras.Config.IconSize
 
             -- Get the icons for this frame type
             local iconArray = BoxxyAuras.iconArrays and BoxxyAuras.iconArrays[frameType]
