@@ -149,11 +149,10 @@ end
 function BoxxyAuras.Options:ApplyIconSizeChange(frameType)
     if not frameType then return end
 
-    local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-    local currentSettings = GetCurrentProfileSettings()
-    if not (currentSettings and settingsKey and currentSettings[settingsKey]) then return end
+    local frameSettings = BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+    if not frameSettings then return end
 
-    local iconSize = currentSettings[settingsKey].iconSize
+    local iconSize = frameSettings.iconSize
     if not iconSize then return end
 
     -- Resize all icons for this frame type
@@ -176,13 +175,12 @@ end
 function BoxxyAuras.Options:ApplyTextSizeChange(frameType)
     if not frameType then return end
 
-    local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-    local currentSettings = GetCurrentProfileSettings()
-    if not (currentSettings and settingsKey and currentSettings[settingsKey]) then return end
+    local frameSettings = BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+    if not frameSettings then return end
 
     -- The AuraIcon:Resize function automatically picks up the new text size from settings.
     -- We just need to call it with the *current* icon size to trigger a refresh.
-    local iconSize = currentSettings[settingsKey].iconSize
+    local iconSize = frameSettings.iconSize
     if not iconSize then return end
 
     local icons = BoxxyAuras.iconArrays and BoxxyAuras.iconArrays[frameType]
@@ -204,19 +202,21 @@ end
 function BoxxyAuras.Options:ApplyBorderSizeChange(frameType)
     if not frameType then return end
 
-    local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-    local currentSettings = GetCurrentProfileSettings()
-    if not (currentSettings and settingsKey and currentSettings[settingsKey]) then return end
+    local frameSettings = BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+    if not frameSettings then return end
 
-    local borderSize = currentSettings[settingsKey].borderSize
+    local borderSize = frameSettings.borderSize
     if borderSize == nil then return end
 
     -- Apply border size to all aura icons of this frame type
     local iconArray = BoxxyAuras.iconArrays and BoxxyAuras.iconArrays[frameType]
-    if iconArray then
-        for _, icon in ipairs(iconArray) do
-            if icon and icon.UpdateBorderSize then
-                icon:UpdateBorderSize()
+    local trackedAuras = BoxxyAuras.auraTracking and BoxxyAuras.auraTracking[frameType]
+
+    if iconArray and trackedAuras then
+        for i, icon in ipairs(iconArray) do
+            local auraData = trackedAuras[i]
+            if icon and icon.UpdateBorderSize and auraData then
+                icon:UpdateBorderSize(auraData)
             end
         end
     end
@@ -245,9 +245,8 @@ end
 function BoxxyAuras.Options:ApplyIconSpacingChange(frameType)
     if not frameType then return end
 
-    local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-    local currentSettings = GetCurrentProfileSettings()
-    if not (currentSettings and settingsKey and currentSettings[settingsKey]) then return end
+    local frameSettings = BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+    if not frameSettings then return end
 
     -- THROTTLED UPDATE: Cancel any pending update and schedule a new one
     -- This prevents rapid successive calls from accumulating
@@ -271,9 +270,13 @@ end
 
 function BoxxyAuras.Options:ApplyNormalBorderColorChange()
     for frameType, icons in pairs(BoxxyAuras.iconArrays or {}) do
-        for _, icon in ipairs(icons) do
-            if icon and icon.UpdateBorderSize then
-                icon:UpdateBorderSize() -- This function re-evaluates and re-applies the border color
+        local trackedAuras = BoxxyAuras.auraTracking and BoxxyAuras.auraTracking[frameType]
+        if trackedAuras then
+            for i, icon in ipairs(icons) do
+                local auraData = trackedAuras[i]
+                if icon and icon.UpdateBorderSize and auraData then
+                    icon:UpdateBorderSize(auraData) -- This function re-evaluates and re-applies the border color
+                end
             end
         end
     end
@@ -341,9 +344,13 @@ end
 
 function BoxxyAuras.Options:ApplyBackgroundColorChange()
     for frameType, icons in pairs(BoxxyAuras.iconArrays or {}) do
-        for _, icon in ipairs(icons) do
-            if icon and icon.UpdateBorderSize then
-                icon:UpdateBorderSize() -- This function re-evaluates and re-applies the background color
+        local trackedAuras = BoxxyAuras.auraTracking and BoxxyAuras.auraTracking[frameType]
+        if trackedAuras then
+            for i, icon in ipairs(icons) do
+                local auraData = trackedAuras[i]
+                if icon and icon.UpdateBorderSize and auraData then
+                    icon:UpdateBorderSize(auraData) -- This function re-evaluates and re-applies the background color
+                end
             end
         end
     end
@@ -471,6 +478,7 @@ local optionsFrame = CreateFrame("Frame", "BoxxyAurasOptionsFrame", UIParent, "B
 PixelUtilCompat.SetSize(optionsFrame, 650, 600) -- << CHANGED: Increased width from 300 to 650, height from 500 to 600
 PixelUtilCompat.SetPoint(optionsFrame, "CENTER", UIParent, "CENTER", 0, 0)
 optionsFrame:SetFrameStrata("HIGH")             -- Changed from MEDIUM to HIGH to appear above aura bars
+optionsFrame:SetClampedToScreen(true)
 optionsFrame:SetMovable(true)
 optionsFrame:EnableMouse(true)
 optionsFrame:RegisterForDrag("LeftButton")

@@ -2,7 +2,7 @@ local addonNameString, privateTable = ... -- Use different names for the local v
 _G.BoxxyAuras = _G.BoxxyAuras or {}       -- Explicitly create/assign the GLOBAL table
 local BoxxyAuras = _G.BoxxyAuras          -- Create a convenient local alias to the global table
 
-BoxxyAuras.Version = "1.4.0"
+BoxxyAuras.Version = "1.4.1"
 
 BoxxyAuras.AllAuras = {}         -- Global cache for aura info
 BoxxyAuras.recentAuraEvents = {} -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
@@ -223,25 +223,7 @@ local trackedCustom = {} -- NEW Cache for Custom Bar
 
 -- New sorting function
 local function SortAurasForDisplay(a, b)
-    local aIsPermanent = (a.duration or 0) == 0 or a.duration == -1 -- Check 0 or -1 for permanent
-    local bIsPermanent = (b.duration or 0) == 0 or b.duration == -1
-
-    -- Rule 1: Permanent auras come before non-permanent ones
-    if aIsPermanent and not bIsPermanent then
-        return true
-    end
-    if not aIsPermanent and bIsPermanent then
-        return false
-    end
-
-    -- Rule 2: If both are permanent, sort alphabetically by name
-    if aIsPermanent and bIsPermanent then
-        local aName = a.name or ""
-        local bName = b.name or ""
-        return aName < bName
-    end
-
-    -- Rule 3: If both are non-permanent, use the original start time sort
+    -- Rule: Sort by the original start time
     local aTrackTime = a.originalTrackTime or 0
     local bTrackTime = b.originalTrackTime or 0
     if aTrackTime == bTrackTime then
@@ -819,7 +801,7 @@ local function InitializeAuras()
                 icon.newAuraAnimGroup:Play()
             end
 
-            icon:Update(auraData, i, auraFilter)
+            icon:Update(auraData, i, auraData.auraType)
             icon.frame:Show()
         end
     end
@@ -941,12 +923,11 @@ BoxxyAuras.UpdateSingleFrameAuras = function(frameType)
         end
 
         if icon then
-            local auraFilter = (frameType == "Debuff") and "HARMFUL" or "HELPFUL"
             if BoxxyAuras.DEBUG and newAuraData.forceExpired then
                 print(string.format("Single frame update: Updating icon for expired aura '%s' with forceExpired = %s",
                     newAuraData.name or "Unknown", tostring(newAuraData.forceExpired)))
             end
-            icon:Update(newAuraData, i, auraFilter)
+            icon:Update(newAuraData, i, newAuraData.auraType)
             icon.frame:Show()
             newIconArray[i] = icon
         end
@@ -1042,8 +1023,7 @@ function BoxxyAuras:UpdateFrameWithAuras(frameType, auraList)
     for i, auraData in ipairs(auraList) do
         local icon = iconArray[i] or BoxxyAuras.GetOrCreateIcon(iconPool, i, frame, "BoxxyAuras" .. frameType .. "Icon")
         if icon then
-            local auraFilter = (frameType == "Debuff") and "HARMFUL" or "HELPFUL"
-            icon:Update(auraData, i, auraFilter)
+            icon:Update(auraData, i, auraData.auraType)
             icon.frame:Show()
             newIconArray[i] = icon
         end
@@ -1232,12 +1212,11 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
                 end
 
                 if icon then
-                    local auraFilter = (frameType == "Debuff") and "HARMFUL" or "HELPFUL"
                     if BoxxyAuras.DEBUG and newAuraData.forceExpired then
                         print(string.format("Updating icon for expired aura '%s' with forceExpired = %s",
                             newAuraData.name or "Unknown", tostring(newAuraData.forceExpired)))
                     end
-                    icon:Update(newAuraData, i, auraFilter)
+                    icon:Update(newAuraData, i, newAuraData.auraType)
                     icon.frame:Show()
                     newIconArray[i] = icon
                 end
@@ -1705,7 +1684,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         end)
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local timestamp, subevent, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, spellId, spellName,
-        spellSchool, amount = CombatLogGetCurrentEventInfo()
+        spellSchool, amount, overkill, school, resisted, blocked, absorbed = CombatLogGetCurrentEventInfo()
 
         -- Handle Aura Application Events to capture source GUID
         if destName and destName == UnitName("player") and
@@ -1728,27 +1707,85 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
 
         -- Handle Damage Events for Shake Effect
         if destName and destName == UnitName("player") and
-            (subevent == "SPELL_DAMAGE" or subevent == "SPELL_PERIODIC_DAMAGE") then
-            -- Use correct tracking table and check it exists
-            if spellId and sourceGUID and amount and amount > 0 and BoxxyAuras.auraTracking and
-                BoxxyAuras.auraTracking["Debuff"] and #BoxxyAuras.auraTracking["Debuff"] > 0 then
+            (subevent == "SPELL_DAMAGE" or subevent == "SPELL_PERIODIC_DAMAGE" or subevent == "SPELL_PERIODIC_MISSED") then
+            -- Handle cases where amount might be a string (like "ABSORB" for missed events)
+            local numericAmount = (type(amount) == "number") and amount or 0
+            local numericAbsorbed = (type(absorbed) == "number") and absorbed or 0
+            local totalDamage = numericAmount + numericAbsorbed
+
+            -- Enhanced debug logging for DOT shake troubleshooting
+            if BoxxyAuras.DEBUG and (subevent == "SPELL_PERIODIC_DAMAGE" or subevent == "SPELL_PERIODIC_MISSED") then
+                print(string.format(
+                    "DOT Event: %s, spellId=%s, sourceGUID=%s, amount=%s (%s), absorbed=%s (%s), totalDamage=%d",
+                    subevent, tostring(spellId), tostring(sourceGUID),
+                    tostring(amount), type(amount), tostring(absorbed), type(absorbed), totalDamage))
+            end
+
+            -- Allow shake even for fully absorbed damage (totalDamage can be 0 but we still want shake effect)
+            if spellId and sourceGUID and BoxxyAuras.auraTracking then
                 local targetAuraInstanceID = nil
-                -- Iterate over the correct tracking table
-                for _, trackedDebuff in ipairs(BoxxyAuras.auraTracking["Debuff"]) do
-                    -- Match based on spellId AND sourceGUID if available
-                    if trackedDebuff and trackedDebuff.spellId == spellId then
-                        if trackedDebuff.sourceGUID and trackedDebuff.sourceGUID == sourceGUID then
-                            targetAuraInstanceID = trackedDebuff.auraInstanceID
-                            break
-                            -- Fallback: if sourceGUID isn't stored on the trackedDebuff yet, match just by spellId (less accurate)
-                        elseif not trackedDebuff.sourceGUID then
-                            targetAuraInstanceID = trackedDebuff.auraInstanceID
-                            -- Don't break here, keep looking for a sourceGUID match if possible
+                local targetFrameType = nil
+                local targetAuraName = nil
+                local matchedAuras = {} -- Track all potential matches for debug
+
+                -- Check ALL frame types for matching debuffs, not just "Debuff" frame
+                for frameType, trackedAuras in pairs(BoxxyAuras.auraTracking) do
+                    if trackedAuras and #trackedAuras > 0 then
+                        for _, trackedAura in ipairs(trackedAuras) do
+                            -- Only check harmful auras (debuffs) for shake animation
+                            if trackedAura and trackedAura.spellId == spellId and
+                                (trackedAura.auraType == "HARMFUL" or trackedAura.originalAuraType == "HARMFUL") then
+                                -- Enhanced debug logging
+                                if BoxxyAuras.DEBUG and (subevent == "SPELL_PERIODIC_DAMAGE" or subevent == "SPELL_PERIODIC_MISSED") then
+                                    print(string.format(
+                                        "  Found potential match: %s (instanceID=%s, sourceGUID=%s vs %s)",
+                                        trackedAura.name or "Unknown",
+                                        tostring(trackedAura.auraInstanceID),
+                                        tostring(trackedAura.sourceGUID),
+                                        tostring(sourceGUID)))
+                                end
+
+                                table.insert(matchedAuras, {
+                                    aura = trackedAura,
+                                    frameType = frameType,
+                                    hasSourceMatch = (trackedAura.sourceGUID == sourceGUID)
+                                })
+
+                                -- Prioritize exact sourceGUID matches
+                                if trackedAura.sourceGUID and trackedAura.sourceGUID == sourceGUID then
+                                    targetAuraInstanceID = trackedAura.auraInstanceID
+                                    targetFrameType = frameType
+                                    targetAuraName = trackedAura.name
+                                    break -- Fallback: if sourceGUID isn't stored on the trackedAura yet, match just by spellId (less accurate)
+                                elseif not trackedAura.sourceGUID and not targetAuraInstanceID then
+                                    targetAuraInstanceID = trackedAura.auraInstanceID
+                                    targetFrameType = frameType
+                                    targetAuraName = trackedAura.name
+                                    -- Don't break here, keep looking for a sourceGUID match if possible
+                                end
+                            end
+                        end
+                        if targetAuraInstanceID and targetFrameType then
+                            -- If we found a sourceGUID match, stop searching immediately
+                            if #matchedAuras > 0 and matchedAuras[#matchedAuras].hasSourceMatch then
+                                break -- Found exact match, stop searching
+                            end
                         end
                     end
                 end
 
-                if targetAuraInstanceID then
+                -- Enhanced debug logging for missing matches
+                if BoxxyAuras.DEBUG and (subevent == "SPELL_PERIODIC_DAMAGE" or subevent == "SPELL_PERIODIC_MISSED") and not targetAuraInstanceID then
+                    print(string.format(
+                        "  No matching aura found for spellId=%s, sourceGUID=%s. Checked %d potential matches:",
+                        tostring(spellId), tostring(sourceGUID), #matchedAuras))
+                    for i, match in ipairs(matchedAuras) do
+                        print(string.format("    Match %d: %s (sourceGUID match: %s)",
+                            i, match.aura.name or "Unknown", tostring(match.hasSourceMatch)))
+                    end
+                end
+
+                if targetAuraInstanceID and targetFrameType then
                     -- Check if dot ticking animation is enabled
                     local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
                     local animationEnabled = currentSettings and currentSettings.enableDotTickingAnimation
@@ -1757,39 +1794,52 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                     end
 
                     if animationEnabled then
-                        -- Iterate over the correct icon array
-                        if BoxxyAuras.iconArrays and BoxxyAuras.iconArrays["Debuff"] then
-                            for _, auraIcon in ipairs(BoxxyAuras.iconArrays["Debuff"]) do
+                        -- Look for the icon in the correct frame type's icon array
+                        if BoxxyAuras.iconArrays and BoxxyAuras.iconArrays[targetFrameType] then
+                            local iconFound = false
+                            for _, auraIcon in ipairs(BoxxyAuras.iconArrays[targetFrameType]) do
                                 if auraIcon and auraIcon.auraInstanceID == targetAuraInstanceID then
                                     if auraIcon.Shake then
-                                        local shakeScale = 1.0
-                                        local maxHealth = UnitHealthMax("player")
-                                        if maxHealth and maxHealth > 0 then
-                                            local damagePercent = amount / maxHealth
-                                            local minScale = BoxxyAuras.Config.MinShakeScale or 0.5
-                                            local maxScale = BoxxyAuras.Config.MaxShakeScale or 2.0
-                                            local minPercent = BoxxyAuras.Config.MinDamagePercentForShake or 0.01
-                                            local maxPercent = BoxxyAuras.Config.MaxDamagePercentForShake or 0.10
-                                            if minPercent >= maxPercent then
-                                                maxPercent = minPercent + 0.01
-                                            end
-                                            if damagePercent <= minPercent then
-                                                shakeScale = minScale
-                                            elseif damagePercent >= maxPercent then
-                                                shakeScale = maxScale
-                                            else
-                                                local percentInRange =
-                                                    (damagePercent - minPercent) / (maxPercent - minPercent)
-                                                shakeScale = minScale + (maxScale - minScale) * percentInRange
-                                            end
+                                        auraIcon:Shake(2.0)
+                                        iconFound = true
+                                        if BoxxyAuras.DEBUG then
+                                            print(string.format(
+                                                "✓ Triggered shake for '%s' in frame '%s' (damage: %d, absorbed: %d)",
+                                                targetAuraName or "Unknown",
+                                                targetFrameType, numericAmount, numericAbsorbed))
                                         end
-                                        auraIcon:Shake(shakeScale)
                                     end
                                     break
                                 end
                             end
+
+                            -- Debug logging if icon not found in array
+                            if BoxxyAuras.DEBUG and not iconFound and (subevent == "SPELL_PERIODIC_DAMAGE" or subevent == "SPELL_PERIODIC_MISSED") then
+                                print(string.format(
+                                    "  Icon not found in frame '%s' icon array (instanceID=%s). Array has %d icons:",
+                                    targetFrameType, tostring(targetAuraInstanceID),
+                                    #BoxxyAuras.iconArrays[targetFrameType]))
+                                for i, icon in ipairs(BoxxyAuras.iconArrays[targetFrameType]) do
+                                    print(string.format("    Icon %d: instanceID=%s, name=%s",
+                                        i, tostring(icon.auraInstanceID), tostring(icon.name)))
+                                end
+                            end
+                        else
+                            if BoxxyAuras.DEBUG and (subevent == "SPELL_PERIODIC_DAMAGE" or subevent == "SPELL_PERIODIC_MISSED") then
+                                print(string.format("  No icon array found for frame type '%s'", targetFrameType))
+                            end
+                        end
+                    else
+                        if BoxxyAuras.DEBUG and (subevent == "SPELL_PERIODIC_DAMAGE" or subevent == "SPELL_PERIODIC_MISSED") then
+                            print("  DOT ticking animation is disabled in settings")
                         end
                     end
+                end
+            else
+                -- Debug logging for missing required data
+                if BoxxyAuras.DEBUG and (subevent == "SPELL_PERIODIC_DAMAGE" or subevent == "SPELL_PERIODIC_MISSED") then
+                    print(string.format("  Missing required data: spellId=%s, sourceGUID=%s, auraTracking=%s",
+                        tostring(spellId), tostring(sourceGUID), tostring(BoxxyAuras.auraTracking ~= nil)))
                 end
             end
         end -- end of COMBAT_LOG damage handling
@@ -2610,6 +2660,33 @@ function BoxxyAuras:TestMultipleCustomBars()
     print("  BoxxyAuras:DeleteCustomBar('Defensives')")
     print("  BoxxyAuras:DeleteCustomBar('Offensives')")
     print("  BoxxyAuras:DeleteCustomBar('Utilities')")
+end
+
+-- Function to test shake animation on all visible debuff icons
+function BoxxyAuras:TestShakeAnimation()
+    local shakeCount = 0
+
+    -- Test all frame types
+    for frameType, frame in pairs(self.Frames or {}) do
+        if self.iconArrays and self.iconArrays[frameType] then
+            for _, auraIcon in ipairs(self.iconArrays[frameType]) do
+                if auraIcon and auraIcon.frame and auraIcon.frame:IsVisible() then
+                    -- Only shake harmful auras (debuffs)
+                    if (auraIcon.auraType == "HARMFUL" or auraIcon.originalAuraType == "HARMFUL") and auraIcon.Shake then
+                        auraIcon:Shake(2.0)
+                        shakeCount = shakeCount + 1
+                        print(string.format("Test shake: %s in frame %s", auraIcon.name or "Unknown", frameType))
+                    end
+                end
+            end
+        end
+    end
+
+    if shakeCount == 0 then
+        print("No harmful auras found to test shake animation")
+    else
+        print(string.format("Triggered test shake on %d debuff icons", shakeCount))
+    end
 end
 
 -- Add this at the end of the file

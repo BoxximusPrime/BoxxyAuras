@@ -477,6 +477,7 @@ function BoxxyAuras.FrameHandler.SetupDisplayFrame(frameName)
 
     -- Prepare LibWindow for dragging - use the settings table directly
     LibWindow.RegisterConfig(frame, settingsTable)
+    frame:SetClampedToScreen(true)
     frame:EnableMouse(true)
     frame:SetMovable(true)
     frame:RegisterForDrag("LeftButton")

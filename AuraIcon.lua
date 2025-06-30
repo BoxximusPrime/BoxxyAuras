@@ -91,13 +91,12 @@ function AuraIcon.New(parentFrame, index, baseName)
         end
     end
 
-    local settingsKey = frameType and BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-    local currentSettings = settingsKey and BoxxyAuras:GetCurrentProfileSettings()
+    local frameSettings = frameType and BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
 
     -- Get icon dimensions and text size
-    local iconSize = (currentSettings and currentSettings[settingsKey] and currentSettings[settingsKey].iconSize) or
-        BoxxyAuras.Config.IconSize
-    local textSize = (currentSettings and currentSettings[settingsKey] and currentSettings[settingsKey].textSize) or 8
+    local iconSize = (frameSettings and frameSettings.iconSize) or BoxxyAuras.Config.IconSize
+    local textSize = (frameSettings and frameSettings.textSize) or 8
     local padding = (BoxxyAuras.Config and BoxxyAuras.Config.Padding) or 6
     -- Calculate text area height with some padding (text size + small buffer)
     local textAreaHeight = textSize + 4
@@ -160,9 +159,9 @@ function AuraIcon.New(parentFrame, index, baseName)
     shakeOverlay:SetAlpha(0)
 
     -- Get border size from settings
-    local borderSize = 0                                          -- Default border size
-    if currentSettings and settingsKey and currentSettings[settingsKey] then
-        borderSize = currentSettings[settingsKey].borderSize or 0 -- Use 0 if borderSize is nil
+    local borderSize = 0                           -- Default border size
+    if frameSettings then
+        borderSize = frameSettings.borderSize or 0 -- Use 0 if borderSize is nil
     end
 
     -- Apply backdrop
@@ -439,13 +438,32 @@ function AuraIcon.Update(self, auraData, index, auraType)
         end
     end
 
-    local settingsKey = frameType and BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-    local currentSettings = settingsKey and BoxxyAuras:GetCurrentProfileSettings()
+    local frameSettings = frameType and BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
 
     -- Get border size from settings
-    local borderSize = 0                                          -- Default border size
-    if currentSettings and settingsKey and currentSettings[settingsKey] then
-        borderSize = currentSettings[settingsKey].borderSize or 0 -- Use 0 if borderSize is nil
+    local borderSize = 0                           -- Default border size
+    if frameSettings then
+        borderSize = frameSettings.borderSize or 0 -- Use 0 if borderSize is nil
+    end
+
+    -- Redraw border with new size (this is what was missing!)
+    if borderSize == 0 then
+        -- No border at all - hide any existing border textures
+        if self.frame.borderTextures then
+            for _, tex in pairs(self.frame.borderTextures) do
+                if tex and tex.Hide then
+                    tex:Hide()
+                end
+            end
+        end
+    elseif borderSize == 1 then
+        -- Standard border
+        BoxxyAuras.UIUtils.DrawSlicedBG(self.frame, "ItemEntryBorder", "border", 0)
+    else
+        -- Thick border for borderSize >= 2
+        local shrinkAmount = -math.min((borderSize - 1) * 2, 12) -- Scale shrink with border size, max 12
+        BoxxyAuras.UIUtils.DrawSlicedBG(self.frame, "ThickBorder", "border", shrinkAmount)
     end
 
     -- Set border color based on aura type (only if border exists)
@@ -539,9 +557,9 @@ function AuraIcon.Update(self, auraData, index, auraType)
         end
     end
 
-    -- Ensure correct size (we already have frameType, settingsKey, and currentSettings from above)
-    if frameType and currentSettings and settingsKey and currentSettings[settingsKey] then
-        local iconSize = currentSettings[settingsKey].iconSize or BoxxyAuras.Config.IconSize
+    -- Ensure correct size (we already have frameType and frameSettings from above)
+    if frameSettings then
+        local iconSize = frameSettings.iconSize or BoxxyAuras.Config.IconSize
         self:Resize(iconSize)
     end
 
@@ -995,8 +1013,21 @@ function AuraIcon:Shake(scale)
     end
 end
 
-function AuraIcon:UpdateBorderSize()
+function AuraIcon:UpdateBorderSize(auraData)
     if not self.frame then
+        return
+    end
+
+    -- If auraData is not provided, try to get it from the instance itself
+    if not auraData then
+        auraData = {
+            auraType = self.auraType,
+            dispelName = self.dispelName,
+            -- Add other necessary fields from self if needed
+        }
+    end
+
+    if not auraData or not auraData.auraType then
         return
     end
 
@@ -1011,13 +1042,13 @@ function AuraIcon:UpdateBorderSize()
         end
     end
 
-    local borderSize = 0 -- Default border size
-    if frameType then
-        local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-        local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
-        if currentSettings and settingsKey and currentSettings[settingsKey] then
-            borderSize = currentSettings[settingsKey].borderSize or 0 -- Use 0 if borderSize is nil
-        end
+    local frameSettings = frameType and BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+
+    -- Get border size from settings
+    local borderSize = 0                           -- Default border size
+    if frameSettings then
+        borderSize = frameSettings.borderSize or 0 -- Use 0 if borderSize is nil
     end
 
     -- Redraw the border with the new size using custom thick texture
@@ -1042,8 +1073,8 @@ function AuraIcon:UpdateBorderSize()
         if borderSize > 0 then
             local r, g, b, a = 0.3, 0.3, 0.3, 0.8 -- Default colors
 
-            if self.auraType == "HARMFUL" then
-                local dispelType = string.upper(self.dispelName or "NONE")
+            if auraData.auraType == "HARMFUL" then
+                local dispelType = string.upper(auraData.dispelName or "NONE")
                 if dispelType == "NONE" then
                     r, g, b, a = 1.0, 0.1, 0.1, 0.9
                 else
@@ -1113,10 +1144,9 @@ function AuraIcon:Resize(newIconSize)
 
     local textSize = 8 -- default
     if frameType then
-        local settingsKey = BoxxyAuras.FrameHandler.GetSettingsKeyFromFrameType(frameType)
-        local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
-        if currentSettings and settingsKey and currentSettings[settingsKey] then
-            textSize = currentSettings[settingsKey].textSize or 8
+        local frameSettings = BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+        if frameSettings then
+            textSize = frameSettings.textSize or 8
         end
     end
 
