@@ -224,6 +224,8 @@ function BoxxyAuras.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
     shrink = shrink or 0;
     local group, subLevel;
 
+    -- Debug removed to reduce spam
+
     if layer == "backdrop" then
         if not frame.backdropTextures then
             frame.backdropTextures = {};
@@ -337,6 +339,8 @@ function BoxxyAuras.UIUtils.DrawSlicedBG(frame, textureKey, layer, shrink)
             end
         end
     end
+
+    -- Debug removed to reduce spam
 end
 
 -- Copied from WhoGotLoots/UIBuilder.lua (Adapted slightly)

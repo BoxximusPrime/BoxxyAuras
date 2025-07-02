@@ -515,6 +515,13 @@ optionsFrame:SetScript("OnShow", function(self)
     if BoxxyAuras.Options.UpdateProfileUI then
         BoxxyAuras.Options:UpdateProfileUI()
     end
+
+    -- NEW: Refresh dynamic layouts after the frame is fully shown and rendered
+    C_Timer.After(0.1, function()
+        if BoxxyAuras.Options.RefreshIgnoredAurasLayout then
+            BoxxyAuras.Options:RefreshIgnoredAurasLayout()
+        end
+    end)
 end)
 
 BoxxyAuras.Options.Frame = optionsFrame
@@ -576,6 +583,12 @@ closeBtn:SetScript("OnClick", function(self)
                 timer:Cancel()
             end
         end
+    end
+
+    -- Cancel ignored auras save timer
+    if BoxxyAuras.Options.ignoredAurasSaveTimer then
+        BoxxyAuras.Options.ignoredAurasSaveTimer:Cancel()
+        BoxxyAuras.Options.ignoredAurasSaveTimer = nil
     end
 
     self:GetParent():Hide() -- Hide the main options frame
@@ -1007,6 +1020,45 @@ local demoModeCheck = generalContainer:AddCheckbox("Demo Mode", function(self)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 end)
 BoxxyAuras.Options.DemoModeCheck = demoModeCheck
+
+-- Enable Flash Animation on Show Checkbox
+local enableFlashOnShowCheck = generalContainer:AddCheckbox("Enable flash animation on show", function(self)
+    local currentSettings = GetCurrentProfileSettings()
+    if not currentSettings then
+        return
+    end
+
+    local currentState = currentSettings.enableFlashAnimationOnShow
+    if currentState == nil then
+        currentState = true
+    end
+    local newState = not currentState
+    currentSettings.enableFlashAnimationOnShow = newState
+
+    self:SetChecked(newState)
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+end)
+BoxxyAuras.Options.EnableFlashOnShowCheck = enableFlashOnShowCheck
+
+-- Force a wider width on this specific checkbox to prevent text truncation
+if enableFlashOnShowCheck and enableFlashOnShowCheck.Label and enableFlashOnShowCheck.NormalBorder then
+    -- Set a large visual width for the parent button to ensure no clipping
+    enableFlashOnShowCheck:SetWidth(300)
+
+    -- Set a large width for the label to ensure text draws fully
+    -- (280 is known to be sufficient and fits within the 300px button)
+    enableFlashOnShowCheck.Label:SetWidth(280)
+
+    -- Now, calculate the *actual* width of the content to create a precise hitbox
+    local textWidth = enableFlashOnShowCheck.Label:GetStringWidth()
+    local checkboxGraphicWidth = enableFlashOnShowCheck.NormalBorder:GetWidth() or 12
+    local padding = 4
+    local contentWidth = checkboxGraphicWidth + padding + textWidth
+
+    -- Shrink the hitbox to match the actual content
+    local rightInset = enableFlashOnShowCheck:GetWidth() - contentWidth
+    enableFlashOnShowCheck:SetHitRectInsets(0, rightInset, -4, -4)
+end
 
 -- Enable Dot Ticking Animation Checkbox
 local enableDotTickingCheck = generalContainer:AddCheckbox("Enable Dot Ticking Animation", function(self)
@@ -1689,7 +1741,7 @@ function BoxxyAuras.Options:RefreshCustomBarTabs()
 
         -- Reposition subsequent sections
         if BoxxyAuras.Options.RepositionGlobalContainer then
-            BoxxyAuras.Options.RepositionGlobalContainer()
+            BoxxyAuras.Options:RepositionGlobalContainer()
         end
     else
         -- Show configure container when bars exist
@@ -1735,7 +1787,7 @@ function BoxxyAuras.Options:RefreshCustomBarTabs()
 
         -- Reposition subsequent sections
         if BoxxyAuras.Options.RepositionGlobalContainer then
-            BoxxyAuras.Options.RepositionGlobalContainer()
+            BoxxyAuras.Options:RepositionGlobalContainer()
         end
     end
 
@@ -1743,6 +1795,13 @@ function BoxxyAuras.Options:RefreshCustomBarTabs()
     if customBarsContainer and customBarsContainer.UpdateHeightFromChildren then
         customBarsContainer:UpdateHeightFromChildren()
     end
+
+    -- Ensure ignored auras section is positioned correctly after custom bars changes
+    C_Timer.After(0.1, function()
+        if BoxxyAuras.Options.RepositionGlobalContainer then
+            BoxxyAuras.Options:RepositionGlobalContainer()
+        end
+    end)
 end
 
 -- Function to create a tab for a custom bar
@@ -2318,6 +2377,14 @@ function BoxxyAuras.Options:Load()
     self.LockFramesCheck:SetChecked(settings.lockFrames)
     self.HideBlizzardCheck:SetChecked(settings.hideBlizzardAuras)
     self.ShowHoverBorderCheck:SetChecked(settings.showHoverBorder)
+
+    -- Use default value (true) if enableFlashAnimationOnShow is nil
+    local enableFlashOnShow = settings.enableFlashAnimationOnShow
+    if enableFlashOnShow == nil then
+        enableFlashOnShow = true -- Default to enabled
+    end
+    self.EnableFlashOnShowCheck:SetChecked(enableFlashOnShow)
+
     -- Use default value (true) if enableDotTickingAnimation is nil
     local enableDotTicking = settings.enableDotTickingAnimation
     if enableDotTicking == nil then
@@ -2406,6 +2473,41 @@ function BoxxyAuras.Options:Load()
     -- Load Custom Bars Data
     if self.RefreshCustomBarTabs then
         self:RefreshCustomBarTabs()
+    end
+
+    -- Load Ignored Auras
+    if self.IgnoredAurasEditBox then
+        local ignoredAuras = {}
+        if settings.ignoredAuras then
+            for auraName, _ in pairs(settings.ignoredAuras) do
+                table.insert(ignoredAuras, auraName)
+            end
+        end
+        table.sort(ignoredAuras)
+        self.IgnoredAurasEditBox:SetText(table.concat(ignoredAuras, ", "))
+
+        -- Trigger resize and restyle after loading content
+        C_Timer.After(0.05, function()
+            if self.IgnoredAurasEditBox then
+                local editBox = self.IgnoredAurasEditBox
+                local currentText = editBox:GetText()
+
+                -- Measure and resize
+                if ignoredEditBoxFontString then
+                    ignoredEditBoxFontString:SetWidth(editBox:GetWidth() - (ignoredPadding * 2))
+                    ignoredEditBoxFontString:SetText(currentText)
+                    ignoredEditBoxFontString:Show()
+                    local measuredHeight = ignoredEditBoxFontString:GetStringHeight() + (ignoredPadding * 2)
+                    ignoredEditBoxFontString:Hide()
+
+                    editBox:SetHeight(measuredHeight)
+                    RestyleIgnoredAurasEditBox(editBox)
+
+                    -- Also update the container height
+                    BoxxyAuras.Options:UpdateIgnoredAurasContainerHeight()
+                end
+            end
+        end)
     end
 
     -- Load Aura Bar Scale (note: this only updates the slider, actual scale should already be applied to frames)
@@ -3157,3 +3259,264 @@ if optionsWindowScaleSlider then
         end
     end)
 end
+
+--[[------------------------------------------------------------
+-- Ignored Auras Section
+--------------------------------------------------------------]]
+
+-- Function to reposition the global container based on custom bars visibility
+function BoxxyAuras.Options:RepositionGlobalContainer()
+    if not self.IgnoredAurasContainer then
+        return
+    end
+
+    -- Get the actual bottom-most container that's currently visible
+    local targetContainer = nil
+
+    -- Check if configure container exists and is visible (custom bars exist)
+    if self.CustomBars and self.CustomBars.configureBarContainer then
+        local configFrame = self.CustomBars.configureBarContainer:GetFrame()
+        if configFrame and configFrame:IsVisible() then
+            targetContainer = self.CustomBars.configureBarContainer
+        end
+    end
+
+    -- Fall back to create container if configure isn't visible
+    if not targetContainer and self.CustomBars and self.CustomBars.createBarContainer then
+        targetContainer = self.CustomBars.createBarContainer
+    end
+
+    -- Position relative to the target container
+    if targetContainer then
+        -- Use a small negative offset to align with the main content area, accounting for container padding
+        self.IgnoredAurasContainer:SetPosition("TOPLEFT", targetContainer:GetFrame(), "BOTTOMLEFT", -12, -15)
+
+        if BoxxyAuras.DEBUG then
+            print("RepositionGlobalContainer: Positioned relative to " ..
+                (targetContainer:GetFrame():GetName() or "unnamed container"))
+        end
+    end
+end
+
+-- Create Ignored Auras container
+local ignoredAurasContainer = BoxxyAuras.UIBuilder.CreateContainer(contentFrame, "Ignored Auras")
+-- Position relative to the proper last container (either create or configure container)
+local initialParentContainer = GetLastCustomBarContainer()
+if initialParentContainer then
+    ignoredAurasContainer:SetPosition("TOPLEFT", initialParentContainer:GetFrame(), "BOTTOMLEFT", -12, -15)
+else
+    -- Fallback to custom bars container if function returns nil
+    ignoredAurasContainer:SetPosition("TOPLEFT", customBarsContainer:GetFrame(), "BOTTOMLEFT", -12, -15)
+end
+
+-- Instructions text
+local ignoredInstructLabel = ignoredAurasContainer:GetFrame():CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+PixelUtilCompat.SetPoint(ignoredInstructLabel, "TOPLEFT", ignoredAurasContainer:GetFrame(), "TOPLEFT", 12, -35)
+PixelUtilCompat.SetPoint(ignoredInstructLabel, "TOPRIGHT", ignoredAurasContainer:GetFrame(), "TOPRIGHT", -12, -35)
+ignoredInstructLabel:SetText(
+    "Enter exact spell names to ignore on all aura bars, separated by commas. Case-insensitive.")
+ignoredInstructLabel:SetJustifyH("LEFT")
+ignoredInstructLabel:SetWordWrap(true)
+ignoredInstructLabel:SetTextColor(0.8, 0.8, 0.8, 1)
+
+-- Helper to clear and redraw the background and border for the ignored auras edit box
+local function RestyleIgnoredAurasEditBox(container)
+    -- Remove old backdrop and border textures if present
+    if container.backdropTextures then
+        for _, tex in pairs(container.backdropTextures) do
+            if tex and tex.Hide then tex:Hide() end
+            if tex and tex.SetParent then tex:SetParent(nil) end
+        end
+        container.backdropTextures = nil
+    end
+    if container.borderTextures then
+        for _, tex in pairs(container.borderTextures) do
+            if tex and tex.Hide then tex:Hide() end
+            if tex and tex.SetParent then tex:SetParent(nil) end
+        end
+        container.borderTextures = nil
+    end
+    -- Redraw
+    if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
+        BoxxyAuras.UIUtils.DrawSlicedBG(container, "OptionsWindowBG", "backdrop", 0)
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(container, "backdrop", 0.05, 0.05, 0.05, 0.8)
+        BoxxyAuras.UIUtils.DrawSlicedBG(container, "EdgedBorder", "border", 0)
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(container, "border", 0.4, 0.4, 0.4, 1)
+    end
+end
+
+local ignoredPadding = 12
+-- Create a hidden FontString for measuring text height
+local ignoredEditBoxFontString = ignoredAurasContainer:GetFrame():CreateFontString(nil, "OVERLAY", "BAURASFont_General")
+ignoredEditBoxFontString:SetWidth(ignoredAurasContainer:GetFrame():GetWidth() - 24 - (ignoredPadding * 2)) -- Match the edit box width
+ignoredEditBoxFontString:SetWordWrap(true)
+ignoredEditBoxFontString:SetNonSpaceWrap(false)
+ignoredEditBoxFontString:Hide()
+
+-- Create the EditBox for ignored auras
+local ignoredAurasEditBox = CreateFrame("EditBox", nil, ignoredAurasContainer:GetFrame())
+PixelUtilCompat.SetSize(ignoredAurasEditBox, ignoredAurasContainer:GetFrame():GetWidth() - 24, 28)  -- Reduced from 34 to 24 to account for container padding
+PixelUtilCompat.SetPoint(ignoredAurasEditBox, "TOPLEFT", ignoredInstructLabel, "BOTTOMLEFT", 0, -8) -- Removed the 8px left offset
+ignoredAurasEditBox:SetMultiLine(true)
+ignoredAurasEditBox:SetAutoFocus(false)
+ignoredAurasEditBox:SetFontObject("BAURASFont_General")
+ignoredAurasEditBox:SetTextColor(1, 1, 1, 1)
+ignoredAurasEditBox:SetTextInsets(ignoredPadding, ignoredPadding, ignoredPadding, ignoredPadding)
+ignoredAurasEditBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+-- Initial style applied directly to the edit box
+RestyleIgnoredAurasEditBox(ignoredAurasEditBox)
+
+-- OnTextChanged handler for auto-saving and resizing
+ignoredAurasEditBox:SetScript("OnTextChanged", function(self, userInput)
+    if not userInput then return end -- Only respond to user input
+
+    -- Debounced auto-save logic
+    if not BoxxyAuras.Options.ignoredAurasSaveTimer then
+        BoxxyAuras.Options.ignoredAurasSaveTimer = nil
+    end
+
+    if BoxxyAuras.Options.ignoredAurasSaveTimer then
+        BoxxyAuras.Options.ignoredAurasSaveTimer:Cancel()
+    end
+    BoxxyAuras.Options.ignoredAurasSaveTimer = C_Timer.NewTimer(1.0, function()
+        BoxxyAuras.Options:SaveIgnoredAuras(self:GetText())
+        BoxxyAuras.Options.ignoredAurasSaveTimer = nil
+    end)
+
+    -- Auto-expand using FontString measurement
+    ignoredEditBoxFontString:SetWidth(self:GetWidth() - (ignoredPadding * 2))
+    ignoredEditBoxFontString:SetText(self:GetText())
+    ignoredEditBoxFontString:Show()
+    local measuredHeight = ignoredEditBoxFontString:GetStringHeight() + (ignoredPadding * 2)
+    ignoredEditBoxFontString:Hide()
+
+    PixelUtilCompat.SetHeight(self, measuredHeight)
+
+    -- Redraw background and border at new size
+    RestyleIgnoredAurasEditBox(self)
+
+    -- Update container height after resizing
+    C_Timer.After(0.01, function()
+        BoxxyAuras.Options:UpdateIgnoredAurasContainerHeight()
+    end)
+end)
+
+-- Store references
+BoxxyAuras.Options.IgnoredAurasContainer = ignoredAurasContainer
+BoxxyAuras.Options.IgnoredAurasEditBox = ignoredAurasEditBox
+
+-- Position the ignored auras container correctly after creation
+C_Timer.After(0.2, function()
+    -- Force update of custom bars container height first
+    if customBarsContainer and customBarsContainer.UpdateHeightFromChildren then
+        customBarsContainer:UpdateHeightFromChildren()
+    end
+
+    -- Then reposition the ignored auras section
+    if BoxxyAuras.Options.RepositionGlobalContainer then
+        BoxxyAuras.Options:RepositionGlobalContainer()
+    end
+end)
+
+-- Function to save ignored auras
+function BoxxyAuras.Options:SaveIgnoredAuras(auraText)
+    local settings = GetCurrentProfileSettings()
+    if not settings then
+        return
+    end
+
+    -- Initialize ignored auras list
+    if not settings.ignoredAuras then
+        settings.ignoredAuras = {}
+    end
+
+    -- Clear existing ignored auras
+    wipe(settings.ignoredAuras)
+
+    -- Parse new ignored auras
+    if auraText and auraText ~= "" then
+        for name in string.gmatch(auraText .. ',', "([^,]*),") do
+            local trimmedName = string.match(name, "^%s*(.-)%s*$")
+            if trimmedName and trimmedName ~= "" then
+                -- Store as lowercase for case-insensitive matching
+                settings.ignoredAuras[trimmedName:lower()] = true
+            end
+        end
+    end
+
+    -- Trigger aura update to apply the new ignore list
+    if BoxxyAuras.UpdateAuras then
+        BoxxyAuras.UpdateAuras(true) -- Force full refresh
+    end
+
+    if BoxxyAuras.DEBUG then
+        local count = 0
+        for _ in pairs(settings.ignoredAuras) do
+            count = count + 1
+        end
+        print("|cff00FF00BoxxyAuras:|r Saved " .. count .. " ignored auras")
+    end
+end
+
+-- NEW: Function to correctly calculate and set the height of the ignored auras container
+function BoxxyAuras.Options:UpdateIgnoredAurasContainerHeight()
+    if not self.IgnoredAurasContainer then return end
+
+    local containerFrame = self.IgnoredAurasContainer:GetFrame()
+    if not containerFrame or not containerFrame:IsVisible() then return end
+
+    local top = containerFrame:GetTop()
+    if not top then return end
+
+    local lowestBottom = top
+
+    -- Find the lowest point among the container's visible children
+    for _, child in ipairs({ containerFrame:GetChildren() }) do
+        if child:IsShown() and child:GetHeight() > 0 then
+            local childBottom = child:GetBottom()
+            if childBottom and childBottom < lowestBottom then
+                lowestBottom = childBottom
+            end
+        end
+    end
+
+    local contentHeight = top - lowestBottom
+    local titleAreaHeight = 35 -- Estimated height for title and top padding
+    local bottomPadding = 12
+
+    local newHeight = titleAreaHeight + contentHeight + bottomPadding
+
+    -- Ensure a minimum height so the container doesn't collapse
+    newHeight = math.max(newHeight, 90)
+
+    PixelUtilCompat.SetHeight(containerFrame, newHeight)
+end
+
+-- NEW Function to handle layout refreshes
+function BoxxyAuras.Options:RefreshIgnoredAurasLayout()
+    if not self.IgnoredAurasEditBox then return end
+
+    local editBox = self.IgnoredAurasEditBox
+    local currentText = editBox:GetText()
+
+    if not editBox:IsVisible() then return end
+
+    -- Measure and resize the edit box based on its content
+    if ignoredEditBoxFontString then
+        ignoredEditBoxFontString:SetWidth(editBox:GetWidth() - (ignoredPadding * 2))
+        ignoredEditBoxFontString:SetText(currentText)
+        ignoredEditBoxFontString:Show()
+        local measuredHeight = ignoredEditBoxFontString:GetStringHeight() + (ignoredPadding * 2)
+        ignoredEditBoxFontString:Hide()
+
+        editBox:SetHeight(measuredHeight)
+        RestyleIgnoredAurasEditBox(editBox)
+
+        -- Now that the edit box has the correct height, update its parent container
+        self:UpdateIgnoredAurasContainerHeight()
+    end
+end
+
+-- Update reference for potential future containers
+lastContainer = ignoredAurasContainer

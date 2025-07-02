@@ -2,7 +2,7 @@ local addonNameString, privateTable = ... -- Use different names for the local v
 _G.BoxxyAuras = _G.BoxxyAuras or {}       -- Explicitly create/assign the GLOBAL table
 local BoxxyAuras = _G.BoxxyAuras          -- Create a convenient local alias to the global table
 
-BoxxyAuras.Version = "1.4.1"
+BoxxyAuras.Version = "1.4.2"
 
 BoxxyAuras.AllAuras = {}         -- Global cache for aura info
 BoxxyAuras.recentAuraEvents = {} -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
@@ -186,9 +186,9 @@ BoxxyAuras.Config = {
 }
 
 BoxxyAuras.FrameHoverStates = {
-    BuffFrame = false,
-    DebuffFrame = false,
-    CustomFrame = false
+    Buff = false,
+    Debuff = false,
+    -- Custom frames will be added dynamically as they are created
 }
 
 -- <<< UPDATED: Per-frame hover and timer tracking >>>
@@ -603,8 +603,6 @@ local function InitializeAuras()
         return
     end
 
-    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
-
     -- Initialize collections
     if not BoxxyAuras.auraTracking then
         BoxxyAuras.auraTracking = {}
@@ -640,168 +638,27 @@ local function InitializeAuras()
         BoxxyAuras.iconArrays[frameType] = {}
     end
 
-    -- Get all current auras
-    local allCurrentBuffs = {}
-    local allCurrentDebuffs = {}
-
-    -- Check if demo mode is active
-    if BoxxyAuras.Options and BoxxyAuras.Options.demoModeActive and BoxxyAuras.demoAuras then
-        -- Use demo auras instead of real auras
-        if BoxxyAuras.demoAuras.Buff then
-            for _, demoAura in ipairs(BoxxyAuras.demoAuras.Buff) do
-                local auraData = {
-                    name = demoAura.name,
-                    icon = demoAura.icon,
-                    duration = demoAura.duration,
-                    expirationTime = demoAura.expirationTime,
-                    applications = demoAura.applications,
-                    spellId = demoAura.spellId,
-                    auraInstanceID = demoAura.auraInstanceID,
-                    slot = 0, -- Demo auras don't have real slots
-                    auraType = "HELPFUL"
-                }
-                table.insert(allCurrentBuffs, auraData)
-            end
-        end
-
-        if BoxxyAuras.demoAuras.Debuff then
-            for _, demoAura in ipairs(BoxxyAuras.demoAuras.Debuff) do
-                local auraData = {
-                    name = demoAura.name,
-                    icon = demoAura.icon,
-                    duration = demoAura.duration,
-                    expirationTime = demoAura.expirationTime,
-                    applications = demoAura.applications,
-                    spellId = demoAura.spellId,
-                    auraInstanceID = demoAura.auraInstanceID,
-                    slot = 0, -- Demo auras don't have real slots
-                    auraType = "HARMFUL",
-                    dispelName = demoAura.dispelName
-                }
-                table.insert(allCurrentDebuffs, auraData)
-            end
-        end
-    else
-        -- Use real auras from the game API
-        local buffSlots = { C_UnitAuras.GetAuraSlots("player", "HELPFUL") }
-        local debuffSlots = { C_UnitAuras.GetAuraSlots("player", "HARMFUL") }
-
-        for i = 2, #buffSlots do
-            local slot = buffSlots[i]
-            local auraData = C_UnitAuras.GetAuraDataBySlot("player", slot)
-            if auraData then
-                auraData.slot = slot
-                auraData.auraType = "HELPFUL"
-                table.insert(allCurrentBuffs, auraData)
-            end
-        end
-
-        for i = 2, #debuffSlots do
-            local slot = debuffSlots[i]
-            local auraData = C_UnitAuras.GetAuraDataBySlot("player", slot)
-            if auraData then
-                auraData.slot = slot
-                auraData.auraType = "HARMFUL"
-                table.insert(allCurrentDebuffs, auraData)
-            end
-        end
-    end
-
-    -- Get custom aura assignments (case-insensitive)
-    local customNamesLookup = {}
-    local profileCustomAuras = currentSettings.customAuraNames
-    if profileCustomAuras and type(profileCustomAuras) == "table" then
-        for name, _ in pairs(profileCustomAuras) do
-            -- Store lowercase version for case-insensitive matching
-            customNamesLookup[string.lower(name)] = true
-        end
-    end
-
-    -- Create frame-specific aura lists
-    local aurasByFrame = {}
-
-    -- Initialize collection for each frame type
-    for frameType, _ in pairs(BoxxyAuras.Frames) do
-        aurasByFrame[frameType] = {}
-    end
-
-    -- Assign auras to the appropriate frame types
-    for _, auraData in ipairs(allCurrentBuffs) do
-        local isCustom = customNamesLookup[string.lower(auraData.name or "")]
-        if isCustom and aurasByFrame["Custom"] then
-            auraData.originalAuraType = "HELPFUL"
-            table.insert(aurasByFrame["Custom"], auraData)
-        elseif aurasByFrame["Buff"] then
-            table.insert(aurasByFrame["Buff"], auraData)
-        end
-    end
-
-    for _, auraData in ipairs(allCurrentDebuffs) do
-        local isCustom = customNamesLookup[string.lower(auraData.name or "")]
-        if isCustom and aurasByFrame["Custom"] then
-            auraData.originalAuraType = "HARMFUL"
-            table.insert(aurasByFrame["Custom"], auraData)
-        elseif aurasByFrame["Debuff"] then
-            table.insert(aurasByFrame["Debuff"], auraData)
-        end
-    end
-
-    -- Add demo custom auras if demo mode is active
-    if BoxxyAuras.Options and BoxxyAuras.Options.demoModeActive and BoxxyAuras.demoAuras and BoxxyAuras.demoAuras.Custom then
-        for _, demoAura in ipairs(BoxxyAuras.demoAuras.Custom) do
-            local auraData = {
-                name = demoAura.name,
-                icon = demoAura.icon,
-                duration = demoAura.duration,
-                expirationTime = demoAura.expirationTime,
-                applications = demoAura.applications,
-                spellId = demoAura.spellId,
-                auraInstanceID = demoAura.auraInstanceID,
-                slot = 0,                    -- Demo auras don't have real slots
-                auraType = "CUSTOM",
-                originalAuraType = "HELPFUL" -- Default to helpful for custom demo auras
-            }
-            if aurasByFrame["Custom"] then
-                table.insert(aurasByFrame["Custom"], auraData)
-            end
-        end
-    end
-
-    -- Sort and assign auras to tracking lists
-    for frameType, auras in pairs(aurasByFrame) do
-        table.sort(auras, SortAurasForDisplay)
-        BoxxyAuras.auraTracking[frameType] = auras
-    end
-
     -- Create initial icons for each frame
     for frameType, frame in pairs(BoxxyAuras.Frames) do
-        local auras = BoxxyAuras.auraTracking[frameType] or {}
+        -- Get the correctly sorted and filtered auras for this frame
+        local auras = BoxxyAuras:GetSortedAurasForFrame(frameType)
+        BoxxyAuras.auraTracking[frameType] = auras
+
+        -- Initialize icon array and pool if they don't exist
         BoxxyAuras.iconArrays[frameType] = BoxxyAuras.iconArrays[frameType] or {}
         local iconPool = BoxxyAuras.iconPools[frameType] or {}
-
-        -- Determine aura filter for this frame type
-        local auraFilter = "HELPFUL"
-        if frameType == "Debuff" then
-            auraFilter = "HARMFUL"
-        elseif BoxxyAuras:IsCustomFrameType(frameType) then
-            auraFilter = "CUSTOM"
-        end
 
         -- Create icons for each aura
         for i, auraData in ipairs(auras) do
             local icon = table.remove(iconPool)
             if not icon then
                 local baseNamePrefix = "BoxxyAuras" .. frameType .. "Icon"
-                BoxxyAuras.iconCounters[frameType] = BoxxyAuras.iconCounters[frameType] + 1
+                BoxxyAuras.iconCounters[frameType] = (BoxxyAuras.iconCounters[frameType] or 0) + 1
                 icon = AuraIcon.New(frame, BoxxyAuras.iconCounters[frameType], baseNamePrefix)
             end
 
             BoxxyAuras.iconArrays[frameType][i] = icon
-            if icon and icon.newAuraAnimGroup then
-                icon.newAuraAnimGroup:Play()
-            end
-
-            icon:Update(auraData, i, auraData.auraType)
+            icon:Display(auraData, i, auraData.auraType, false) -- Skip intro animation at login
             icon.frame:Show()
         end
     end
@@ -881,6 +738,20 @@ BoxxyAuras.UpdateSingleFrameAuras = function(frameType)
                 end
             end
         end
+    else
+        -- Clean up any forceExpired auras when hover state ends
+        if BoxxyAuras.DEBUG then
+            local expiredCount = 0
+            for _, trackedAura in ipairs(trackedAuras) do
+                if trackedAura and trackedAura.forceExpired then
+                    expiredCount = expiredCount + 1
+                end
+            end
+            if expiredCount > 0 then
+                print(string.format("Single frame update: Cleaning up %d forceExpired auras from frame %s (hover ended)",
+                    expiredCount, frameType))
+            end
+        end
     end
 
     -- Re-sort the list if we added expired auras, to maintain order
@@ -898,11 +769,27 @@ BoxxyAuras.UpdateSingleFrameAuras = function(frameType)
     local newIconArray = {}
     local usedIcons = {} -- Keep track of icons from the old array that are being kept
 
-    -- Iterate through the NEW list of auras
-    for i, newAuraData in ipairs(newAuraList) do
+    -- Filter out forceExpired auras if we shouldn't hold them anymore
+    local filteredAuraList = {}
+    for _, auraData in ipairs(newAuraList) do
+        -- Only include forceExpired auras if we should still hold them
+        if auraData.forceExpired and not shouldHoldExpiredAuras then
+            if BoxxyAuras.DEBUG then
+                print(string.format("Single frame: Filtering out forceExpired aura '%s' from frame %s (hover ended)",
+                    auraData.name or "Unknown", frameType))
+            end
+            -- Skip this aura
+        else
+            table.insert(filteredAuraList, auraData)
+        end
+    end
+
+    -- Iterate through the FILTERED list of auras
+    for i, newAuraData in ipairs(filteredAuraList) do
         local newInstanceID = newAuraData.auraInstanceID
         local existing = existingAuraLookup[newInstanceID]
         local icon
+        local isNewAura = false
 
         if existing then
             -- Aura already exists, reuse its icon
@@ -911,9 +798,7 @@ BoxxyAuras.UpdateSingleFrameAuras = function(frameType)
         else
             -- This is a completely new aura, get an icon from the pool
             icon = BoxxyAuras.GetOrCreateIcon(iconPool, i, frame, "BoxxyAuras" .. frameType .. "Icon")
-            if icon and icon.newAuraAnimGroup then
-                icon.newAuraAnimGroup:Play() -- Play new aura animation
-            end
+            isNewAura = true
 
             -- Trigger tooltip scrape for the new aura
             if newAuraData.auraInstanceID and BoxxyAuras.AttemptTooltipScrape then
@@ -924,14 +809,15 @@ BoxxyAuras.UpdateSingleFrameAuras = function(frameType)
 
         if icon then
             if BoxxyAuras.DEBUG and newAuraData.forceExpired then
-                print(string.format("Single frame update: Updating icon for expired aura '%s' with forceExpired = %s",
+                print(string.format("Updating icon for expired aura '%s' with forceExpired = %s",
                     newAuraData.name or "Unknown", tostring(newAuraData.forceExpired)))
             end
-            icon:Update(newAuraData, i, newAuraData.auraType)
+            icon:Display(newAuraData, i, newAuraData.auraType, isNewAura)
             icon.frame:Show()
             newIconArray[i] = icon
         end
 
+        -- The new list of tracked auras is the filtered list
         newTrackedAuras[i] = newAuraData
     end
 
@@ -1022,8 +908,9 @@ function BoxxyAuras:UpdateFrameWithAuras(frameType, auraList)
     -- Create or reuse icons for the provided auras
     for i, auraData in ipairs(auraList) do
         local icon = iconArray[i] or BoxxyAuras.GetOrCreateIcon(iconPool, i, frame, "BoxxyAuras" .. frameType .. "Icon")
+        local isNewAura = (iconArray[i] == nil) -- New if we had to get/create from pool
         if icon then
-            icon:Update(auraData, i, auraData.auraType)
+            icon:Display(auraData, i, auraData.auraType, isNewAura)
             icon.frame:Show()
             newIconArray[i] = icon
         end
@@ -1135,6 +1022,30 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
         aurasByFrame[frameType] = BoxxyAuras:GetSortedAurasForFrame(frameType)
     end
 
+    -- DEBUG: Check for frames with forceExpired auras that shouldn't have them
+    if BoxxyAuras.DEBUG then
+        for frameType, frame in pairs(BoxxyAuras.Frames) do
+            local frameKey = frame:GetName() or frameType
+            local shouldHoldExpiredAuras = BoxxyAuras.FrameHoverStates[frameType] or
+                BoxxyAuras.FrameHoverTimers[frameKey]
+
+            if not shouldHoldExpiredAuras and BoxxyAuras.auraTracking and BoxxyAuras.auraTracking[frameType] then
+                local expiredCount = 0
+                for _, aura in ipairs(BoxxyAuras.auraTracking[frameType]) do
+                    if aura and aura.forceExpired then
+                        expiredCount = expiredCount + 1
+                    end
+                end
+                if expiredCount > 0 then
+                    print(string.format(
+                        "DEBUG: Frame %s has %d forceExpired auras but shouldn't hold them (hover=%s, timer=%s)",
+                        frameType, expiredCount, tostring(BoxxyAuras.FrameHoverStates[frameType]),
+                        tostring(BoxxyAuras.FrameHoverTimers[frameKey])))
+                end
+            end
+        end
+    end
+
     -- Loop through each frame type to update its icons
     for frameType, newAuraList in pairs(aurasByFrame) do
         local frame = BoxxyAuras.Frames[frameType]
@@ -1170,6 +1081,20 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
                         end
                     end
                 end
+            else
+                -- Clean up any forceExpired auras when hover state ends
+                if BoxxyAuras.DEBUG then
+                    local expiredCount = 0
+                    for _, trackedAura in ipairs(trackedAuras) do
+                        if trackedAura and trackedAura.forceExpired then
+                            expiredCount = expiredCount + 1
+                        end
+                    end
+                    if expiredCount > 0 then
+                        print(string.format("UpdateAuras: Cleaning up %d forceExpired auras from frame %s (hover ended)",
+                            expiredCount, frameType))
+                    end
+                end
             end
 
             -- Re-sort the list if we added expired auras, to maintain order
@@ -1187,11 +1112,27 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
             local newIconArray = {}
             local usedIcons = {} -- Keep track of icons from the old array that are being kept
 
-            -- 1. Iterate through the NEW list of auras
-            for i, newAuraData in ipairs(newAuraList) do
+            -- Filter out forceExpired auras if we shouldn't hold them anymore
+            local filteredAuraList = {}
+            for _, auraData in ipairs(newAuraList) do
+                -- Only include forceExpired auras if we should still hold them
+                if auraData.forceExpired and not shouldHoldExpiredAuras then
+                    if BoxxyAuras.DEBUG then
+                        print(string.format("Filtering out forceExpired aura '%s' from frame %s (hover ended)",
+                            auraData.name or "Unknown", frameType))
+                    end
+                    -- Skip this aura
+                else
+                    table.insert(filteredAuraList, auraData)
+                end
+            end
+
+            -- 1. Iterate through the FILTERED list of auras
+            for i, newAuraData in ipairs(filteredAuraList) do
                 local newInstanceID = newAuraData.auraInstanceID
                 local existing = existingAuraLookup[newInstanceID]
                 local icon
+                local isNewAura = false
 
                 if existing then
                     -- Aura already exists, reuse its icon
@@ -1200,9 +1141,7 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
                 else
                     -- This is a completely new aura, get an icon from the pool
                     icon = BoxxyAuras.GetOrCreateIcon(iconPool, i, frame, "BoxxyAuras" .. frameType .. "Icon")
-                    if icon and icon.newAuraAnimGroup then
-                        icon.newAuraAnimGroup:Play() -- Play new aura animation
-                    end
+                    isNewAura = true
 
                     -- Trigger tooltip scrape for the new aura
                     if newAuraData.auraInstanceID and BoxxyAuras.AttemptTooltipScrape then
@@ -1216,12 +1155,12 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
                         print(string.format("Updating icon for expired aura '%s' with forceExpired = %s",
                             newAuraData.name or "Unknown", tostring(newAuraData.forceExpired)))
                     end
-                    icon:Update(newAuraData, i, newAuraData.auraType)
+                    icon:Display(newAuraData, i, newAuraData.auraType, isNewAura)
                     icon.frame:Show()
                     newIconArray[i] = icon
                 end
 
-                -- The new list of tracked auras is simply the new list from the game
+                -- The new list of tracked auras is the filtered list
                 newTrackedAuras[i] = newAuraData
             end
 
@@ -1266,6 +1205,15 @@ function BoxxyAuras.ReturnIconToPool(pool, icon)
             icon.frame:Hide()
             icon.frame:SetScript("OnUpdate", nil)
         end
+
+        -- Safety check: Ensure frame is always hidden when returned to pool
+        if icon.frame:IsShown() then
+            if BoxxyAuras.DEBUG then
+                print("ReturnIconToPool: Frame still showing after Reset, forcing Hide()")
+            end
+            icon.frame:Hide()
+        end
+
         table.insert(pool, icon)
     end
 end
@@ -1333,6 +1281,20 @@ function BoxxyAuras:GetSortedAurasForFrame(frameType)
         end
     end
 
+    -- Filter out ignored auras first (applies to ALL frame types)
+    if currentSettings.ignoredAuras and next(currentSettings.ignoredAuras) then
+        local filteredAuras = {}
+        for _, auraData in ipairs(allAuras) do
+            local auraNameLower = string.lower(auraData.name or "")
+            if not currentSettings.ignoredAuras[auraNameLower] then
+                table.insert(filteredAuras, auraData)
+            elseif self.DEBUG then
+                print(string.format("BoxxyAuras: Ignoring aura '%s' (in ignored list)", auraData.name or "Unknown"))
+            end
+        end
+        allAuras = filteredAuras
+    end
+
     -- Build lookup tables for aura assignments
     local customAuraAssignments = {}
     local legacyCustomNamesLookup = {}
@@ -1362,6 +1324,9 @@ function BoxxyAuras:GetSortedAurasForFrame(frameType)
         for _, auraData in ipairs(allAuras) do
             local auraNameLower = string.lower(auraData.name or "")
             local assignedTo = customAuraAssignments[auraNameLower]
+            if assignedTo and not self.Frames[assignedTo] then
+                assignedTo = nil -- ignore invalid assignment
+            end
 
             -- Include aura if it's not assigned to any custom frame
             if not assignedTo then
@@ -1375,6 +1340,9 @@ function BoxxyAuras:GetSortedAurasForFrame(frameType)
         for _, auraData in ipairs(allAuras) do
             local auraNameLower = string.lower(auraData.name or "")
             local assignedTo = customAuraAssignments[auraNameLower]
+            if assignedTo and not self.Frames[assignedTo] then
+                assignedTo = nil
+            end
 
             -- Include aura if it's assigned to this specific custom frame
             if assignedTo == frameType then
@@ -1493,6 +1461,7 @@ eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED") -- Combat end event
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
 -- Key event handling frame for arrow key nudging
 local keyEventFrame = CreateFrame("Frame")
@@ -1659,27 +1628,33 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         BoxxyAuras.UpdateAuras(true)
 
         -- Apply initial lock state and restore positions
-        C_Timer.After(0.1, function()
-            local finalSettings = BoxxyAuras:GetCurrentProfileSettings()
+        local finalSettings = BoxxyAuras:GetCurrentProfileSettings()
 
-            -- First restore positions for all frames
-            if LibWindow then
-                for frameType, frame in pairs(BoxxyAuras.Frames or {}) do
-                    if frame then
-                        LibWindow.RestorePosition(frame)
-                        if BoxxyAuras.DEBUG then
-                            print(string.format("Restored position for %s frame during login", frameType))
-                        end
+        -- First restore positions for all frames
+        if LibWindow then
+            for frameType, frame in pairs(BoxxyAuras.Frames or {}) do
+                if frame then
+                    LibWindow.RestorePosition(frame)
+                    if BoxxyAuras.DEBUG then
+                        print(string.format("Restored position for %s frame during login", frameType))
                     end
                 end
             end
+        end
 
-            -- Then apply lock state if needed
-            if finalSettings.lockFrames then
-                BoxxyAuras.FrameHandler.ApplyLockState(true)
-                if BoxxyAuras.DEBUG then
-                    print("Applied lock state during login")
-                end
+        -- Then apply lock state if needed
+        if finalSettings.lockFrames then
+            BoxxyAuras.FrameHandler.ApplyLockState(true)
+            if BoxxyAuras.DEBUG then
+                print("Applied lock state during login")
+            end
+        end
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Run another full update once the player has fully entered the world – at this point
+        -- the aura APIs are guaranteed to be populated.
+        C_Timer.After(0.1, function()
+            if BoxxyAuras and BoxxyAuras.UpdateAuras then
+                BoxxyAuras.UpdateAuras(true)
             end
         end)
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
@@ -2000,8 +1975,24 @@ function BoxxyAuras:SwitchToProfile(profileName)
     -- 6. Finally trigger a full aura update so icon durations, sizes, etc. refresh
     ------------------------------------------------------------------
     if self.UpdateAuras then
-        self.UpdateAuras()
+        self.UpdateAuras(true) -- Use forced refresh to ensure everything redraws properly
     end
+
+    -- Add delayed comprehensive refresh for profile switching (similar to reload fix)
+    -- This ensures borders and custom routing work correctly after profile changes
+    C_Timer.After(0.3, function()
+        if BoxxyAuras.DEBUG then
+            print("BoxxyAuras: Performing post-profile-switch comprehensive refresh for borders and routing")
+        end
+
+        if self.UpdateAuras then
+            self.UpdateAuras(true) -- Force complete refresh
+        end
+
+        if BoxxyAuras.DEBUG then
+            print("BoxxyAuras: Post-profile-switch refresh complete")
+        end
+    end)
 
     return true
 end
@@ -2259,7 +2250,8 @@ hoverCheckFrame:SetScript("OnUpdate", function(self, elapsed)
     -- Update auras only for frames that had hover state changes
     for frameType, _ in pairs(framesNeedingUpdate) do
         if BoxxyAuras.DEBUG then
-            print("OnUpdate: Calling UpdateSingleFrameAuras() for frame: " .. frameType)
+            print("OnUpdate: Calling UpdateSingleFrameAuras() for frame: " ..
+                frameType .. " (HOVER TRIGGERED BORDER REFRESH)")
         end
         BoxxyAuras.UpdateSingleFrameAuras(frameType)
     end
@@ -2277,6 +2269,10 @@ hoverCheckFrame:SetScript("OnUpdate", function(self, elapsed)
                 -- Frame is LOCKED: Hide normal visuals, but show hover border on hover if enabled
                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "backdrop", 0, 0, 0, 0)
                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", 0, 0, 0, 0)
+
+                if BoxxyAuras.DEBUG then
+                    print(string.format("BORDER DEBUG: Setting frame %s border to transparent (locked)", frameType))
+                end
                 if isVisuallyHovered and showHoverBorder then
                     BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "hoverBorder", hoverColor)
                 else
@@ -2300,8 +2296,8 @@ hoverCheckFrame:SetScript("OnUpdate", function(self, elapsed)
                         0)
                 end
 
-                -- Always show border when unlocked
-                BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", BoxxyAuras.Config.BorderColor)
+                -- Note: Individual icon borders are managed by Auraicon:Display() method
+                -- Frame-level border is handled in FrameHandler.SetupDisplayFrame()
             end
         end
     end
@@ -2309,7 +2305,7 @@ hoverCheckFrame:SetScript("OnUpdate", function(self, elapsed)
     -- Update previous lock state for next tick
     BoxxyAuras.WasLocked = currentLockState
 
-    -- === Periodic Cache Cleanup ===
+    -- === Periodic Cache Cleanup and Force Expired Aura Cleanup ===
     local currentTime = GetTime()
     if currentTime - BoxxyAuras.lastCacheCleanup > 300 then -- Clean every 5 minutes
         BoxxyAuras.lastCacheCleanup = currentTime
@@ -2337,6 +2333,34 @@ hoverCheckFrame:SetScript("OnUpdate", function(self, elapsed)
 
         if BoxxyAuras.DEBUG and removedCount > 0 then
             print(string.format("Cache cleanup: Removed %d old tooltip entries", removedCount))
+        end
+
+        -- Force cleanup of any stuck forceExpired auras
+        local cleanupNeeded = false
+        for frameType, frame in pairs(BoxxyAuras.Frames or {}) do
+            local frameKey = frame:GetName() or frameType
+            local shouldHoldExpiredAuras = BoxxyAuras.FrameHoverStates[frameType] or
+                BoxxyAuras.FrameHoverTimers[frameKey]
+
+            if not shouldHoldExpiredAuras and BoxxyAuras.auraTracking and BoxxyAuras.auraTracking[frameType] then
+                for _, aura in ipairs(BoxxyAuras.auraTracking[frameType]) do
+                    if aura and aura.forceExpired then
+                        cleanupNeeded = true
+                        if BoxxyAuras.DEBUG then
+                            print(string.format("Periodic cleanup: Found stuck forceExpired aura '%s' in frame %s",
+                                aura.name or "Unknown", frameType))
+                        end
+                        break
+                    end
+                end
+            end
+        end
+
+        if cleanupNeeded then
+            if BoxxyAuras.DEBUG then
+                print("Periodic cleanup: Triggering full aura update to clean up stuck expired auras")
+            end
+            BoxxyAuras.UpdateAuras()
         end
     end
     -- === End Cache Cleanup ===
@@ -2694,4 +2718,133 @@ local widgetIDCounter = 0
 function BoxxyAuras:GetNextWidgetID()
     widgetIDCounter = widgetIDCounter + 1
     return widgetIDCounter
+end
+
+-- Debug function to check hover states and timers
+function BoxxyAuras:DebugHoverStates()
+    if not self.DEBUG then
+        print("Enable BoxxyAuras.DEBUG = true first")
+        return
+    end
+
+    print("=== BoxxyAuras Hover State Debug ===")
+    print("Current time:", GetTime())
+
+    print("\nFrames and their hover states:")
+    for frameType, frame in pairs(self.Frames or {}) do
+        local frameKey = frame:GetName() or frameType
+        local mouseInFrame = self.IsMouseWithinFrame(frame)
+        local hoverState = self.FrameHoverStates[frameType]
+        local hoverTimer = self.FrameHoverTimers[frameKey]
+        local visualHover = self.FrameVisualHoverStates[frameType]
+
+        print(string.format("  %s (%s):", frameType, frameKey))
+        print(string.format("    Mouse in frame: %s", tostring(mouseInFrame)))
+        print(string.format("    Hover state: %s", tostring(hoverState)))
+        print(string.format("    Hover timer: %s", tostring(hoverTimer)))
+        print(string.format("    Visual hover: %s", tostring(visualHover)))
+        print(string.format("    shouldHoldExpiredAuras: %s", tostring(hoverState or hoverTimer)))
+
+        -- Check tracked auras for this frame
+        if self.auraTracking and self.auraTracking[frameType] then
+            local expiredCount = 0
+            local totalCount = #self.auraTracking[frameType]
+            for _, aura in ipairs(self.auraTracking[frameType]) do
+                if aura and aura.forceExpired then
+                    expiredCount = expiredCount + 1
+                end
+            end
+            print(string.format("    Tracked auras: %d total, %d forceExpired", totalCount, expiredCount))
+        end
+    end
+
+    print("=== End Debug ===")
+end
+
+-- Debug function to trace expired aura handling
+function BoxxyAuras:DebugExpiredAuras(frameType)
+    if not self.DEBUG then
+        return
+    end
+
+    local frame = self.Frames and self.Frames[frameType]
+    if not frame then
+        print("DebugExpiredAuras: No frame found for " .. tostring(frameType))
+        return
+    end
+
+    local frameKey = frame:GetName() or frameType
+    local mouseInFrame = self.IsMouseWithinFrame(frame)
+    local hoverState = self.FrameHoverStates[frameType]
+    local hoverTimer = self.FrameHoverTimers[frameKey]
+    local shouldHoldExpiredAuras = hoverState or hoverTimer
+
+    print(string.format("\n=== Expired Aura Debug for %s ===", frameType))
+    print(string.format("Frame key: %s", frameKey))
+    print(string.format("Mouse in frame: %s", tostring(mouseInFrame)))
+    print(string.format("Hover state: %s", tostring(hoverState)))
+    print(string.format("Hover timer: %s", tostring(hoverTimer)))
+    print(string.format("shouldHoldExpiredAuras: %s", tostring(shouldHoldExpiredAuras)))
+
+    if self.auraTracking and self.auraTracking[frameType] then
+        print(string.format("Tracked auras (%d total):", #self.auraTracking[frameType]))
+        for i, aura in ipairs(self.auraTracking[frameType]) do
+            if aura then
+                print(string.format("  %d: %s (ID:%s, forceExpired:%s)",
+                    i, aura.name or "Unknown",
+                    tostring(aura.auraInstanceID),
+                    tostring(aura.forceExpired)))
+            end
+        end
+    else
+        print("No tracked auras")
+    end
+    print("=== End Debug ===\n")
+end
+
+-- Manual function to force cleanup of all expired auras (for testing)
+function BoxxyAuras:ForceCleanupExpiredAuras()
+    print("=== Force Cleanup Expired Auras ===")
+    local cleanedFrames = 0
+    local cleanedAuras = 0
+
+    for frameType, frame in pairs(self.Frames or {}) do
+        local frameKey = frame:GetName() or frameType
+        local shouldHoldExpiredAuras = self.FrameHoverStates[frameType] or self.FrameHoverTimers[frameKey]
+
+        if self.DEBUG then
+            print(string.format("Frame %s: shouldHold=%s (hover=%s, timer=%s)",
+                frameType, tostring(shouldHoldExpiredAuras),
+                tostring(self.FrameHoverStates[frameType]),
+                tostring(self.FrameHoverTimers[frameKey])))
+        end
+
+        if self.auraTracking and self.auraTracking[frameType] then
+            local expiredCount = 0
+            for _, aura in ipairs(self.auraTracking[frameType]) do
+                if aura and aura.forceExpired then
+                    expiredCount = expiredCount + 1
+                end
+            end
+
+            if expiredCount > 0 then
+                print(string.format("  Frame %s has %d forceExpired auras", frameType, expiredCount))
+                if not shouldHoldExpiredAuras then
+                    cleanedFrames = cleanedFrames + 1
+                    cleanedAuras = cleanedAuras + expiredCount
+                    print(string.format("  Triggering cleanup for frame %s", frameType))
+                else
+                    print(string.format("  Frame %s should hold expired auras, skipping cleanup", frameType))
+                end
+            end
+        end
+    end
+
+    if cleanedFrames > 0 then
+        print(string.format("Triggering UpdateAuras to clean %d auras from %d frames", cleanedAuras, cleanedFrames))
+        self.UpdateAuras()
+    else
+        print("No expired auras need cleanup")
+    end
+    print("=== End Force Cleanup ===")
 end
