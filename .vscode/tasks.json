@@ -1,0 +1,10 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Check Lua Syntax",
+			"type": "shell",
+			"command": "powershell.exe -Command \"Get-ChildItem -Path '.' -Filter '*.lua' | ForEach-Object { Write-Host ('Checking: ' + $_.Name); Get-Content $_.FullName | Out-Null; if ($?) { Write-Host 'OK' -ForegroundColor Green } else { Write-Host 'ERROR' -ForegroundColor Red } }\""
+		}
+	]
+}

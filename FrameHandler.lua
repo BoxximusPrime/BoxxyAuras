@@ -1149,8 +1149,58 @@ function BoxxyAuras.FrameHandler.ApplySettings(frameType, resetPosition_IGNORED)
     local borderSize = frameSettings.borderSize or 0
     local frameWidth = BoxxyAuras.FrameHandler.CalculateFrameWidth(numIconsWide, iconSize, borderSize, frameSettings)
 
-    -- Set frame width
-    frame:SetWidth(frameWidth)
+    -- Check if this frame is right-aligned to determine growth direction
+    local alignment = "LEFT" -- Default alignment
+    if frameType == "Buff" and frameSettings.buffTextAlign then
+        alignment = frameSettings.buffTextAlign
+    elseif frameType == "Debuff" and frameSettings.debuffTextAlign then
+        alignment = frameSettings.debuffTextAlign
+    elseif BoxxyAuras:IsCustomFrameType(frameType) and frameSettings.customTextAlign then
+        alignment = frameSettings.customTextAlign
+    end
+
+    -- For right-aligned frames, we need special handling to grow left instead of right
+    if alignment == "RIGHT" then
+        local currentWidth = frame:GetWidth()
+        local widthDelta = frameWidth - currentWidth
+        
+        -- Only do special handling if the width is actually changing
+        if math.abs(widthDelta) > 0.1 then
+            -- Get current position
+            local point, relativeTo, relativePoint, xOfs, yOfs = frame:GetPoint()
+            
+            if point and relativeTo and relativePoint then
+                -- Calculate current right edge position
+                local currentLeft = frame:GetLeft()
+                local currentRightEdge = currentLeft + currentWidth
+                
+                -- Set the new width
+                frame:SetWidth(frameWidth)
+                
+                -- Calculate the new X offset to maintain the right edge position
+                -- We adjust the existing offset by the width change
+                local newXOfs = xOfs - widthDelta
+                
+                -- Clear points and reposition using the original anchor point
+                frame:ClearAllPoints()
+                frame:SetPoint(point, relativeTo, relativePoint, newXOfs, yOfs)
+                
+                if BoxxyAuras.DEBUG then
+                    print(string.format("Right-aligned frame %s: width %.1f -> %.1f, adjusted X offset by %.1f (%.1f -> %.1f)", 
+                        frameType, currentWidth, frameWidth, -widthDelta, xOfs, newXOfs))
+                end
+            else
+                -- Fallback if we can't get position info
+                frame:SetWidth(frameWidth)
+            end
+        else
+            -- Width isn't changing significantly, just set it normally
+            frame:SetWidth(frameWidth)
+        end
+    else
+        -- For left-aligned and center-aligned frames, just set width normally
+        frame:SetWidth(frameWidth)
+    end
 
     -- Ensure frame is visible unless explicitly locked
     local isLocked = currentSettings and currentSettings.lockFrames

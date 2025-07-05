@@ -3,6 +3,15 @@ _G.BoxxyAuras = _G.BoxxyAuras or {}       -- Explicitly create/assign the GLOBAL
 local BoxxyAuras = _G.BoxxyAuras          -- Create a convenient local alias to the global table
 BoxxyAuras.Options = {}                   -- Table to hold options elements
 
+-- LibSharedMedia for font selection
+local Media = LibStub("LibSharedMedia-3.0")
+
+-- Register our addon's fonts with LibSharedMedia so they appear in the dropdown
+Media:Register("font", "OpenSans SemiBold", "Interface\\AddOns\\BoxxyAuras\\Fonts\\OpenSans-SemiBold.ttf")
+Media:Register("font", "HK Grotesk Bold", "Interface\\AddOns\\BoxxyAuras\\Fonts\\hk-grotesk.bold.ttf")
+Media:Register("font", "OpenSans Bold", "Interface\\AddOns\\BoxxyAuras\\Fonts\\OpenSans-Bold.ttf")
+Media:Register("font", "OpenSans Bold Italic", "Interface\\AddOns\\BoxxyAuras\\Fonts\\OpenSans-BoldItalic.ttf")
+
 -- PixelUtil Compatibility Layer
 local PixelUtilCompat = {}
 
@@ -376,6 +385,432 @@ function BoxxyAuras.Options:ApplyBackgroundColorChange()
     end)
 end
 
+-- Helper function to update the healing absorb color swatch display
+function BoxxyAuras.Options:UpdateHealingAbsorbColorSwatch()
+    if not self.HealingAbsorbColorSwatch or not self.HealingAbsorbColorSwatch.background then
+        return
+    end
+
+    local settings = BoxxyAuras:GetCurrentProfileSettings()
+    if not settings then
+        return
+    end
+
+    local color = settings.healingAbsorbBarColor or BoxxyAuras:GetDefaultProfileSettings().healingAbsorbBarColor
+    self.HealingAbsorbColorSwatch.background:SetColorTexture(color.r, color.g, color.b, color.a)
+
+    if BoxxyAuras.DEBUG then
+        print(string.format("Updated healing absorb color swatch: r=%.2f, g=%.2f, b=%.2f, a=%.2f",
+            color.r, color.g, color.b, color.a))
+    end
+end
+
+-- Helper function to update the healing absorb background color swatch display
+function BoxxyAuras.Options:UpdateHealingAbsorbBGColorSwatch()
+    if not self.HealingAbsorbBGColorSwatch or not self.HealingAbsorbBGColorSwatch.background then
+        return
+    end
+
+    local settings = BoxxyAuras:GetCurrentProfileSettings()
+    if not settings then
+        return
+    end
+
+    local color = settings.healingAbsorbBarBGColor or BoxxyAuras:GetDefaultProfileSettings().healingAbsorbBarBGColor
+    self.HealingAbsorbBGColorSwatch.background:SetColorTexture(color.r, color.g, color.b, color.a)
+
+    if BoxxyAuras.DEBUG then
+        print(string.format("Updated healing absorb BG color swatch: r=%.2f, g=%.2f, b=%.2f, a=%.2f",
+            color.r, color.g, color.b, color.a))
+    end
+end
+
+-- Helper function to update the text color swatch display
+function BoxxyAuras.Options:UpdateTextColorSwatch()
+    if not self.TextColorSwatch or not self.TextColorSwatch.background then
+        return
+    end
+
+    local settings = BoxxyAuras:GetCurrentProfileSettings()
+    if not settings then
+        return
+    end
+
+    local color = settings.textColor or BoxxyAuras:GetDefaultProfileSettings().textColor
+    self.TextColorSwatch.background:SetColorTexture(color.r, color.g, color.b, color.a)
+
+    if BoxxyAuras.DEBUG then
+        print(string.format("Updated text color swatch: r=%.2f, g=%.2f, b=%.2f, a=%.2f",
+            color.r, color.g, color.b, color.a))
+    end
+end
+
+function BoxxyAuras.Options:ApplyHealingAbsorbColorChange()
+    -- Update all existing healing absorb bars with new colors
+    if BoxxyAuras.Frames then
+        for _, frame in pairs(BoxxyAuras.Frames) do
+            if frame and frame.HealingAbsorbFrame then
+                local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+                local healingAbsorbColor = currentSettings.healingAbsorbBarColor or BoxxyAuras:GetDefaultProfileSettings().healingAbsorbBarColor
+                local healingAbsorbBGColor = currentSettings.healingAbsorbBarBGColor or BoxxyAuras:GetDefaultProfileSettings().healingAbsorbBarBGColor
+                
+                if frame.HealingAbsorbFrame.bar then
+                    frame.HealingAbsorbFrame.bar:SetColorTexture(healingAbsorbColor.r, healingAbsorbColor.g, healingAbsorbColor.b, healingAbsorbColor.a)
+                end
+                if frame.HealingAbsorbFrame.background then
+                    frame.HealingAbsorbFrame.background:SetColorTexture(healingAbsorbBGColor.r, healingAbsorbBGColor.g, healingAbsorbBGColor.b, healingAbsorbBGColor.a)
+                end
+            end
+        end
+    end
+    
+    -- Update all actual aura icon progress bars
+    if BoxxyAuras.iconArrays then
+        for frameType, iconArray in pairs(BoxxyAuras.iconArrays) do
+            if iconArray then
+                for _, icon in ipairs(iconArray) do
+                    if icon and icon.UpdateAbsorbProgressBarColor then
+                        icon:UpdateAbsorbProgressBarColor()
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Apply font changes to all aura text elements
+function BoxxyAuras.Options:ApplyFontChange()
+    local settings = BoxxyAuras:GetCurrentProfileSettings()
+    if not settings or not settings.textFont then
+        return
+    end
+
+    local fontPath = Media:Fetch("font", settings.textFont, true) -- silent mode
+    if not fontPath then
+        if BoxxyAuras.DEBUG then
+            print("|cffFF0000BoxxyAuras Error:|r Font not found: " .. tostring(settings.textFont))
+        end
+        -- Try fallback to our default registered font
+        fontPath = Media:Fetch("font", "OpenSans SemiBold", true)
+        if not fontPath then
+            if BoxxyAuras.DEBUG then
+                print("|cffFF0000BoxxyAuras Error:|r Default font not found either!")
+            end
+            return
+        end
+    end
+
+    -- Update all existing aura icons' font
+    if BoxxyAuras.iconArrays then
+        for frameType, iconArray in pairs(BoxxyAuras.iconArrays) do
+            if iconArray then
+                for _, icon in ipairs(iconArray) do
+                    if icon and icon.frame and icon.frame:IsShown() then
+                        -- Get the frame settings for this icon's frame type to get proper text size
+                        local frameSettings = BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.GetFrameSettingsTable 
+                            and BoxxyAuras.FrameHandler.GetFrameSettingsTable(frameType)
+                        local textSize = (frameSettings and frameSettings.textSize) or 8
+                        
+                        -- Update duration text font
+                        if icon.frame.durationText then
+                            local _, currentSize, currentFlags = icon.frame.durationText:GetFont()
+                            icon.frame.durationText:SetFont(fontPath, textSize, currentFlags or "OUTLINE")
+                        end
+                        
+                        -- Update count text font (slightly larger for visibility)
+                        if icon.frame.countText then
+                            local _, currentCountSize, currentCountFlags = icon.frame.countText:GetFont()
+                            icon.frame.countText:SetFont(fontPath, textSize + 2, currentCountFlags or "OUTLINE")
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if BoxxyAuras.DEBUG then
+        print("|cff4CAF50BoxxyAuras:|r Font updated to: " .. settings.textFont)
+    end
+end
+
+-- Apply text color changes to all aura text elements
+function BoxxyAuras.Options:ApplyTextColorChange()
+    local settings = BoxxyAuras:GetCurrentProfileSettings()
+    if not settings or not settings.textColor then
+        return
+    end
+
+    local textColor = settings.textColor
+
+    -- Update all existing aura icons' text color
+    if BoxxyAuras.iconArrays then
+        for frameType, iconArray in pairs(BoxxyAuras.iconArrays) do
+            if iconArray then
+                for _, icon in ipairs(iconArray) do
+                    if icon and icon.frame and icon.frame:IsShown() then
+                        -- Update duration text color
+                        if icon.frame.durationText then
+                            icon.frame.durationText:SetTextColor(textColor.r, textColor.g, textColor.b, textColor.a)
+                        end
+                        
+                        -- Update count text color
+                        if icon.frame.countText then
+                            icon.frame.countText:SetTextColor(textColor.r, textColor.g, textColor.b, textColor.a)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if BoxxyAuras.DEBUG then
+        print(string.format("|cff4CAF50BoxxyAuras:|r Text color updated to: r=%.2f, g=%.2f, b=%.2f, a=%.2f",
+            textColor.r, textColor.g, textColor.b, textColor.a))
+    end
+end
+
+-- Helper function to create reset buttons for container sections
+function BoxxyAuras.Options:CreateResetButton(container, resetFunction)
+    if not container or not container.GetFrame then
+        return nil
+    end
+
+    local containerFrame = container:GetFrame()
+    
+    -- Create the reset button
+    local resetButton = CreateFrame("Button", nil, containerFrame)
+    PixelUtilCompat.SetSize(resetButton, 28, 28)
+    
+    -- Position in top-right corner of the container (accounting for padding and border)
+    PixelUtilCompat.SetPoint(resetButton, "TOPRIGHT", containerFrame, "TOPRIGHT", -8, -8)
+    
+    -- Set the refresh icon texture
+    local icon = resetButton:CreateTexture(nil, "ARTWORK")
+    PixelUtilCompat.SetAllPoints(icon, resetButton)
+    icon:SetTexture("Interface\\AddOns\\BoxxyAuras\\Art\\refresh.tga")
+    icon:SetTexCoord(0, 1, 0, 1)
+    
+    -- Add hover effects
+    resetButton:SetScript("OnEnter", function(self)
+        icon:SetVertexColor(1.2, 1.2, 1.2, 1) -- Brighten on hover
+        
+        -- Show tooltip
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Reset to Default Values", 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    
+    resetButton:SetScript("OnLeave", function(self)
+        icon:SetVertexColor(0.9, 0.9, 0.9, 1) -- Dim when not hovering
+        GameTooltip:Hide()
+    end)
+    
+    -- Set initial color (slightly dimmed)
+    icon:SetVertexColor(0.9, 0.9, 0.9, 1)
+    
+    -- Set click handler
+    resetButton:SetScript("OnClick", function(self)
+        if resetFunction then
+            resetFunction()
+        end
+        PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+    end)
+    
+    return resetButton
+end
+
+-- Reset functions for different sections
+function BoxxyAuras.Options:ResetGeneralSettings()
+    local currentSettings = GetCurrentProfileSettings()
+    if not currentSettings then return end
+    
+    local defaults = BoxxyAuras:GetDefaultProfileSettings()
+    
+    -- Reset general settings to defaults
+    currentSettings.lockFrames = defaults.lockFrames
+    currentSettings.hideBlizzardAuras = defaults.hideBlizzardAuras
+    currentSettings.showHoverBorder = defaults.showHoverBorder
+    currentSettings.enableFlashAnimationOnShow = true -- Default value for flash animation
+    currentSettings.enableDotTickingAnimation = defaults.enableDotTickingAnimation
+    currentSettings.textFont = defaults.textFont
+    currentSettings.textColor = CopyTable(defaults.textColor)
+    currentSettings.normalBorderColor = CopyTable(defaults.normalBorderColor)
+    currentSettings.normalBackgroundColor = CopyTable(defaults.normalBackgroundColor)
+    currentSettings.healingAbsorbBarColor = CopyTable(defaults.healingAbsorbBarColor)
+    currentSettings.healingAbsorbBarBGColor = CopyTable(defaults.healingAbsorbBarBGColor)
+    currentSettings.auraBarScale = defaults.auraBarScale
+    currentSettings.optionsWindowScale = defaults.optionsWindowScale
+    
+    -- Update UI elements to reflect the reset values
+    if BoxxyAuras.Options.LockFramesCheck then
+        BoxxyAuras.Options.LockFramesCheck:SetChecked(currentSettings.lockFrames)
+    end
+    if BoxxyAuras.Options.HideBlizzardCheck then
+        BoxxyAuras.Options.HideBlizzardCheck:SetChecked(currentSettings.hideBlizzardAuras)
+    end
+    if BoxxyAuras.Options.ShowHoverBorderCheck then
+        BoxxyAuras.Options.ShowHoverBorderCheck:SetChecked(currentSettings.showHoverBorder)
+    end
+    if BoxxyAuras.Options.EnableFlashOnShowCheck then
+        BoxxyAuras.Options.EnableFlashOnShowCheck:SetChecked(currentSettings.enableFlashAnimationOnShow)
+    end
+    if BoxxyAuras.Options.EnableDotTickingCheck then
+        BoxxyAuras.Options.EnableDotTickingCheck:SetChecked(currentSettings.enableDotTickingAnimation)
+    end
+
+    -- Update scale sliders if they exist
+    if BoxxyAuras.Options.AuraBarScaleSlider then
+        BoxxyAuras.Options.AuraBarScaleSlider:SetValue(currentSettings.auraBarScale)
+    end
+    if BoxxyAuras.Options.OptionsWindowScaleSlider then
+        BoxxyAuras.Options.OptionsWindowScaleSlider:SetValue(currentSettings.optionsWindowScale)
+    end
+
+    -- Update color swatches
+    BoxxyAuras.Options:UpdateNormalBorderColorSwatch()
+    BoxxyAuras.Options:UpdateBackgroundColorSwatch()
+    BoxxyAuras.Options:UpdateTextColorSwatch()
+    BoxxyAuras.Options:UpdateHealingAbsorbColorSwatch()
+    BoxxyAuras.Options:UpdateHealingAbsorbBGColorSwatch()
+
+    -- Update font dropdown
+    if BoxxyAuras.Options.FontDropdown then
+        UIDropDownMenu_SetText(BoxxyAuras.Options.FontDropdown, currentSettings.textFont)
+    end
+
+    -- Apply the changes
+    if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.ApplyLockState then
+        BoxxyAuras.FrameHandler.ApplyLockState(currentSettings.lockFrames)
+    end
+    if BoxxyAuras.ApplyBlizzardAuraVisibility then
+        BoxxyAuras.ApplyBlizzardAuraVisibility(currentSettings.hideBlizzardAuras)
+    end
+    BoxxyAuras.Options:ApplyNormalBorderColorChange()
+    BoxxyAuras.Options:ApplyBackgroundColorChange()
+    BoxxyAuras.Options:ApplyTextColorChange()
+    BoxxyAuras.Options:ApplyHealingAbsorbColorChange()
+    BoxxyAuras.Options:ApplyFontChange()
+    -- Ensure aura bar scale is applied to all bars visually
+    BoxxyAuras.Options:ApplyAuraBarScale(currentSettings.auraBarScale)
+    BoxxyAuras.Options:ApplyOptionsWindowScale(currentSettings.optionsWindowScale)
+
+    print("|cff4CAF50BoxxyAuras:|r General settings reset to defaults.")
+end
+
+function BoxxyAuras.Options:ResetBuffSettings()
+    local currentSettings = GetCurrentProfileSettings()
+    if not currentSettings then return end
+    
+    local defaults = BoxxyAuras:GetDefaultProfileSettings()
+    
+    -- Reset buff frame settings to defaults
+    if not currentSettings.buffFrameSettings then
+        currentSettings.buffFrameSettings = {}
+    end
+    
+    currentSettings.buffFrameSettings.buffTextAlign = defaults.buffFrameSettings.buffTextAlign
+    currentSettings.buffFrameSettings.iconSize = defaults.buffFrameSettings.iconSize
+    currentSettings.buffFrameSettings.textSize = defaults.buffFrameSettings.textSize
+    currentSettings.buffFrameSettings.borderSize = defaults.buffFrameSettings.borderSize
+    currentSettings.buffFrameSettings.iconSpacing = defaults.buffFrameSettings.iconSpacing or 0
+    currentSettings.buffFrameSettings.wrapDirection = defaults.buffFrameSettings.wrapDirection or "DOWN"
+    
+    -- Update UI elements for buff settings
+    if BoxxyAuras.Options.BuffAlignCheckboxes then
+        for i, checkbox in ipairs(BoxxyAuras.Options.BuffAlignCheckboxes) do
+            local alignValues = {"LEFT", "CENTER", "RIGHT"}
+            checkbox:SetChecked(alignValues[i] == currentSettings.buffFrameSettings.buffTextAlign)
+        end
+    end
+    
+    if BoxxyAuras.Options.BuffWrapCheckboxes then
+        for i, checkbox in ipairs(BoxxyAuras.Options.BuffWrapCheckboxes) do
+            local wrapValues = {"DOWN", "UP"}
+            checkbox:SetChecked(wrapValues[i] == currentSettings.buffFrameSettings.wrapDirection)
+        end
+    end
+    
+    if BoxxyAuras.Options.BuffSizeSlider then
+        BoxxyAuras.Options.BuffSizeSlider:SetValue(currentSettings.buffFrameSettings.iconSize)
+    end
+    if BoxxyAuras.Options.BuffTextSizeSlider then
+        BoxxyAuras.Options.BuffTextSizeSlider:SetValue(currentSettings.buffFrameSettings.textSize)
+    end
+    if BoxxyAuras.Options.BuffBorderSizeSlider then
+        BoxxyAuras.Options.BuffBorderSizeSlider:SetValue(currentSettings.buffFrameSettings.borderSize)
+    end
+    if BoxxyAuras.Options.BuffSpacingSlider then
+        BoxxyAuras.Options.BuffSpacingSlider:SetValue(currentSettings.buffFrameSettings.iconSpacing)
+    end
+    
+    -- Apply the changes
+    BoxxyAuras.Options:ApplyTextAlign("Buff")
+    BoxxyAuras.Options:ApplyWrapDirection("Buff")
+    BoxxyAuras.Options:ApplyIconSizeChange("Buff")
+    BoxxyAuras.Options:ApplyTextSizeChange("Buff")
+    BoxxyAuras.Options:ApplyBorderSizeChange("Buff")
+    BoxxyAuras.Options:ApplyIconSpacingChange("Buff")
+    
+    print("|cff4CAF50BoxxyAuras:|r Buff settings reset to defaults.")
+end
+
+function BoxxyAuras.Options:ResetDebuffSettings()
+    local currentSettings = GetCurrentProfileSettings()
+    if not currentSettings then return end
+    
+    local defaults = BoxxyAuras:GetDefaultProfileSettings()
+    
+    -- Reset debuff frame settings to defaults
+    if not currentSettings.debuffFrameSettings then
+        currentSettings.debuffFrameSettings = {}
+    end
+    
+    currentSettings.debuffFrameSettings.debuffTextAlign = defaults.debuffFrameSettings.debuffTextAlign
+    currentSettings.debuffFrameSettings.iconSize = defaults.debuffFrameSettings.iconSize
+    currentSettings.debuffFrameSettings.textSize = defaults.debuffFrameSettings.textSize
+    currentSettings.debuffFrameSettings.borderSize = defaults.debuffFrameSettings.borderSize
+    currentSettings.debuffFrameSettings.iconSpacing = defaults.debuffFrameSettings.iconSpacing or 0
+    currentSettings.debuffFrameSettings.wrapDirection = defaults.debuffFrameSettings.wrapDirection or "DOWN"
+    
+    -- Update UI elements for debuff settings
+    if BoxxyAuras.Options.DebuffAlignCheckboxes then
+        for i, checkbox in ipairs(BoxxyAuras.Options.DebuffAlignCheckboxes) do
+            local alignValues = {"LEFT", "CENTER", "RIGHT"}
+            checkbox:SetChecked(alignValues[i] == currentSettings.debuffFrameSettings.debuffTextAlign)
+        end
+    end
+    
+    if BoxxyAuras.Options.DebuffWrapCheckboxes then
+        for i, checkbox in ipairs(BoxxyAuras.Options.DebuffWrapCheckboxes) do
+            local wrapValues = {"DOWN", "UP"}
+            checkbox:SetChecked(wrapValues[i] == currentSettings.debuffFrameSettings.wrapDirection)
+        end
+    end
+    
+    if BoxxyAuras.Options.DebuffSizeSlider then
+        BoxxyAuras.Options.DebuffSizeSlider:SetValue(currentSettings.debuffFrameSettings.iconSize)
+    end
+    if BoxxyAuras.Options.DebuffTextSizeSlider then
+        BoxxyAuras.Options.DebuffTextSizeSlider:SetValue(currentSettings.debuffFrameSettings.textSize)
+    end
+    if BoxxyAuras.Options.DebuffBorderSizeSlider then
+        BoxxyAuras.Options.DebuffBorderSizeSlider:SetValue(currentSettings.debuffFrameSettings.borderSize)
+    end
+    if BoxxyAuras.Options.DebuffSpacingSlider then
+        BoxxyAuras.Options.DebuffSpacingSlider:SetValue(currentSettings.debuffFrameSettings.iconSpacing)
+    end
+    
+    -- Apply the changes
+    BoxxyAuras.Options:ApplyTextAlign("Debuff")
+    BoxxyAuras.Options:ApplyWrapDirection("Debuff")
+    BoxxyAuras.Options:ApplyIconSizeChange("Debuff")
+    BoxxyAuras.Options:ApplyTextSizeChange("Debuff")
+    BoxxyAuras.Options:ApplyBorderSizeChange("Debuff")
+    BoxxyAuras.Options:ApplyIconSpacingChange("Debuff")
+    
+    print("|cff4CAF50BoxxyAuras:|r Debuff settings reset to defaults.")
+end
+
 -- Apply global scale changes
 function BoxxyAuras.Options:ApplyAuraBarScale(scale)
     if BoxxyAuras.DEBUG then
@@ -386,26 +821,18 @@ function BoxxyAuras.Options:ApplyAuraBarScale(scale)
     -- Validate scale value - must be greater than 0
     if not scale or scale <= 0 then
         if BoxxyAuras.DEBUG then
-            print("|cffFF0000BoxxyAuras Error:|r Invalid scale value: " ..
-                tostring(scale) .. ". Using default scale of 1.0")
+            print("|cffFF0000BoxxyAuras Error:|r Invalid scale value: " .. tostring(scale) .. ". Using default scale of 1.0")
         end
         scale = 1.0
     end
 
     local settings = GetCurrentProfileSettings()
     if settings then
-        -- Check if scale is actually changing
-        if settings.auraBarScale and math.abs(settings.auraBarScale - scale) < 0.001 then
-            if BoxxyAuras.DEBUG then
-                print(string.format("Skipping ApplyAuraBarScale - scale unchanged at %.2f", scale))
-            end
-            return
-        end
-
+        -- Always set the scale and forcibly apply it to all frames
         settings.auraBarScale = scale
 
         if BoxxyAuras.DEBUG then
-            print(string.format("Applying aura bar scale %.2f to %d frames", scale,
+            print(string.format("Applying aura bar scale %.2f to %d frames (forced)", scale,
                 (BoxxyAuras.Frames and #BoxxyAuras.Frames or 0)))
         end
 
@@ -413,32 +840,7 @@ function BoxxyAuras.Options:ApplyAuraBarScale(scale)
         if BoxxyAuras.Frames then
             for frameType, frame in pairs(BoxxyAuras.Frames) do
                 if BoxxyAuras.FrameHandler and BoxxyAuras.FrameHandler.SetFrameScale then
-                    local currentScale = frame:GetScale()
-                    if math.abs(currentScale - scale) > 0.001 then
-                        if BoxxyAuras.DEBUG then
-                            print(string.format("  - Scaling frame %s from %.2f to %.2f", frameType, currentScale, scale))
-                        end
-                        BoxxyAuras.FrameHandler.SetFrameScale(frame, scale)
-
-                        -- CRITICAL: Update LibWindow's stored scale to prevent conflicts
-                        if LibWindow and LibWindow.windowData and LibWindow.windowData[frame] then
-                            -- Access LibWindow's internal storage system to update scale without double-applying
-                            local function setLibWindowStorage(frame, key, value)
-                                if not LibWindow.windowData[frame].store then
-                                    LibWindow.windowData[frame].store = {}
-                                end
-                                LibWindow.windowData[frame].store[key] = value
-                            end
-
-                            setLibWindowStorage(frame, "scale", scale)
-                            if BoxxyAuras.DEBUG then
-                                print(string.format("  - Updated LibWindow scale storage for %s to %.2f", frameType,
-                                    scale))
-                            end
-                        end
-                    elseif BoxxyAuras.DEBUG then
-                        print(string.format("  - Frame %s already at scale %.2f", frameType, scale))
-                    end
+                    BoxxyAuras.FrameHandler.SetFrameScale(frame, scale)
                 end
             end
         end
@@ -510,6 +912,10 @@ optionsFrame:SetScript("OnShow", function(self)
     -- Initialize profile dropdown when the main frame is shown
     if BoxxyAuras.Options.InitializeProfileDropdown then
         BoxxyAuras.Options:InitializeProfileDropdown()
+    end
+    -- Initialize font dropdown when the main frame is shown
+    if BoxxyAuras.Options.InitializeFontDropdown then
+        BoxxyAuras.Options:InitializeFontDropdown()
     end
     -- Update UI elements based on the loaded state (Load is called by Toggle before Show)
     if BoxxyAuras.Options.UpdateProfileUI then
@@ -1332,8 +1738,515 @@ C_Timer.After(0.1, function()
     end
 end)
 
+-- Text Color Picker
+local textColorPickerContainer = CreateFrame("Frame", nil, generalContainer:GetFrame())
+PixelUtilCompat.SetSize(textColorPickerContainer, generalContainer:GetFrame():GetWidth() - 24, 20)
+
+local textColorLabel = textColorPickerContainer:CreateFontString(nil, "ARTWORK", "BAURASFont_Checkbox")
+PixelUtilCompat.SetPoint(textColorLabel, "LEFT", textColorPickerContainer, "LEFT", 0, 0)
+textColorLabel:SetText("Text Color:")
+
+local textColorSwatch = CreateFrame("Button", "BoxxyAurasTextColorSwatch", textColorPickerContainer)
+PixelUtilCompat.SetSize(textColorSwatch, 16, 16)
+PixelUtilCompat.SetPoint(textColorSwatch, "LEFT", textColorLabel, "RIGHT", 8, 0)
+
+-- Create the color background
+local textSwatchBg = textColorSwatch:CreateTexture(nil, "BACKGROUND")
+PixelUtilCompat.SetAllPoints(textSwatchBg, textColorSwatch)
+-- Initialize with default text color from centralized defaults
+local defaultTextColor = BoxxyAuras:GetDefaultProfileSettings().textColor
+textSwatchBg:SetColorTexture(defaultTextColor.r, defaultTextColor.g, defaultTextColor.b, defaultTextColor.a)
+textColorSwatch.background = textSwatchBg
+
+-- Create border for text color swatch (same as other color swatches)
+local textBorderColor = { 0.6, 0.6, 0.6, 1 }
+local textBorderThickness = 1
+
+-- Top border
+local textBorderTop = textColorSwatch:CreateTexture(nil, "BORDER")
+textBorderTop:SetColorTexture(unpack(textBorderColor))
+PixelUtilCompat.SetPoint(textBorderTop, "TOPLEFT", textColorSwatch, "TOPLEFT", 0, 0)
+PixelUtilCompat.SetPoint(textBorderTop, "TOPRIGHT", textColorSwatch, "TOPRIGHT", 0, 0)
+PixelUtilCompat.SetHeight(textBorderTop, textBorderThickness)
+
+-- Bottom border
+local textBorderBottom = textColorSwatch:CreateTexture(nil, "BORDER")
+textBorderBottom:SetColorTexture(unpack(textBorderColor))
+PixelUtilCompat.SetPoint(textBorderBottom, "BOTTOMLEFT", textColorSwatch, "BOTTOMLEFT", 0, 0)
+PixelUtilCompat.SetPoint(textBorderBottom, "BOTTOMRIGHT", textColorSwatch, "BOTTOMRIGHT", 0, 0)
+PixelUtilCompat.SetHeight(textBorderBottom, textBorderThickness)
+
+-- Left border
+local textBorderLeft = textColorSwatch:CreateTexture(nil, "BORDER")
+textBorderLeft:SetColorTexture(unpack(textBorderColor))
+PixelUtilCompat.SetPoint(textBorderLeft, "TOPLEFT", textColorSwatch, "TOPLEFT", 0, 0)
+PixelUtilCompat.SetPoint(textBorderLeft, "BOTTOMLEFT", textColorSwatch, "BOTTOMLEFT", 0, 0)
+PixelUtilCompat.SetWidth(textBorderLeft, textBorderThickness)
+
+-- Right border
+local textBorderRight = textColorSwatch:CreateTexture(nil, "BORDER")
+textBorderRight:SetColorTexture(unpack(textBorderColor))
+PixelUtilCompat.SetPoint(textBorderRight, "TOPRIGHT", textColorSwatch, "TOPRIGHT", 0, 0)
+PixelUtilCompat.SetPoint(textBorderRight, "BOTTOMRIGHT", textColorSwatch, "BOTTOMRIGHT", 0, 0)
+PixelUtilCompat.SetWidth(textBorderRight, textBorderThickness)
+
+generalContainer:AddElement(textColorPickerContainer, 26)
+
+textColorSwatch:SetScript("OnMouseUp", function(self)
+    -- Show the color picker for text color
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+    local currentColor = (currentSettings and currentSettings.textColor) or
+        BoxxyAuras:GetDefaultProfileSettings().textColor
+
+    local options = {
+        swatchFunc = function()
+            local newR, newG, newB = ColorPickerFrame:GetColorRGB()
+            local newA = ColorPickerFrame:GetColorAlpha()
+            if not currentSettings.textColor then
+                currentSettings.textColor = {}
+            end
+            currentSettings.textColor.r = newR
+            currentSettings.textColor.g = newG
+            currentSettings.textColor.b = newB
+            currentSettings.textColor.a = newA
+            -- Update the swatch immediately
+            if BoxxyAuras.Options and BoxxyAuras.Options.UpdateTextColorSwatch then
+                BoxxyAuras.Options:UpdateTextColorSwatch()
+            end
+            -- Apply to all aura text
+            if BoxxyAuras.Options and BoxxyAuras.Options.ApplyTextColorChange then
+                BoxxyAuras.Options:ApplyTextColorChange()
+            end
+        end,
+        cancelFunc = function(previousValues)
+            if not currentSettings.textColor then
+                currentSettings.textColor = {}
+            end
+            currentSettings.textColor.r = previousValues.r
+            currentSettings.textColor.g = previousValues.g
+            currentSettings.textColor.b = previousValues.b
+            currentSettings.textColor.a = previousValues.a
+            -- Update the swatch to show canceled color
+            if BoxxyAuras.Options and BoxxyAuras.Options.UpdateTextColorSwatch then
+                BoxxyAuras.Options:UpdateTextColorSwatch()
+            end
+            -- Apply to all aura text
+            if BoxxyAuras.Options and BoxxyAuras.Options.ApplyTextColorChange then
+                BoxxyAuras.Options:ApplyTextColorChange()
+            end
+        end,
+        hasOpacity = true,
+        opacity = currentColor.a,
+        r = currentColor.r,
+        g = currentColor.g,
+        b = currentColor.b,
+        -- Pass the swatch itself so the color picker can update it live
+        swatchBg = self.background
+    }
+    ColorPickerFrame:SetupColorPickerAndShow(options)
+end)
+
+BoxxyAuras.Options.TextColorSwatch = textColorSwatch
+
+-- Initialize the text color swatch with the current color immediately
+C_Timer.After(0.1, function()
+    if BoxxyAuras.Options and BoxxyAuras.Options.UpdateTextColorSwatch then
+        BoxxyAuras.Options:UpdateTextColorSwatch()
+    end
+end)
+
+-- Healing Absorb Bar Color Picker
+local healingAbsorbColorPickerContainer = CreateFrame("Frame", nil, generalContainer:GetFrame())
+PixelUtilCompat.SetSize(healingAbsorbColorPickerContainer, generalContainer:GetFrame():GetWidth() - 24, 20)
+
+local healingAbsorbColorLabel = healingAbsorbColorPickerContainer:CreateFontString(nil, "ARTWORK", "BAURASFont_Checkbox")
+PixelUtilCompat.SetPoint(healingAbsorbColorLabel, "LEFT", healingAbsorbColorPickerContainer, "LEFT", 0, 0)
+healingAbsorbColorLabel:SetText("Healing Absorb Bar Color:")
+
+local healingAbsorbColorSwatch = CreateFrame("Button", "BoxxyAurasHealingAbsorbColorSwatch", healingAbsorbColorPickerContainer)
+PixelUtilCompat.SetSize(healingAbsorbColorSwatch, 16, 16)
+PixelUtilCompat.SetPoint(healingAbsorbColorSwatch, "LEFT", healingAbsorbColorLabel, "RIGHT", 8, 0)
+
+-- Create the color background
+local healingAbsorbSwatchBg = healingAbsorbColorSwatch:CreateTexture(nil, "BACKGROUND")
+PixelUtilCompat.SetAllPoints(healingAbsorbSwatchBg, healingAbsorbColorSwatch)
+-- Initialize with default healing absorb color from centralized defaults
+local defaultHealingAbsorbColor = BoxxyAuras:GetDefaultProfileSettings().healingAbsorbBarColor
+healingAbsorbSwatchBg:SetColorTexture(defaultHealingAbsorbColor.r, defaultHealingAbsorbColor.g, defaultHealingAbsorbColor.b, defaultHealingAbsorbColor.a)
+healingAbsorbColorSwatch.background = healingAbsorbSwatchBg
+
+-- Create border for healing absorb color swatch (same as other color swatches)
+local healingAbsorbBorderColor = { 0.6, 0.6, 0.6, 1 }
+local healingAbsorbBorderThickness = 1
+
+-- Top border
+local healingAbsorbBorderTop = healingAbsorbColorSwatch:CreateTexture(nil, "BORDER")
+healingAbsorbBorderTop:SetColorTexture(unpack(healingAbsorbBorderColor))
+PixelUtilCompat.SetPoint(healingAbsorbBorderTop, "TOPLEFT", healingAbsorbColorSwatch, "TOPLEFT", 0, 0)
+PixelUtilCompat.SetPoint(healingAbsorbBorderTop, "TOPRIGHT", healingAbsorbColorSwatch, "TOPRIGHT", 0, 0)
+PixelUtilCompat.SetHeight(healingAbsorbBorderTop, healingAbsorbBorderThickness)
+
+-- Bottom border
+local healingAbsorbBorderBottom = healingAbsorbColorSwatch:CreateTexture(nil, "BORDER")
+healingAbsorbBorderBottom:SetColorTexture(unpack(healingAbsorbBorderColor))
+PixelUtilCompat.SetPoint(healingAbsorbBorderBottom, "BOTTOMLEFT", healingAbsorbColorSwatch, "BOTTOMLEFT", 0, 0)
+PixelUtilCompat.SetPoint(healingAbsorbBorderBottom, "BOTTOMRIGHT", healingAbsorbColorSwatch, "BOTTOMRIGHT", 0, 0)
+PixelUtilCompat.SetHeight(healingAbsorbBorderBottom, healingAbsorbBorderThickness)
+
+-- Left border
+local healingAbsorbBorderLeft = healingAbsorbColorSwatch:CreateTexture(nil, "BORDER")
+healingAbsorbBorderLeft:SetColorTexture(unpack(healingAbsorbBorderColor))
+PixelUtilCompat.SetPoint(healingAbsorbBorderLeft, "TOPLEFT", healingAbsorbColorSwatch, "TOPLEFT", 0, 0)
+PixelUtilCompat.SetPoint(healingAbsorbBorderLeft, "BOTTOMLEFT", healingAbsorbColorSwatch, "BOTTOMLEFT", 0, 0)
+PixelUtilCompat.SetWidth(healingAbsorbBorderLeft, healingAbsorbBorderThickness)
+
+-- Right border
+local healingAbsorbBorderRight = healingAbsorbColorSwatch:CreateTexture(nil, "BORDER")
+healingAbsorbBorderRight:SetColorTexture(unpack(healingAbsorbBorderColor))
+PixelUtilCompat.SetPoint(healingAbsorbBorderRight, "TOPRIGHT", healingAbsorbColorSwatch, "TOPRIGHT", 0, 0)
+PixelUtilCompat.SetPoint(healingAbsorbBorderRight, "BOTTOMRIGHT", healingAbsorbColorSwatch, "BOTTOMRIGHT", 0, 0)
+PixelUtilCompat.SetWidth(healingAbsorbBorderRight, healingAbsorbBorderThickness)
+
+generalContainer:AddElement(healingAbsorbColorPickerContainer, 26)
+
+healingAbsorbColorSwatch:SetScript("OnMouseUp", function(self)
+    -- Show the color picker for healing absorb bar color
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+    local currentColor = (currentSettings and currentSettings.healingAbsorbBarColor) or
+        BoxxyAuras:GetDefaultProfileSettings().healingAbsorbBarColor
+
+    local options = {
+        swatchFunc = function()
+            local newR, newG, newB = ColorPickerFrame:GetColorRGB()
+            local newA = ColorPickerFrame:GetColorAlpha()
+            if not currentSettings.healingAbsorbBarColor then
+                currentSettings.healingAbsorbBarColor = {}
+            end
+            currentSettings.healingAbsorbBarColor.r = newR
+            currentSettings.healingAbsorbBarColor.g = newG
+            currentSettings.healingAbsorbBarColor.b = newB
+            currentSettings.healingAbsorbBarColor.a = newA
+            -- Update the swatch immediately
+            if BoxxyAuras.Options and BoxxyAuras.Options.UpdateHealingAbsorbColorSwatch then
+                BoxxyAuras.Options:UpdateHealingAbsorbColorSwatch()
+            end
+            -- Apply to all healing absorb bars
+            if BoxxyAuras.Options and BoxxyAuras.Options.ApplyHealingAbsorbColorChange then
+                BoxxyAuras.Options:ApplyHealingAbsorbColorChange()
+            end
+        end,
+        cancelFunc = function(previousValues)
+            if not currentSettings.healingAbsorbBarColor then
+                currentSettings.healingAbsorbBarColor = {}
+            end
+            currentSettings.healingAbsorbBarColor.r = previousValues.r
+            currentSettings.healingAbsorbBarColor.g = previousValues.g
+            currentSettings.healingAbsorbBarColor.b = previousValues.b
+            currentSettings.healingAbsorbBarColor.a = previousValues.a
+            -- Update the swatch to show canceled color
+            if BoxxyAuras.Options and BoxxyAuras.Options.UpdateHealingAbsorbColorSwatch then
+                BoxxyAuras.Options:UpdateHealingAbsorbColorSwatch()
+            end
+            -- Apply to all healing absorb bars
+            if BoxxyAuras.Options and BoxxyAuras.Options.ApplyHealingAbsorbColorChange then
+                BoxxyAuras.Options:ApplyHealingAbsorbColorChange()
+            end
+        end,
+        hasOpacity = true,
+        opacity = currentColor.a,
+        r = currentColor.r,
+        g = currentColor.g,
+        b = currentColor.b,
+        -- Pass the swatch itself so the color picker can update it live
+        swatchBg = self.background
+    }
+    ColorPickerFrame:SetupColorPickerAndShow(options)
+end)
+
+BoxxyAuras.Options.HealingAbsorbColorSwatch = healingAbsorbColorSwatch
+
+-- Initialize the healing absorb color swatch with the current color immediately
+C_Timer.After(0.1, function()
+    if BoxxyAuras.Options and BoxxyAuras.Options.UpdateHealingAbsorbColorSwatch then
+        BoxxyAuras.Options:UpdateHealingAbsorbColorSwatch()
+    end
+end)
+
+-- Healing Absorb Bar Background Color Picker
+local healingAbsorbBGColorPickerContainer = CreateFrame("Frame", nil, generalContainer:GetFrame())
+PixelUtilCompat.SetSize(healingAbsorbBGColorPickerContainer, generalContainer:GetFrame():GetWidth() - 24, 20)
+
+local healingAbsorbBGColorLabel = healingAbsorbBGColorPickerContainer:CreateFontString(nil, "ARTWORK", "BAURASFont_Checkbox")
+PixelUtilCompat.SetPoint(healingAbsorbBGColorLabel, "LEFT", healingAbsorbBGColorPickerContainer, "LEFT", 0, 0)
+healingAbsorbBGColorLabel:SetText("Healing Absorb BG Color:")
+
+local healingAbsorbBGColorSwatch = CreateFrame("Button", "BoxxyAurasHealingAbsorbBGColorSwatch", healingAbsorbBGColorPickerContainer)
+PixelUtilCompat.SetSize(healingAbsorbBGColorSwatch, 16, 16)
+PixelUtilCompat.SetPoint(healingAbsorbBGColorSwatch, "LEFT", healingAbsorbBGColorLabel, "RIGHT", 8, 0)
+
+-- Create the color background
+local healingAbsorbBGSwatchBg = healingAbsorbBGColorSwatch:CreateTexture(nil, "BACKGROUND")
+PixelUtilCompat.SetAllPoints(healingAbsorbBGSwatchBg, healingAbsorbBGColorSwatch)
+-- Initialize with default healing absorb background color from centralized defaults
+local defaultHealingAbsorbBGColor = BoxxyAuras:GetDefaultProfileSettings().healingAbsorbBarBGColor
+healingAbsorbBGSwatchBg:SetColorTexture(defaultHealingAbsorbBGColor.r, defaultHealingAbsorbBGColor.g, defaultHealingAbsorbBGColor.b, defaultHealingAbsorbBGColor.a)
+healingAbsorbBGColorSwatch.background = healingAbsorbBGSwatchBg
+
+-- Create border for healing absorb background color swatch (same as other color swatches)
+local healingAbsorbBGBorderColor = { 0.6, 0.6, 0.6, 1 }
+local healingAbsorbBGBorderThickness = 1
+
+-- Top border
+local healingAbsorbBGBorderTop = healingAbsorbBGColorSwatch:CreateTexture(nil, "BORDER")
+healingAbsorbBGBorderTop:SetColorTexture(unpack(healingAbsorbBGBorderColor))
+PixelUtilCompat.SetPoint(healingAbsorbBGBorderTop, "TOPLEFT", healingAbsorbBGColorSwatch, "TOPLEFT", 0, 0)
+PixelUtilCompat.SetPoint(healingAbsorbBGBorderTop, "TOPRIGHT", healingAbsorbBGColorSwatch, "TOPRIGHT", 0, 0)
+PixelUtilCompat.SetHeight(healingAbsorbBGBorderTop, healingAbsorbBGBorderThickness)
+
+-- Bottom border
+local healingAbsorbBGBorderBottom = healingAbsorbBGColorSwatch:CreateTexture(nil, "BORDER")
+healingAbsorbBGBorderBottom:SetColorTexture(unpack(healingAbsorbBGBorderColor))
+PixelUtilCompat.SetPoint(healingAbsorbBGBorderBottom, "BOTTOMLEFT", healingAbsorbBGColorSwatch, "BOTTOMLEFT", 0, 0)
+PixelUtilCompat.SetPoint(healingAbsorbBGBorderBottom, "BOTTOMRIGHT", healingAbsorbBGColorSwatch, "BOTTOMRIGHT", 0, 0)
+PixelUtilCompat.SetHeight(healingAbsorbBGBorderBottom, healingAbsorbBGBorderThickness)
+
+-- Left border
+local healingAbsorbBGBorderLeft = healingAbsorbBGColorSwatch:CreateTexture(nil, "BORDER")
+healingAbsorbBGBorderLeft:SetColorTexture(unpack(healingAbsorbBGBorderColor))
+PixelUtilCompat.SetPoint(healingAbsorbBGBorderLeft, "TOPLEFT", healingAbsorbBGColorSwatch, "TOPLEFT", 0, 0)
+PixelUtilCompat.SetPoint(healingAbsorbBGBorderLeft, "BOTTOMLEFT", healingAbsorbBGColorSwatch, "BOTTOMLEFT", 0, 0)
+PixelUtilCompat.SetWidth(healingAbsorbBGBorderLeft, healingAbsorbBGBorderThickness)
+
+-- Right border
+local healingAbsorbBGBorderRight = healingAbsorbBGColorSwatch:CreateTexture(nil, "BORDER")
+healingAbsorbBGBorderRight:SetColorTexture(unpack(healingAbsorbBGBorderColor))
+PixelUtilCompat.SetPoint(healingAbsorbBGBorderRight, "TOPRIGHT", healingAbsorbBGColorSwatch, "TOPRIGHT", 0, 0)
+PixelUtilCompat.SetPoint(healingAbsorbBGBorderRight, "BOTTOMRIGHT", healingAbsorbBGColorSwatch, "BOTTOMRIGHT", 0, 0)
+PixelUtilCompat.SetWidth(healingAbsorbBGBorderRight, healingAbsorbBGBorderThickness)
+
+generalContainer:AddElement(healingAbsorbBGColorPickerContainer, 26)
+
+healingAbsorbBGColorSwatch:SetScript("OnMouseUp", function(self)
+    -- Show the color picker for healing absorb bar background color
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+    local currentColor = (currentSettings and currentSettings.healingAbsorbBarBGColor) or
+        BoxxyAuras:GetDefaultProfileSettings().healingAbsorbBarBGColor
+
+    local options = {
+        swatchFunc = function()
+            local newR, newG, newB = ColorPickerFrame:GetColorRGB()
+            local newA = ColorPickerFrame:GetColorAlpha()
+            if not currentSettings.healingAbsorbBarBGColor then
+                currentSettings.healingAbsorbBarBGColor = {}
+            end
+            currentSettings.healingAbsorbBarBGColor.r = newR
+            currentSettings.healingAbsorbBarBGColor.g = newG
+            currentSettings.healingAbsorbBarBGColor.b = newB
+            currentSettings.healingAbsorbBarBGColor.a = newA
+            -- Update the swatch immediately
+            if BoxxyAuras.Options and BoxxyAuras.Options.UpdateHealingAbsorbBGColorSwatch then
+                BoxxyAuras.Options:UpdateHealingAbsorbBGColorSwatch()
+            end
+            -- Apply to all healing absorb bars
+            if BoxxyAuras.Options and BoxxyAuras.Options.ApplyHealingAbsorbColorChange then
+                BoxxyAuras.Options:ApplyHealingAbsorbColorChange()
+            end
+        end,
+        cancelFunc = function(previousValues)
+            if not currentSettings.healingAbsorbBarBGColor then
+                currentSettings.healingAbsorbBarBGColor = {}
+            end
+            currentSettings.healingAbsorbBarBGColor.r = previousValues.r
+            currentSettings.healingAbsorbBarBGColor.g = previousValues.g
+            currentSettings.healingAbsorbBarBGColor.b = previousValues.b
+            currentSettings.healingAbsorbBarBGColor.a = previousValues.a
+            -- Update the swatch to show canceled color
+            if BoxxyAuras.Options and BoxxyAuras.Options.UpdateHealingAbsorbBGColorSwatch then
+                BoxxyAuras.Options:UpdateHealingAbsorbBGColorSwatch()
+            end
+            -- Apply to all healing absorb bars
+            if BoxxyAuras.Options and BoxxyAuras.Options.ApplyHealingAbsorbColorChange then
+                BoxxyAuras.Options:ApplyHealingAbsorbColorChange()
+            end
+        end,
+        hasOpacity = true,
+        opacity = currentColor.a,
+        r = currentColor.r,
+        g = currentColor.g,
+        b = currentColor.b,
+        -- Pass the swatch itself so the color picker can update it live
+        swatchBg = self.background
+    }
+    ColorPickerFrame:SetupColorPickerAndShow(options)
+end)
+
+BoxxyAuras.Options.HealingAbsorbBGColorSwatch = healingAbsorbBGColorSwatch
+
+-- Initialize the healing absorb background color swatch with the current color immediately
+C_Timer.After(0.1, function()
+    if BoxxyAuras.Options and BoxxyAuras.Options.UpdateHealingAbsorbBGColorSwatch then
+        BoxxyAuras.Options:UpdateHealingAbsorbBGColorSwatch()
+    end
+end)
+
+-- Font Selection Dropdown
+local fontDropdownContainer = CreateFrame("Frame", nil, generalContainer:GetFrame())
+PixelUtilCompat.SetSize(fontDropdownContainer, generalContainer:GetFrame():GetWidth() - 24, 32)
+
+local fontLabel = fontDropdownContainer:CreateFontString(nil, "ARTWORK", "BAURASFont_Checkbox")
+PixelUtilCompat.SetPoint(fontLabel, "LEFT", fontDropdownContainer, "LEFT", 0, 0)
+fontLabel:SetText("Aura Text Font:")
+
+-- Create the font dropdown
+local fontDropdown = CreateFrame("Frame", "BoxxyAurasFontDropdown", fontDropdownContainer, "UIDropDownMenuTemplate")
+PixelUtilCompat.SetWidth(fontDropdown, 200)
+PixelUtilCompat.SetPoint(fontDropdown, "LEFT", fontLabel, "RIGHT", 8, 0)
+
+-- Hide default button textures to allow custom styling
+local fontDropdownButton = _G[fontDropdown:GetName() .. "Button"]
+if fontDropdownButton then
+    fontDropdownButton:Hide()
+end
+
+-- Hide the background textures
+local fontDropdownLeft = _G[fontDropdown:GetName() .. "Left"]
+local fontDropdownMiddle = _G[fontDropdown:GetName() .. "Middle"]
+local fontDropdownRight = _G[fontDropdown:GetName() .. "Right"]
+
+if fontDropdownLeft then fontDropdownLeft:Hide() end
+if fontDropdownMiddle then fontDropdownMiddle:Hide() end
+if fontDropdownRight then fontDropdownRight:Hide() end
+
+-- Center Dropdown Text
+local fontDropdownText = _G[fontDropdown:GetName() .. "Text"]
+if fontDropdownText then
+    fontDropdownText:SetJustifyH("LEFT")
+    fontDropdownText:ClearAllPoints()
+    PixelUtilCompat.SetPoint(fontDropdownText, "LEFT", fontDropdown, "LEFT", 8, 0)
+end
+
+-- Style the font dropdown
+if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.DrawSlicedBG and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
+    BoxxyAuras.UIUtils.DrawSlicedBG(fontDropdown, "BtnBG", "backdrop", 0)
+    BoxxyAuras.UIUtils.ColorBGSlicedFrame(fontDropdown, "backdrop", 0.1, 0.1, 0.1, 0.85)
+    BoxxyAuras.UIUtils.DrawSlicedBG(fontDropdown, "EdgedBorder", "border", 0)
+    BoxxyAuras.UIUtils.ColorBGSlicedFrame(fontDropdown, "border", 0.4, 0.4, 0.4, 0.9)
+end
+
+-- Dropdown Arrow Texture
+local fontArrow = fontDropdown:CreateTexture(nil, "OVERLAY")
+PixelUtilCompat.SetSize(fontArrow, 16, 16)
+PixelUtilCompat.SetPoint(fontArrow, "RIGHT", fontDropdown, "RIGHT", -8, 0)
+fontArrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown")
+fontArrow:SetTexCoord(0, 1, 0, 1)
+
+-- Font Dropdown Hover Effect
+fontDropdown:SetScript("OnEnter", function(self)
+    if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.8, 0.8, 0.8, 1.0)
+    end
+end)
+fontDropdown:SetScript("OnLeave", function(self)
+    if BoxxyAuras.UIUtils and BoxxyAuras.UIUtils.ColorBGSlicedFrame then
+        BoxxyAuras.UIUtils.ColorBGSlicedFrame(self, "border", 0.4, 0.4, 0.4, 0.9)
+    end
+end)
+
+-- Initialize font dropdown
+local function InitializeFontDropdown()
+    local fontList = Media:HashTable("font")
+    local sortedFonts = {}
+    
+    -- Convert hash table to sorted array
+    for fontName, fontPath in pairs(fontList) do
+        table.insert(sortedFonts, fontName)
+    end
+    table.sort(sortedFonts)
+    
+    -- Clear existing items
+    UIDropDownMenu_Initialize(fontDropdown, function()
+        local settings = BoxxyAuras:GetCurrentProfileSettings()
+        local currentFont = settings and settings.textFont or BoxxyAuras:GetDefaultProfileSettings().textFont
+        
+        -- Make sure our current font is in the list (fallback safety)
+        if currentFont and not fontList[currentFont] then
+            if BoxxyAuras.DEBUG then
+                print("|cffFFCC00BoxxyAuras Warning:|r Current font '" .. currentFont .. "' not found in LibSharedMedia. Using default.")
+            end
+            currentFont = "OpenSans SemiBold" -- Fallback to our registered font
+        end
+        
+        for _, fontName in ipairs(sortedFonts) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = fontName
+            info.value = fontName
+            info.func = function(self)
+                local settings = BoxxyAuras:GetCurrentProfileSettings()
+                if settings then
+                    settings.textFont = fontName
+                    UIDropDownMenu_SetText(fontDropdown, fontName)
+                    
+                    -- Apply font change to all auras
+                    if BoxxyAuras.Options.ApplyFontChange then
+                        BoxxyAuras.Options:ApplyFontChange()
+                    end
+                end
+                PlaySound(SOUNDKIT.U_CHAT_SCROLL_BUTTON)
+            end
+            info.checked = (fontName == currentFont)
+            
+            -- Create a custom font object for this dropdown item to show font preview
+            local fontPath = fontList[fontName]
+            if fontPath then
+                -- Create a unique font object name for this dropdown item
+                local fontObjectName = "BoxxyAurasFontPreview_" .. fontName:gsub("[^%w]", "_")
+                
+                -- Only create the font object if it doesn't already exist
+                if not _G[fontObjectName] then
+                    local fontObject = CreateFont(fontObjectName)
+                    fontObject:SetFont(fontPath, 12, "OUTLINE")
+                    fontObject:SetTextColor(1, 1, 1, 1) -- White text
+                    _G[fontObjectName] = fontObject
+                end
+                
+                -- Apply the font object to this dropdown item
+                info.fontObject = _G[fontObjectName]
+            end
+            
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
+    
+    -- Set initial text
+    local settings = BoxxyAuras:GetCurrentProfileSettings()
+    local currentFont = settings and settings.textFont or BoxxyAuras:GetDefaultProfileSettings().textFont
+    
+    -- Ensure we display a valid font name
+    if currentFont and not fontList[currentFont] then
+        currentFont = "OpenSans SemiBold" -- Fallback to our registered font
+    end
+    
+    UIDropDownMenu_SetText(fontDropdown, currentFont)
+end
+
+-- Click handler for font dropdown
+fontDropdown:SetScript("OnMouseUp", function(self, button)
+    if button == "LeftButton" then
+        ToggleDropDownMenu(1, nil, self)
+    end
+end)
+
+BoxxyAuras.Options.FontDropdown = fontDropdown
+BoxxyAuras.Options.InitializeFontDropdown = InitializeFontDropdown
+generalContainer:AddElement(fontDropdownContainer, 38) -- height 32 + 6px padding
+
 -- Update reference for next container
 lastContainer = generalContainer
+
+-- Add reset button to general settings container
+BoxxyAuras.Options.GeneralResetButton = BoxxyAuras.Options:CreateResetButton(generalContainer, function()
+    BoxxyAuras.Options:ResetGeneralSettings()
+end)
 
 --[[------------------------------------------------------------
 -- Display Frame Settings (Alignment & Size)
@@ -1494,6 +2407,15 @@ local debuffSpacingSlider = debuffContainer:AddSlider("Icon Spacing", -10, 20, 1
     BoxxyAuras.Options:ApplyIconSpacingChange("Debuff")
 end)
 BoxxyAuras.Options.DebuffSpacingSlider = debuffSpacingSlider
+
+-- Add reset buttons to buff and debuff containers
+BoxxyAuras.Options.BuffResetButton = BoxxyAuras.Options:CreateResetButton(buffContainer, function()
+    BoxxyAuras.Options:ResetBuffSettings()
+end)
+
+BoxxyAuras.Options.DebuffResetButton = BoxxyAuras.Options:CreateResetButton(debuffContainer, function()
+    BoxxyAuras.Options:ResetDebuffSettings()
+end)
 
 -- Update reference for next container (use the buff container since both are at same level)
 lastContainer = buffContainer
@@ -2014,10 +2936,10 @@ function BoxxyAuras.Options:CreateCustomBarContent(barId, contentFrame)
     appearanceContainer:AddSpacer(10)
 
     -- Delete button (now anchored inside the appearance container)
-    local deleteButton = appearanceContainer:AddButton("Delete Bar", 100, function()
+    local deleteButton = appearanceContainer:AddButton("Delete Bar", 120, function()
         self:DeleteCustomBar(barId)
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-    end, "LEFT")
+    end, "LEFT", { top = 6, right = 8, bottom = 6, left = 8 })
 
     -- Aura Assignment Container (now on the right side)
     local auraContainer = BoxxyAuras.UIBuilder.CreateContainer(mainBarContainer:GetFrame(), "Aura Assignments")
@@ -2402,6 +3324,10 @@ function BoxxyAuras.Options:Load()
     -- Load Background Color
     self:UpdateBackgroundColorSwatch()
 
+    -- Load Healing Absorb Colors
+    self:UpdateHealingAbsorbColorSwatch()
+    self:UpdateHealingAbsorbBGColorSwatch()
+
     -- Load Buff Frame Settings
     if settings.buffFrameSettings then
         -- Buff Icon Size
@@ -2663,6 +3589,8 @@ function BoxxyAuras.Options:UpdateProfileUI()
     -- Update the color swatches when profile changes
     self:UpdateNormalBorderColorSwatch()
     self:UpdateBackgroundColorSwatch()
+    self:UpdateHealingAbsorbColorSwatch()
+    self:UpdateHealingAbsorbBGColorSwatch()
 end
 
 -- Create a new profile
@@ -2852,14 +3780,15 @@ function BoxxyAuras.Options:SetDemoMode(enable)
     if enable then
         print("|cff00FF00BoxxyAuras:|r Demo mode enabled - showing test auras.")
 
-        -- Dynamically create demo auras
+        -- Dynamically create demo auras with varying durations for timer display
+        local currentTime = GetTime()
         BoxxyAuras.demoAuras = {
             Buff = {
                 {
                     name = "Demo Blessing",
                     icon = "Interface\\Icons\\Spell_Holy_GreaterBlessofKings",
-                    duration = 0, -- Permanent for demo
-                    expirationTime = 0,
+                    duration = 300, -- 5 minutes
+                    expirationTime = currentTime + 267, -- 4:27 remaining
                     applications = 1,
                     spellId = 12345,
                     auraInstanceID = "demo_buff_1",
@@ -2868,8 +3797,8 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Shield",
                     icon = "Interface\\Icons\\Spell_Holy_PowerWordShield",
-                    duration = 0, -- Permanent for demo
-                    expirationTime = 0,
+                    duration = 60, -- 1 minute
+                    expirationTime = currentTime + 42, -- 42 seconds remaining
                     applications = 3,
                     spellId = 12346,
                     auraInstanceID = "demo_buff_2",
@@ -2878,8 +3807,8 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Haste",
                     icon = "Interface\\Icons\\Spell_Nature_Bloodlust",
-                    duration = 0, -- Permanent for demo
-                    expirationTime = 0,
+                    duration = 120, -- 2 minutes
+                    expirationTime = currentTime + 87, -- 1:27 remaining
                     applications = 1,
                     spellId = 12347,
                     auraInstanceID = "demo_buff_3",
@@ -2888,7 +3817,7 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Strength",
                     icon = "Interface\\Icons\\Spell_Holy_GreaterBlessofWisdom",
-                    duration = 0, -- Permanent for demo
+                    duration = 0, -- Permanent (no timer)
                     expirationTime = 0,
                     applications = 1,
                     spellId = 12348,
@@ -2898,8 +3827,8 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Intellect",
                     icon = "Interface\\Icons\\Spell_Holy_MindVision",
-                    duration = 0, -- Permanent for demo
-                    expirationTime = 0,
+                    duration = 30, -- 30 seconds
+                    expirationTime = currentTime + 18, -- 18 seconds remaining
                     applications = 1,
                     spellId = 12349,
                     auraInstanceID = "demo_buff_5",
@@ -2908,8 +3837,8 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Regeneration",
                     icon = "Interface\\Icons\\Spell_Nature_Rejuvenation",
-                    duration = 0, -- Permanent for demo
-                    expirationTime = 0,
+                    duration = 15, -- 15 seconds
+                    expirationTime = currentTime + 8, -- 8 seconds remaining
                     applications = 1,
                     spellId = 12350,
                     auraInstanceID = "demo_buff_6",
@@ -2918,7 +3847,7 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Fortitude",
                     icon = "Interface\\Icons\\Spell_Holy_PrayerofFortitude",
-                    duration = 0, -- Permanent for demo
+                    duration = 0, -- Permanent (no timer)
                     expirationTime = 0,
                     applications = 1,
                     spellId = 12351,
@@ -2928,8 +3857,8 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Spirit",
                     icon = "Interface\\Icons\\Spell_Holy_PrayerofSpirit",
-                    duration = 0, -- Permanent for demo
-                    expirationTime = 0,
+                    duration = 10, -- 10 seconds
+                    expirationTime = currentTime + 3, -- 3 seconds remaining
                     applications = 1,
                     spellId = 12352,
                     auraInstanceID = "demo_buff_8",
@@ -2940,8 +3869,8 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Curse",
                     icon = "Interface\\Icons\\Spell_Shadow_CurseOfTounges",
-                    duration = 0, -- Permanent for demo
-                    expirationTime = 0,
+                    duration = 180, -- 3 minutes
+                    expirationTime = currentTime + 156, -- 2:36 remaining
                     applications = 1,
                     spellId = 22345,
                     auraInstanceID = "demo_debuff_1",
@@ -2951,8 +3880,8 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Poison",
                     icon = "Interface\\Icons\\Spell_Nature_CorrosiveBreath",
-                    duration = 0, -- Permanent for demo
-                    expirationTime = 0,
+                    duration = 45, -- 45 seconds
+                    expirationTime = currentTime + 32, -- 32 seconds remaining
                     applications = 2,
                     spellId = 22346,
                     auraInstanceID = "demo_debuff_2",
@@ -2962,8 +3891,8 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Disease",
                     icon = "Interface\\Icons\\Spell_Shadow_AbominationExplosion",
-                    duration = 0, -- Permanent for demo
-                    expirationTime = 0,
+                    duration = 90, -- 1.5 minutes
+                    expirationTime = currentTime + 74, -- 1:14 remaining
                     applications = 1,
                     spellId = 22347,
                     auraInstanceID = "demo_debuff_3",
@@ -2973,8 +3902,8 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Magic Debuff",
                     icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain",
-                    duration = 0, -- Permanent for demo
-                    expirationTime = 0,
+                    duration = 24, -- 24 seconds
+                    expirationTime = currentTime + 16, -- 16 seconds remaining
                     applications = 1,
                     spellId = 22348,
                     auraInstanceID = "demo_debuff_4",
@@ -2984,7 +3913,7 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Weakness",
                     icon = "Interface\\Icons\\Spell_Shadow_CurseOfMannoroth",
-                    duration = 0, -- Permanent for demo
+                    duration = 0, -- Permanent (no timer)
                     expirationTime = 0,
                     applications = 1,
                     spellId = 22349,
@@ -2994,11 +3923,21 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Demo Slow",
                     icon = "Interface\\Icons\\Spell_Frost_FrostShock",
-                    duration = 0, -- Permanent for demo
-                    expirationTime = 0,
+                    duration = 8, -- 8 seconds
+                    expirationTime = currentTime + 5, -- 5 seconds remaining
                     applications = 1,
                     spellId = 22350,
                     auraInstanceID = "demo_debuff_6",
+                    isDemoAura = true
+                },
+                {
+                    name = "Demo Healing Absorb",
+                    icon = "Interface\\Icons\\Spell_Shadow_AntiMagicShell",
+                    duration = 60, -- 1 minute
+                    expirationTime = currentTime + 27, -- 27 seconds remaining
+                    applications = 1,
+                    spellId = 22351,
+                    auraInstanceID = "demo_debuff_7_absorb",
                     isDemoAura = true
                 }
             }
@@ -3011,28 +3950,28 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                 {
                     name = "Custom Aura",
                     icon = "Interface\\Icons\\Spell_Arcane_TeleportStormwind",
-                    duration = 0, -- Make permanent for demo
+                    duration = 240, -- 4 minutes
                     applications = 1,
                     spellId = 32345
                 },
                 {
                     name = "Tracking",
                     icon = "Interface\\Icons\\Spell_Nature_FaerieFire",
-                    duration = 0, -- Make permanent for demo
+                    duration = 0, -- Permanent tracking (no timer)
                     applications = 1,
                     spellId = 32346
                 },
                 {
                     name = "Enchant",
                     icon = "Interface\\Icons\\Spell_Holy_GreaterHeal",
-                    duration = 0, -- Make permanent for demo
+                    duration = 1800, -- 30 minutes
                     applications = 1,
                     spellId = 32347
                 },
                 {
                     name = "Proc",
                     icon = "Interface\\Icons\\Spell_Lightning_LightningBolt01",
-                    duration = 0, -- Make permanent for demo
+                    duration = 12, -- 12 seconds
                     applications = 5,
                     spellId = 32348
                 }
@@ -3047,18 +3986,48 @@ function BoxxyAuras.Options:SetDemoMode(enable)
                     -- Customize for the specific bar
                     newAura.name = (barConfig.name or "Custom") .. " - " .. templateAura.name
                     newAura.auraInstanceID = "demo_" .. barId .. "_" .. i
-                    newAura.expirationTime = 0 -- Always permanent for demo mode
+                    
+                    -- Set realistic expiration times for timed auras
+                    if newAura.duration > 0 then
+                        local timeVariation = (i - 1) * 15 -- Stagger timers by 15 seconds each
+                        newAura.expirationTime = currentTime + math.max(5, newAura.duration - timeVariation)
+                    else
+                        newAura.expirationTime = 0 -- Permanent
+                    end
+                    
                     newAura.isDemoAura = true  -- Mark as demo aura
                     table.insert(BoxxyAuras.demoAuras[barId], newAura)
                 end
             end
         end
+
+        -- Set up demo healing absorb tracking for the healing absorb aura
+        if not BoxxyAuras.healingAbsorbTracking then
+            BoxxyAuras.healingAbsorbTracking = {}
+        end
+        
+        -- Create demo tracking data for the healing absorb aura
+        local demoAbsorbKey = "demo_debuff_7_absorb"
+        BoxxyAuras.healingAbsorbTracking[demoAbsorbKey] = {
+            spellId = 22351,
+            initialAmount = 10000, -- Demo: 10k shield
+            currentAmount = 7000,   -- Demo: 70% remaining (7k left)
+            totalAbsorbed = 3000,   -- Demo: 3k already absorbed
+            lastUpdate = GetTime(),
+            debuffRemoved = false
+        }
     else
         print("|cff00FF00BoxxyAuras:|r Demo mode disabled.")
 
         -- Clear demo auras
         if BoxxyAuras.demoAuras then
             BoxxyAuras.demoAuras = nil
+        end
+        
+        -- Clear demo healing absorb tracking
+        if BoxxyAuras.healingAbsorbTracking then
+            -- Only clear demo tracking entries, keep any real ones
+            BoxxyAuras.healingAbsorbTracking["demo_debuff_7_absorb"] = nil
         end
     end
 
@@ -3067,6 +4036,19 @@ function BoxxyAuras.Options:SetDemoMode(enable)
     -- Add a small delay to prevent performance issues when creating many demo auras
     C_Timer.After(0.1, function()
         BoxxyAuras.UpdateAuras(true)
+        
+        -- If enabling demo mode, trigger healing absorb visuals for the demo absorb aura
+        if enable then
+            C_Timer.After(0.2, function()
+                local demoAbsorbKey = "demo_debuff_7_absorb"
+                if BoxxyAuras.healingAbsorbTracking and BoxxyAuras.healingAbsorbTracking[demoAbsorbKey] then
+                    BoxxyAuras:UpdateHealingAbsorbVisuals(demoAbsorbKey, BoxxyAuras.healingAbsorbTracking[demoAbsorbKey])
+                    if BoxxyAuras.DEBUG then
+                        print("BoxxyAuras: Demo mode - Updated healing absorb visuals for demo aura")
+                    end
+                end
+            end)
+        end
 
         -- If enabling demo mode, set up a timer to prevent normal updates from interfering
         if enable then

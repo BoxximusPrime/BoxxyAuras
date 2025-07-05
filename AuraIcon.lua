@@ -110,16 +110,50 @@ end
 
 -- Helper: Apply font sizes to text elements
 local function ApplyFontSizes(durationText, countText, textSize)
+    -- Get user's font preference and text color if available
+    local fontPath = nil
+    local textColor = nil
+    if BoxxyAuras and BoxxyAuras.GetCurrentProfileSettings then
+        local settings = BoxxyAuras:GetCurrentProfileSettings()
+        if settings then
+            -- Get font
+            if settings.textFont then
+                -- Try to get the font from LibSharedMedia
+                local Media = LibStub and LibStub("LibSharedMedia-3.0", true)
+                if Media then
+                    fontPath = Media:Fetch("font", settings.textFont, true) -- true = silent mode, won't error if not found
+                end
+            end
+            
+            -- Get text color
+            if settings.textColor then
+                textColor = settings.textColor
+            end
+        end
+    end
+    
     -- Duration text
-    local fontPath, _, fontFlags = durationText:GetFont()
-    if fontPath then
-        durationText:SetFont(fontPath, textSize, fontFlags)
+    local currentFontPath, _, fontFlags = durationText:GetFont()
+    local finalFontPath = fontPath or currentFontPath
+    if finalFontPath then
+        durationText:SetFont(finalFontPath, textSize, fontFlags)
+    end
+    
+    -- Apply text color if available
+    if textColor then
+        durationText:SetTextColor(textColor.r, textColor.g, textColor.b, textColor.a)
     end
 
     -- Count text (2 points larger for better visibility)
     local countFontPath, _, countFontFlags = countText:GetFont()
-    if countFontPath then
-        countText:SetFont(countFontPath, textSize + 2, countFontFlags)
+    local finalCountFontPath = fontPath or countFontPath
+    if finalCountFontPath then
+        countText:SetFont(finalCountFontPath, textSize + 2, countFontFlags)
+    end
+    
+    -- Apply text color to count text if available
+    if textColor then
+        countText:SetTextColor(textColor.r, textColor.g, textColor.b, textColor.a)
     end
 end
 
@@ -233,23 +267,47 @@ local function ApplyBorderStyling(frame, auraType, borderSize, dispelName)
     end
 
     -- Apply border and text colors
+    -- Get user's text color preference if available
+    local userTextColor = nil
+    if BoxxyAuras and BoxxyAuras.GetCurrentProfileSettings then
+        local settings = BoxxyAuras:GetCurrentProfileSettings()
+        if settings and settings.textColor then
+            userTextColor = settings.textColor
+        end
+    end
+    
     if effectiveBorderSize > 0 then
         if auraType == "HARMFUL" then
             local upperDispelType = string.upper(dispelName or "NONE")
             local colorTable = DebuffTypeColor[upperDispelType]
             if upperDispelType == "NONE" or not colorTable then
                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", 1.0, 0.1, 0.1, 0.9)
-                frame.durationText:SetTextColor(1, 1, 1, 1.0)
+                -- Use user text color if available, otherwise white
+                if userTextColor then
+                    frame.durationText:SetTextColor(userTextColor.r, userTextColor.g, userTextColor.b, userTextColor.a)
+                else
+                    frame.durationText:SetTextColor(1, 1, 1, 1.0)
+                end
             else
                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", colorTable[1], colorTable[2], colorTable[3], 0.9)
-                frame.durationText:SetTextColor(colorTable[1], colorTable[2], colorTable[3], 1.0)
+                -- Use user text color if available, otherwise use dispel color for visibility
+                if userTextColor then
+                    frame.durationText:SetTextColor(userTextColor.r, userTextColor.g, userTextColor.b, userTextColor.a)
+                else
+                    frame.durationText:SetTextColor(colorTable[1], colorTable[2], colorTable[3], 1.0)
+                end
             end
         else -- Helpful
             local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
             local cfgBorder = (currentSettings and currentSettings.normalBorderColor) or
                 BoxxyAuras:GetDefaultProfileSettings().normalBorderColor
             BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", cfgBorder.r, cfgBorder.g, cfgBorder.b, cfgBorder.a)
-            frame.durationText:SetTextColor(1, 1, 1, 1)
+            -- Use user text color if available, otherwise white
+            if userTextColor then
+                frame.durationText:SetTextColor(userTextColor.r, userTextColor.g, userTextColor.b, userTextColor.a)
+            else
+                frame.durationText:SetTextColor(1, 1, 1, 1)
+            end
         end
     else
         -- No border, but still color text for debuffs
@@ -257,13 +315,33 @@ local function ApplyBorderStyling(frame, auraType, borderSize, dispelName)
             local upperDispelType = string.upper(dispelName or "NONE")
             local colorTable = DebuffTypeColor[upperDispelType]
             if colorTable and upperDispelType ~= "NONE" then
-                frame.durationText:SetTextColor(colorTable[1], colorTable[2], colorTable[3], 1.0)
+                -- Use user text color if available, otherwise use dispel color for visibility
+                if userTextColor then
+                    frame.durationText:SetTextColor(userTextColor.r, userTextColor.g, userTextColor.b, userTextColor.a)
+                else
+                    frame.durationText:SetTextColor(colorTable[1], colorTable[2], colorTable[3], 1.0)
+                end
             else
-                frame.durationText:SetTextColor(1, 1, 1, 1.0)
+                -- Use user text color if available, otherwise white
+                if userTextColor then
+                    frame.durationText:SetTextColor(userTextColor.r, userTextColor.g, userTextColor.b, userTextColor.a)
+                else
+                    frame.durationText:SetTextColor(1, 1, 1, 1.0)
+                end
             end
         else
-            frame.durationText:SetTextColor(1, 1, 1, 1)
+            -- Use user text color if available, otherwise white
+            if userTextColor then
+                frame.durationText:SetTextColor(userTextColor.r, userTextColor.g, userTextColor.b, userTextColor.a)
+            else
+                frame.durationText:SetTextColor(1, 1, 1, 1)
+            end
         end
+    end
+    
+    -- Also apply text color to count text if it exists
+    if frame.countText and userTextColor then
+        frame.countText:SetTextColor(userTextColor.r, userTextColor.g, userTextColor.b, userTextColor.a)
     end
 end
 
@@ -328,6 +406,67 @@ function AuraIcon.New(parentFrame, index, baseName)
     PixelUtilCompat.SetSize(shakeOverlay, iconSize, iconSize)
     PixelUtilCompat.SetPoint(shakeOverlay, "TOPLEFT", texture, "TOPLEFT")
     shakeOverlay:SetAlpha(0)
+
+    -- Create healing absorb progress bar using texture layers (not StatusBar)
+    -- This ensures proper layering behind text but above backdrop
+    local flatTexture = "Interface\\Buttons\\WHITE8x8"
+    
+    -- Get color from current profile settings, not from Config
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+    local absorbColor = (currentSettings and currentSettings.healingAbsorbBarColor) or { r = 0.86, g = 0.28, b = 0.13, a = 0.8 }
+    local absorbBGColor = { r = 0, g = 0, b = 0, a = 0.4 } -- Keep background black/transparent
+    
+    -- Create background texture in BACKGROUND layer (behind text but above backdrop)
+    local absorbProgressBg = frame:CreateTexture(nil, "BACKGROUND", nil, 2)
+    absorbProgressBg:SetTexture(flatTexture)
+    absorbProgressBg:SetColorTexture(absorbBGColor.r, absorbBGColor.g, absorbBGColor.b, absorbBGColor.a)
+    
+    -- Create foreground texture in BACKGROUND layer (slightly higher sublevel)
+    local absorbProgressBar = frame:CreateTexture(nil, "BACKGROUND", nil, 3)
+    absorbProgressBar:SetTexture(flatTexture)
+    absorbProgressBar:SetColorTexture(absorbColor.r, absorbColor.g, absorbColor.b, absorbColor.a)
+    
+    -- Position both textures to cover the entire text area
+    PixelUtilCompat.SetPoint(absorbProgressBg, "TOPLEFT", texture, "BOTTOMLEFT", 0, -padding)
+    PixelUtilCompat.SetPoint(absorbProgressBg, "TOPRIGHT", texture, "BOTTOMRIGHT", 0, -padding)
+    PixelUtilCompat.SetPoint(absorbProgressBg, "BOTTOM", frame, "BOTTOM", 0, padding)
+    
+    PixelUtilCompat.SetPoint(absorbProgressBar, "TOPLEFT", texture, "BOTTOMLEFT", 0, -padding)
+    PixelUtilCompat.SetPoint(absorbProgressBar, "TOPRIGHT", texture, "BOTTOMRIGHT", 0, -padding)
+    PixelUtilCompat.SetPoint(absorbProgressBar, "BOTTOM", frame, "BOTTOM", 0, padding)
+    
+    -- Store initial width for progress calculations
+    local function updateAbsorbProgress(percentage)
+        percentage = math.max(0, math.min(1, percentage))
+        local fullWidth = absorbProgressBg:GetWidth() or 0
+        local progressWidth = fullWidth * percentage
+        
+        absorbProgressBar:ClearAllPoints()
+        PixelUtilCompat.SetPoint(absorbProgressBar, "TOPLEFT", texture, "BOTTOMLEFT", 0, -padding)
+        absorbProgressBar:SetWidth(progressWidth)
+        PixelUtilCompat.SetPoint(absorbProgressBar, "BOTTOM", frame, "BOTTOM", 0, padding)
+    end
+    
+    -- Create helper functions to mimic StatusBar interface
+    local absorbProgressHelper = {
+        SetValue = function(self, value)
+            updateAbsorbProgress(value)
+        end,
+        SetStatusBarColor = function(self, r, g, b, a)
+            absorbProgressBar:SetColorTexture(r, g, b, a)
+        end,
+        Show = function(self)
+            absorbProgressBg:Show()
+            absorbProgressBar:Show()
+        end,
+        Hide = function(self)
+            absorbProgressBg:Hide()
+            absorbProgressBar:Hide()
+        end
+    }
+
+    -- Hide by default
+    absorbProgressHelper:Hide()
 
     -- Create backdrop texture object
     BoxxyAuras.UIUtils.DrawSlicedBG(frame, "ItemEntryBG", "backdrop", 0)
@@ -410,6 +549,8 @@ function AuraIcon.New(parentFrame, index, baseName)
     frame.durationText = durationText
     frame.wipeOverlay = wipeOverlay
     frame.shakeOverlay = shakeOverlay
+    frame.absorbProgressBar = absorbProgressHelper
+    frame.absorbProgressBg = absorbProgressBg
 
     -- Initialize state
     instance.duration = 0
@@ -489,6 +630,9 @@ function AuraIcon:Display(auraData, index, auraType, isNewAura)
             self.name or "Unknown", tostring(auraType), settings.borderSize or 0, tostring(not isNewAura)))
     end
     ApplyBorderStyling(self.frame, auraType, settings.borderSize, self.dispelName)
+
+    -- Handle healing absorb progress bar
+    self:UpdateHealingAbsorbDisplay(auraData)
 
     local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
     local cfgBG = (currentSettings and currentSettings.normalBackgroundColor) or
@@ -579,6 +723,123 @@ SLASH_BOXXYAURASDEBUG1 = "/badebug"
 SlashCmdList["BOXXYAURASDEBUG"] = function(msg)
     BoxxyAuras.DEBUG = not BoxxyAuras.DEBUG
     print("BoxxyAuras DEBUG mode: " .. (BoxxyAuras.DEBUG and "ON" or "OFF"))
+end
+
+-- Debug command for testing healing absorb progress bars
+SLASH_BOXXYAURASABSORB1 = "/baabsorb"
+SlashCmdList["BOXXYAURASABSORB"] = function(msg)
+    if not BoxxyAuras.DEBUG then
+        print("BoxxyAuras: Enable DEBUG mode first (/badebug)")
+        return
+    end
+    
+    local command, value = string.match(msg, "^(%S+)%s*(.*)$")
+    command = command or msg
+    
+    if command == "list" then
+        -- List all current debuffs to help identify healing absorbs
+        print("BoxxyAuras: Current debuffs:")
+        
+        if C_UnitAuras and C_UnitAuras.GetAuraSlots then
+            local auraSlots = { C_UnitAuras.GetAuraSlots("player", "HARMFUL") }
+            local foundAny = false
+            
+            for i = 2, #auraSlots do
+                local slot = auraSlots[i]
+                local auraData = C_UnitAuras.GetAuraDataBySlot("player", slot)
+                if auraData then
+                    foundAny = true
+                    print(string.format("  '%s' - ID: %s, Type: %s, Dispel: %s", 
+                        auraData.name or "Unknown",
+                        tostring(auraData.spellId),
+                        tostring(auraData.dispelName),
+                        tostring(auraData.auraType)))
+                end
+            end
+            
+            if not foundAny then
+                print("  No debuffs found")
+            end
+        end
+        
+    elseif command == "test" then
+        -- Create a fake healing absorb for testing
+        print("BoxxyAuras: Creating test healing absorb...")
+        
+        if not BoxxyAuras.healingAbsorbTracking then
+            BoxxyAuras.healingAbsorbTracking = {}
+        end
+        
+        -- Find any active debuff to apply the test absorb to
+        for frameType, iconArray in pairs(BoxxyAuras.iconArrays or {}) do
+            if iconArray and #iconArray > 0 then
+                for _, icon in ipairs(iconArray) do
+                    if icon and icon.auraType == "HARMFUL" and icon.frame and icon.frame.absorbProgressBar then
+                        local testKey = icon.auraInstanceID or ("test_" .. (icon.spellId or 0))
+                        BoxxyAuras.healingAbsorbTracking[testKey] = {
+                            initialAmount = 500000,
+                            currentAmount = 500000,
+                            spellId = icon.spellId,
+                            auraInstanceID = icon.auraInstanceID,
+                            lastUpdate = GetTime()
+                        }
+                        
+                        icon.frame.absorbProgressBar:SetValue(1.0)
+                        icon.frame.absorbProgressBar:Show()
+                        
+                        print(string.format("BoxxyAuras: Applied test absorb to '%s' (500k healing)", icon.name or "Unknown"))
+                        return
+                    end
+                end
+            end
+        end
+        print("BoxxyAuras: No suitable debuff found for testing")
+        
+    elseif command == "damage" then
+        local amount = tonumber(value) or 100000
+        print(string.format("BoxxyAuras: Simulating %d absorbed healing...", amount))
+        
+        -- Reduce all active absorbs
+        local updated = false
+        for trackingKey, trackingData in pairs(BoxxyAuras.healingAbsorbTracking or {}) do
+            if trackingData.currentAmount > 0 then
+                trackingData.currentAmount = math.max(0, trackingData.currentAmount - amount)
+                trackingData.lastUpdate = GetTime()
+                BoxxyAuras:UpdateHealingAbsorbVisuals(trackingKey, trackingData)
+                updated = true
+                
+                print(string.format("BoxxyAuras: Absorb reduced to %d/%d", 
+                    trackingData.currentAmount, trackingData.initialAmount))
+            end
+        end
+        
+        if not updated then
+            print("BoxxyAuras: No active absorbs to damage")
+        end
+        
+    elseif command == "clear" then
+        BoxxyAuras.healingAbsorbTracking = {}
+        
+        -- Hide all absorb bars
+        for frameType, iconArray in pairs(BoxxyAuras.iconArrays or {}) do
+            if iconArray then
+                for _, icon in ipairs(iconArray) do
+                    if icon and icon.frame and icon.frame.absorbProgressBar then
+                        icon.frame.absorbProgressBar:Hide()
+                    end
+                end
+            end
+        end
+        
+        print("BoxxyAuras: Cleared all healing absorb tracking")
+        
+    else
+        print("BoxxyAuras Healing Absorb Test Commands:")
+        print("  /baabsorb list - List all current debuffs with spell IDs")
+        print("  /baabsorb test - Create a test healing absorb")
+        print("  /baabsorb damage [amount] - Simulate absorbed healing (default: 100k)")
+        print("  /baabsorb clear - Clear all absorb tracking")
+    end
 end
 
 -- =============================================================== --
@@ -1148,6 +1409,16 @@ function AuraIcon:Resize(newIconSize, newTextSize)
         self.frame.shakeOverlay:ClearAllPoints()
         PixelUtilCompat.SetPoint(self.frame.shakeOverlay, "TOPLEFT", self.textureWidget, "TOPLEFT")
     end
+
+    -- Re-anchor absorb progress bar background texture to fill the text area
+    if self.frame.absorbProgressBg then
+        self.frame.absorbProgressBg:ClearAllPoints()
+        PixelUtilCompat.SetPoint(self.frame.absorbProgressBg, "TOPLEFT", self.textureWidget, "BOTTOMLEFT", 0, -padding)
+        PixelUtilCompat.SetPoint(self.frame.absorbProgressBg, "TOPRIGHT", self.textureWidget, "BOTTOMRIGHT", 0, -padding)
+        PixelUtilCompat.SetPoint(self.frame.absorbProgressBg, "BOTTOM", self.frame, "BOTTOM", 0, padding)
+    end
+    
+    -- Note: The absorb progress bar foreground texture will be repositioned automatically when SetValue is called
 end
 
 -- =============================================================== --
@@ -1181,6 +1452,199 @@ function AuraIcon.GetCasterNameFromCurrentData(self)
     -- Fallback: if no tracked data, we can't reliably determine caster
     -- WoW's live APIs don't preserve original caster information
     return nil
+end
+
+-- =============================================================== --
+-- AuraIcon:UpdateHealingAbsorbDisplay
+-- Shows/hides and updates the healing absorb progress bar
+-- =============================================================== --
+function AuraIcon:UpdateHealingAbsorbDisplay(auraData)
+    if not self.frame or not self.frame.absorbProgressBar then
+        return
+    end
+
+    -- Check if this is a healing absorb debuff
+    local isHealingAbsorb = self:IsHealingAbsorbDebuff(auraData)
+
+    if isHealingAbsorb then
+        -- Initialize healing absorb tracking if needed
+        if not BoxxyAuras.healingAbsorbTracking then
+            BoxxyAuras.healingAbsorbTracking = {}
+        end
+
+        local trackingKey = auraData.auraInstanceID or auraData.spellId
+        if trackingKey then
+            -- Initialize tracking data if this is a new absorb
+            if not BoxxyAuras.healingAbsorbTracking[trackingKey] then
+                local initialAmount = self:GetInitialAbsorbAmount(auraData)
+                if initialAmount and initialAmount > 0 then
+                    BoxxyAuras.healingAbsorbTracking[trackingKey] = {
+                        initialAmount = initialAmount,
+                        currentAmount = initialAmount,
+                        spellId = auraData.spellId,
+                        auraInstanceID = auraData.auraInstanceID,
+                        lastUpdate = GetTime()
+                    }
+                end
+            end
+
+            -- Update progress bar if we have tracking data
+            local tracking = BoxxyAuras.healingAbsorbTracking[trackingKey]
+            if tracking and tracking.initialAmount > 0 then
+                local percentage = math.max(0, tracking.currentAmount / tracking.initialAmount)
+                self.frame.absorbProgressBar:SetValue(percentage)
+                self.frame.absorbProgressBar:Show()
+            else
+                self.frame.absorbProgressBar:Hide()
+                print("BoxxyAuras: No tracking data, hiding absorb bar")
+            end
+        else
+            self.frame.absorbProgressBar:Hide()
+            print("BoxxyAuras: No tracking key, hiding absorb bar")
+        end
+    else
+        -- Not a healing absorb, hide the progress bar
+        self.frame.absorbProgressBar:Hide()
+    end
+end
+
+-- =============================================================== --
+-- AuraIcon:IsHealingAbsorbDebuff
+-- Determines if the aura is a healing absorb effect by checking the API data
+-- =============================================================== --
+function AuraIcon:IsHealingAbsorbDebuff(auraData)
+    if not auraData or auraData.auraType ~= "HARMFUL" then
+        return false
+    end
+
+    -- The WoW API provides healing absorb information directly in the points field
+    -- If points exist and contain meaningful values, this is a healing absorb
+    local points = auraData.points
+    if points and type(points) == "table" and #points > 0 then
+        -- Look for any meaningful absorb value in the points array
+        for i, point in ipairs(points) do
+            if point and point > 0 then
+                if BoxxyAuras.DEBUG then
+                    print(string.format("BoxxyAuras: Detected healing absorb by API data: %s (%d) - absorb amount: %d", 
+                        auraData.name or "Unknown", auraData.spellId or 0, point))
+                end
+                return true
+            end
+        end
+    end
+
+    -- Special case: Demo mode healing absorb (for testing)
+    if auraData.spellId == 22351 then -- Demo Healing Absorb
+        if BoxxyAuras.DEBUG then
+            print(string.format("BoxxyAuras: Detected demo mode healing absorb: %s", auraData.name or "Unknown"))
+        end
+        return true
+    end
+
+    return false
+end
+
+-- =============================================================== --
+-- AuraIcon:GetInitialAbsorbAmount
+-- Attempts to determine the initial healing absorb amount
+-- =============================================================== --
+function AuraIcon:GetInitialAbsorbAmount(auraData)
+    if not auraData then
+        return 0
+    end
+
+    -- First, try to get absorb amount from the aura data itself
+    -- Some auras provide points/amount information that represents the absorb capacity
+    local points = auraData.points
+    if points and type(points) == "table" and #points > 0 then
+        -- Look for the first meaningful value in the points array
+        for i, point in ipairs(points) do
+            if point and point > 0 then
+                return point
+            end
+        end
+    end
+
+    -- Try the applications field as some absorbs use stacks to represent capacity
+    local applications = auraData.applications
+    if applications and applications > 1 then
+        -- For stacking absorbs, estimate based on applications
+        local baseAmount = 50000 -- Base amount per stack
+        local totalAmount = baseAmount * applications
+        return totalAmount
+    end
+
+    -- Try tooltip scanning as fallback
+    local tooltipAmount = self:GetAbsorbAmountFromTooltip(auraData)
+    if tooltipAmount and tooltipAmount > 0 then
+        return tooltipAmount
+    end
+
+    -- Final fallback: Use a reasonable default amount based on level/content
+    -- This ensures the progress bar still shows up even if we can't get exact amounts
+    local playerLevel = UnitLevel("player") or 70
+    local fallbackAmount = math.max(100000, playerLevel * 8000) -- Scale with player level, higher than before
+    
+    return fallbackAmount
+end
+
+-- AuraIcon:GetAbsorbAmountFromTooltip
+-- Attempts to extract healing absorb amount from aura tooltip
+-- =============================================================== --
+function AuraIcon:GetAbsorbAmountFromTooltip(auraData)
+    if not auraData or not auraData.spellId then
+        return nil
+    end
+
+    -- Create a tooltip scanner
+    local tooltip = CreateFrame("GameTooltip", "BoxxyAurasAbsorbScanner", nil, "GameTooltipTemplate")
+    tooltip:SetOwner(UIParent, "ANCHOR_NONE")
+    
+    -- Set the tooltip to the spell
+    tooltip:SetSpellByID(auraData.spellId)
+    
+    -- Scan tooltip lines for absorb amounts
+    for i = 1, tooltip:NumLines() do
+        local line = _G["BoxxyAurasAbsorbScannerTextLeft" .. i]
+        if line then
+            local text = line:GetText()
+            if text then
+                -- Look for patterns like "absorbs 123,456 healing" or "absorbs 123456 damage from healing"
+                local amount = string.match(text, "absorbs? (%d[%d,]*) .-heal")
+                if not amount then
+                    amount = string.match(text, "absorbs? (%d[%d,]*)")
+                end
+                if amount then
+                    -- Remove commas and convert to number
+                    local numericAmount = tonumber(string.gsub(amount, ",", ""))
+                    if numericAmount and numericAmount > 0 then
+                        tooltip:Hide()
+                        return numericAmount
+                    end
+                end
+            end
+        end
+    end
+    
+    tooltip:Hide()
+    return nil
+end
+
+-- =============================================================== --
+-- AuraIcon:UpdateAbsorbProgressBarColor
+-- Updates the color of the healing absorb progress bar from current settings
+-- =============================================================== --
+function AuraIcon:UpdateAbsorbProgressBarColor()
+    if not self.frame or not self.frame.absorbProgressBar then
+        return
+    end
+
+    -- Get color from current profile settings
+    local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+    local absorbColor = (currentSettings and currentSettings.healingAbsorbBarColor) or { r = 0.86, g = 0.28, b = 0.13, a = 0.8 }
+    
+    -- Update the progress bar color using the helper's method
+    self.frame.absorbProgressBar:SetStatusBarColor(absorbColor.r, absorbColor.g, absorbColor.b, absorbColor.a)
 end
 
 -- =============================================================== --
@@ -1244,6 +1708,12 @@ function AuraIcon:Reset()
                 end
             end
         end
+    end
+
+    -- Hide and reset absorb progress bar
+    if self.frame and self.frame.absorbProgressBar then
+        self.frame.absorbProgressBar:Hide()
+        self.frame.absorbProgressBar:SetValue(1) -- Reset to full
     end
 
     -- Hide tooltip if it's showing for this frame

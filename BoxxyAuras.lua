@@ -2,10 +2,11 @@ local addonNameString, privateTable = ... -- Use different names for the local v
 _G.BoxxyAuras = _G.BoxxyAuras or {}       -- Explicitly create/assign the GLOBAL table
 local BoxxyAuras = _G.BoxxyAuras          -- Create a convenient local alias to the global table
 
-BoxxyAuras.Version = "1.4.2"
+BoxxyAuras.Version = "1.5.0"
 
 BoxxyAuras.AllAuras = {}         -- Global cache for aura info
 BoxxyAuras.recentAuraEvents = {} -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
+BoxxyAuras.healingAbsorbTracking = {} -- Track healing absorb shield amounts
 BoxxyAuras.Frames = {}           -- << ADDED: Table to store frame references
 BoxxyAuras.iconArrays = {}       -- << ADDED: Table to store live icon objects
 BoxxyAuras.auraTracking = {}     -- << ADDED: Table to track aura data
@@ -301,8 +302,14 @@ function BoxxyAuras:GetDefaultProfileSettings()
         enableDotTickingAnimation = true, -- Enable dot ticking animation by default
         auraBarScale = 1.0,
         optionsWindowScale = 1.0,
+        textFont = "OpenSans SemiBold",   -- Default font for aura text (matches BoxxyAuras_DurationTxt)
+        textColor = { r = 1.0, g = 1.0, b = 1.0, a = 1.0 },                 -- Default text color (white)
         normalBorderColor = { r = 0.498, g = 0.498, b = 0.498, a = 1.0 },  -- Default normal border color (127,127,127)
         normalBackgroundColor = { r = 0.15, g = 0.15, b = 0.15, a = 1.0 }, -- Default background color (25,25,25)
+
+        -- Healing Absorb Progress Bar Colors
+        healingAbsorbBarColor = { r = 0.86, g = 0.28, b = 0.13, a = 0.8 },    -- Orangish red color for absorb bar
+        healingAbsorbBarBGColor = { r = 0, g = 0, b = 0, a = 0.4 },    -- Dark background for absorb bar
 
         -- NEW: Multiple custom bar support
         customFrameProfiles = {},
@@ -336,7 +343,7 @@ function BoxxyAuras:GetDefaultProfileSettings()
             buffTextAlign = "CENTER",
             iconSize = 24,
             textSize = 8,
-            borderSize = 1,
+            borderSize = 2,
             iconSpacing = 0,
             wrapDirection = "DOWN",
             width = defaultWidth
@@ -351,7 +358,7 @@ function BoxxyAuras:GetDefaultProfileSettings()
             debuffTextAlign = "CENTER",
             iconSize = 24,
             textSize = 8,
-            borderSize = 1,
+            borderSize = 2,
             iconSpacing = 0,
             wrapDirection = "DOWN",
             width = defaultWidth
@@ -587,6 +594,14 @@ function BoxxyAuras:GetCurrentProfileSettings()
     -- Ensure normalBackgroundColor exists
     if profile.normalBackgroundColor == nil then
         profile.normalBackgroundColor = { r = 0.098, g = 0.098, b = 0.098, a = 1.0 }
+    end
+
+    -- Ensure healing absorb colors exist
+    if profile.healingAbsorbBarColor == nil then
+        profile.healingAbsorbBarColor = { r = 0.86, g = 0.28, b = 0.13, a = 0.8 }
+    end
+    if profile.healingAbsorbBarBGColor == nil then
+        profile.healingAbsorbBarBGColor = { r = 0, g = 0, b = 0, a = 0.4 }
     end
 
     return profile
@@ -1680,6 +1695,72 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             end
         end
 
+        -- Handle Aura Removal Events for healing absorb cleanup
+        if destName and destName == UnitName("player") and subevent == "SPELL_AURA_REMOVED" then
+            if spellId and BoxxyAuras.healingAbsorbTracking then
+                -- Find tracking for this spell
+                for trackingKey, trackingData in pairs(BoxxyAuras.healingAbsorbTracking) do
+                    if trackingData.spellId == spellId then
+                        -- Mark as debuff removed but don't clean up yet - the healing absorb might persist
+                        trackingData.debuffRemoved = true
+                        trackingData.debuffRemovedTime = GetTime()
+                        
+                        -- Start a timer to clean up after 30 seconds if no more absorption occurs
+                        trackingData.cleanupTimer = C_Timer.NewTimer(30, function()
+                            if BoxxyAuras.healingAbsorbTracking[trackingKey] then
+                                BoxxyAuras.healingAbsorbTracking[trackingKey] = nil
+                                -- Update visuals to hide the progress bar
+                                BoxxyAuras:UpdateHealingAbsorbVisuals(trackingKey, nil)
+                            end
+                        end)
+                        break
+                    end
+                end
+            end
+        end
+
+        -- Handle Healing Absorb Events (SPELL_HEAL_ABSORBED) to update absorb progress
+        if destName and destName == UnitName("player") and subevent == "SPELL_HEAL_ABSORBED" then
+            -- For SPELL_HEAL_ABSORBED events, the parameters are:
+            -- timestamp, subevent, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, 
+            -- destGUID, destName, destFlags, destRaidFlags, spellId, spellName, spellSchool, 
+            -- extraGUID, extraName, extraFlags, extraRaidFlags, extraSpellID, extraSpellName, extraSchool, absorbedAmount, totalAmount
+            
+            -- The absorb spell info is in the main spell parameters, not the "extra" ones
+            local absorbSpellId = spellId
+            local extraGUID, extraName, extraFlags, extraRaidFlags, extraSpellID, extraSpellName, extraSchool, absorbedAmount, totalAmount = 
+                select(15, CombatLogGetCurrentEventInfo())
+            
+            if absorbedAmount and absorbedAmount > 0 and BoxxyAuras.healingAbsorbTracking then
+                -- Find the healing absorb effect that absorbed this healing
+                -- We need to match by the absorb spell ID (the main spellId, not extraSpellID)
+                for trackingKey, trackingData in pairs(BoxxyAuras.healingAbsorbTracking) do
+                    if trackingData.spellId == absorbSpellId and trackingData.currentAmount > 0 then
+                        local oldAmount = trackingData.currentAmount
+                        trackingData.currentAmount = math.max(0, trackingData.currentAmount - absorbedAmount)
+                        trackingData.lastUpdate = GetTime()
+                        
+                        -- Cancel cleanup timer if it exists (we got new absorption activity)
+                        if trackingData.cleanupTimer then
+                            trackingData.cleanupTimer:Cancel()
+                            trackingData.cleanupTimer = nil
+                        end
+                        
+                        -- Check if the absorb is fully consumed
+                        if trackingData.currentAmount <= 0 then
+                            BoxxyAuras.healingAbsorbTracking[trackingKey] = nil
+                            -- Update visuals to hide the progress bar
+                            BoxxyAuras:UpdateHealingAbsorbVisuals(trackingKey, nil)
+                        else
+                            -- Update the visual progress bar
+                            BoxxyAuras:UpdateHealingAbsorbVisuals(trackingKey, trackingData)
+                        end
+                        break -- Found the matching absorb, no need to continue
+                    end
+                end
+            end
+        end
+
         -- Handle Damage Events for Shake Effect
         if destName and destName == UnitName("player") and
             (subevent == "SPELL_DAMAGE" or subevent == "SPELL_PERIODIC_DAMAGE" or subevent == "SPELL_PERIODIC_MISSED") then
@@ -2759,6 +2840,50 @@ function BoxxyAuras:DebugHoverStates()
     end
 
     print("=== End Debug ===")
+end
+
+-- =============================================================== --
+-- BoxxyAuras:UpdateHealingAbsorbVisuals
+-- Updates the visual progress bars for a specific healing absorb
+-- =============================================================== --
+function BoxxyAuras:UpdateHealingAbsorbVisuals(trackingKey, trackingData)
+    if not trackingKey then
+        return
+    end
+
+    -- Find all icons that match this absorb and update their progress bars
+    for frameType, iconArray in pairs(self.iconArrays or {}) do
+        if iconArray then
+            for _, icon in ipairs(iconArray) do
+                if icon and icon.frame and icon.auraInstanceID then
+                    -- Check if this icon matches the tracking key
+                    local iconTrackingKey = icon.auraInstanceID or icon.spellId
+                    if iconTrackingKey == trackingKey then
+                        if icon.frame.absorbProgressBar then
+                            if trackingData and trackingData.initialAmount > 0 then
+                                -- Update progress bar
+                                local percentage = math.max(0, trackingData.currentAmount / trackingData.initialAmount)
+                                icon.frame.absorbProgressBar:SetValue(percentage)
+                                icon.frame.absorbProgressBar:Show()
+                                
+                                if BoxxyAuras.DEBUG then
+                                    print(string.format("BoxxyAuras: Updated absorb bar for '%s' to %.1f%%", 
+                                        icon.name or "Unknown", percentage * 100))
+                                end
+                            else
+                                -- Hide progress bar (tracking data is nil or absorb is consumed)
+                                icon.frame.absorbProgressBar:Hide()
+                                if BoxxyAuras.DEBUG then
+                                    print(string.format("BoxxyAuras: Hiding absorb bar for '%s' (absorb consumed or tracking removed)", 
+                                        icon.name or "Unknown"))
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
 end
 
 -- Debug function to trace expired aura handling
