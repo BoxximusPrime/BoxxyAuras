@@ -1510,27 +1510,22 @@ end
 
 -- =============================================================== --
 -- AuraIcon:IsHealingAbsorbDebuff
--- Determines if the aura is a healing absorb effect by checking the API data
+-- Determines if the aura is a healing absorb effect by checking combat log tracking
 -- =============================================================== --
 function AuraIcon:IsHealingAbsorbDebuff(auraData)
     if not auraData or auraData.auraType ~= "HARMFUL" then
         return false
     end
 
-    -- The WoW API provides healing absorb information directly in the points field
-    -- If points exist and contain meaningful values, this is a healing absorb
-    local points = auraData.points
-    if points and type(points) == "table" and #points > 0 then
-        -- Look for any meaningful absorb value in the points array
-        for i, point in ipairs(points) do
-            if point and point > 0 then
-                if BoxxyAuras.DEBUG then
-                    print(string.format("BoxxyAuras: Detected healing absorb by API data: %s (%d) - absorb amount: %d", 
-                        auraData.name or "Unknown", auraData.spellId or 0, point))
-                end
-                return true
-            end
+    -- Only return true if we have active tracking data for this aura
+    -- This means we've seen actual SPELL_HEAL_ABSORBED events for it
+    local trackingKey = auraData.auraInstanceID or auraData.spellId
+    if trackingKey and BoxxyAuras.healingAbsorbTracking and BoxxyAuras.healingAbsorbTracking[trackingKey] then
+        if BoxxyAuras.DEBUG then
+            print(string.format("BoxxyAuras: Detected healing absorb by combat log tracking: %s (%d)", 
+                auraData.name or "Unknown", auraData.spellId or 0))
         end
+        return true
     end
 
     -- Special case: Demo mode healing absorb (for testing)

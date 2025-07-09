@@ -1,7 +1,7 @@
 ## Interface: 100207
 ## Title: BoxxyAuras
 ## Author: BoxximusPrime
-## Version: 1.0.0
+## Version: 1.5.1
 ## Notes: Displays player buffs and debuffs.
 ## SavedVariables: BoxxyAurasDB
 

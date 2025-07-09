@@ -2,7 +2,7 @@ local addonNameString, privateTable = ... -- Use different names for the local v
 _G.BoxxyAuras = _G.BoxxyAuras or {}       -- Explicitly create/assign the GLOBAL table
 local BoxxyAuras = _G.BoxxyAuras          -- Create a convenient local alias to the global table
 
-BoxxyAuras.Version = "1.5.0"
+BoxxyAuras.Version = "1.5.1"
 
 BoxxyAuras.AllAuras = {}         -- Global cache for aura info
 BoxxyAuras.recentAuraEvents = {} -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
@@ -1739,7 +1739,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                         local oldAmount = trackingData.currentAmount
                         trackingData.currentAmount = math.max(0, trackingData.currentAmount - absorbedAmount)
                         trackingData.lastUpdate = GetTime()
-                        
+                            
                         -- Cancel cleanup timer if it exists (we got new absorption activity)
                         if trackingData.cleanupTimer then
                             trackingData.cleanupTimer:Cancel()
