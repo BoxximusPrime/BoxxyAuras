@@ -120,19 +120,11 @@ end
 function BoxxyAuras.UIUtils.ProcessNextScrapeInQueue()
     if #BoxxyAuras.scrapingQueue == 0 then
         BoxxyAuras.isScrapingActive = false
-        if BoxxyAuras.DEBUG then
-            print("ProcessNextScrapeInQueue: Queue empty, scraping stopped")
-        end
         return
     end
 
     BoxxyAuras.isScrapingActive = true
     local queuedItem = table.remove(BoxxyAuras.scrapingQueue, 1) -- Take first item
-
-    if BoxxyAuras.DEBUG then
-        print(string.format("ProcessNextScrapeInQueue: Processing instanceID=%s (queue remaining: %d)",
-            tostring(queuedItem.targetAuraInstanceID), #BoxxyAuras.scrapingQueue))
-    end
 
     -- Execute the actual scraping
     BoxxyAuras.UIUtils.ExecuteTooltipScrape(
@@ -507,16 +499,8 @@ end
 function BoxxyAuras.UIUtils.ExecuteTooltipScrape(spellId, instanceId, filter, retryCount)
     retryCount = retryCount or 0
 
-    if BoxxyAuras.DEBUG then
-        print(string.format("ExecuteTooltipScrape: spellId=%s, instanceID=%s, filter=%s, retry=%d",
-            tostring(spellId), tostring(instanceId), tostring(filter), retryCount))
-    end
-
     -- Stop if we already have complete data
     if BoxxyAuras.AllAuras[instanceId] and not BoxxyAuras.AllAuras[instanceId].isPlaceholder then
-        if BoxxyAuras.DEBUG then
-            print("ExecuteTooltipScrape: Already have complete data, moving to next in queue")
-        end
         BoxxyAuras.UIUtils.OnScrapeComplete()
         return
     end
@@ -529,7 +513,6 @@ function BoxxyAuras.UIUtils.ExecuteTooltipScrape(spellId, instanceId, filter, re
             lines = tooltipLines,
             scrapedVia = "C_TooltipInfo"
         }
-        if BoxxyAuras.DEBUG then print("ExecuteTooltipScrape: Success with C_TooltipInfo") end
         BoxxyAuras.UIUtils.OnScrapeComplete()
         return
     end
@@ -689,20 +672,12 @@ function BoxxyAuras.UIUtils.TryTooltipInfoScrape(spellId, instanceId, filter)
     local spellName = nil
     local tooltipLines = {}
 
-    if BoxxyAuras.DEBUG then
-        print(string.format("TryTooltipInfoScrape: tipData=%s, name=%s, lines=%d",
-            tostring(tipData ~= nil), tostring(tipData.name), tipData.lines and #tipData.lines or 0))
-    end
-
     -- Extract spell name and lines from tipData
     if tipData.lines and #tipData.lines > 0 then
         local firstLine = tipData.lines[1]
         if firstLine and firstLine.leftText then
             if not tipData.name or tipData.name == "" then
                 spellName = firstLine.leftText
-                if BoxxyAuras.DEBUG then
-                    print(string.format("TryTooltipInfoScrape: Extracted name from first line: '%s'", spellName))
-                end
             else
                 spellName = tipData.name
             end
@@ -711,10 +686,6 @@ function BoxxyAuras.UIUtils.TryTooltipInfoScrape(spellId, instanceId, filter)
             for i = 1, #tipData.lines do
                 local line = tipData.lines[i]
                 if line and line.leftText then
-                    if BoxxyAuras.DEBUG and i <= 3 then
-                        print(string.format("TryTooltipInfoScrape: Line %d: '%s' | '%s'", i,
-                            tostring(line.leftText), tostring(line.rightText)))
-                    end
                     if not (string.find(line.leftText, "remaining", 1, true) or (line.rightText and string.find(line.rightText, "remaining", 1, true))) then
                         table.insert(tooltipLines, { left = line.leftText, right = line.rightText or "" })
                     end
@@ -724,9 +695,6 @@ function BoxxyAuras.UIUtils.TryTooltipInfoScrape(spellId, instanceId, filter)
     end
 
     if spellName and spellName ~= "" and #tooltipLines > 0 then
-        if BoxxyAuras.DEBUG then
-            print(string.format("TryTooltipInfoScrape: Success, cached %d lines with name '%s'", #tooltipLines, spellName))
-        end
         return true, spellName, tooltipLines
     end
 

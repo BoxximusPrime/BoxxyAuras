@@ -2,14 +2,19 @@ local addonNameString, privateTable = ... -- Use different names for the local v
 _G.BoxxyAuras = _G.BoxxyAuras or {}       -- Explicitly create/assign the GLOBAL table
 local BoxxyAuras = _G.BoxxyAuras          -- Create a convenient local alias to the global table
 
-BoxxyAuras.Version = "1.5.1"
+BoxxyAuras.Version = "1.5.2"
 
-BoxxyAuras.AllAuras = {}         -- Global cache for aura info
-BoxxyAuras.recentAuraEvents = {} -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
+BoxxyAuras.AllAuras = {}              -- Global cache for aura info
+BoxxyAuras.recentAuraEvents = {}      -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
 BoxxyAuras.healingAbsorbTracking = {} -- Track healing absorb shield amounts
-BoxxyAuras.Frames = {}           -- << ADDED: Table to store frame references
-BoxxyAuras.iconArrays = {}       -- << ADDED: Table to store live icon objects
-BoxxyAuras.auraTracking = {}     -- << ADDED: Table to track aura data
+BoxxyAuras.healingAbsorbTracker = {   -- Enhanced healing absorb detection
+    trackedAmount = 0,                -- Currently tracked healing absorb amount
+    confirmedAbsorbs = {},            -- Confirmed healing absorb spell IDs
+    lastAuraApplicationTime = 0       -- Track when the last aura was applied for correlation
+}
+BoxxyAuras.Frames = {}                -- << ADDED: Table to store frame references
+BoxxyAuras.iconArrays = {}            -- << ADDED: Table to store live icon objects
+BoxxyAuras.auraTracking = {}          -- << ADDED: Table to track aura data
 BoxxyAuras.HoveredFrame = nil
 BoxxyAuras.DEBUG = false
 BoxxyAuras.lastCacheCleanup = 0 -- Track when we last cleaned the cache
@@ -74,10 +79,6 @@ function BoxxyAuras.UpdateManager:RegisterAura(auraIcon)
     -- Add to appropriate tier
     table.insert(self.auras[tier], auraIcon)
     auraIcon.updateTier = tier
-
-    if BoxxyAuras.DEBUG then
-        print(string.format("UpdateManager: Registered '%s' in %s tier", auraIcon.name or "Unknown", tier))
-    end
 end
 
 -- Unregister an aura from all update tiers
@@ -90,10 +91,6 @@ function BoxxyAuras.UpdateManager:UnregisterAura(auraIcon)
         for i = #tierList, 1, -1 do
             if tierList[i] == auraIcon then
                 table.remove(tierList, i)
-                if BoxxyAuras.DEBUG then
-                    print(string.format("UpdateManager: Unregistered '%s' from %s tier", auraIcon.name or "Unknown",
-                        tierName))
-                end
                 break
             end
         end
@@ -129,11 +126,6 @@ function BoxxyAuras.UpdateManager:ProcessTier(tierName, currentTime)
                 table.remove(tierList, i)
                 table.insert(self.auras[correctTier], auraIcon)
                 auraIcon.updateTier = correctTier
-
-                if BoxxyAuras.DEBUG then
-                    print(string.format("UpdateManager: Moved '%s' from %s to %s tier",
-                        auraIcon.name or "Unknown", tierName, correctTier))
-                end
             elseif not correctTier then
                 -- Aura no longer needs updates (became permanent or invalid)
                 table.remove(tierList, i)
@@ -302,14 +294,14 @@ function BoxxyAuras:GetDefaultProfileSettings()
         enableDotTickingAnimation = true, -- Enable dot ticking animation by default
         auraBarScale = 1.0,
         optionsWindowScale = 1.0,
-        textFont = "OpenSans SemiBold",   -- Default font for aura text (matches BoxxyAuras_DurationTxt)
-        textColor = { r = 1.0, g = 1.0, b = 1.0, a = 1.0 },                 -- Default text color (white)
+        textFont = "OpenSans SemiBold",                                    -- Default font for aura text (matches BoxxyAuras_DurationTxt)
+        textColor = { r = 1.0, g = 1.0, b = 1.0, a = 1.0 },                -- Default text color (white)
         normalBorderColor = { r = 0.498, g = 0.498, b = 0.498, a = 1.0 },  -- Default normal border color (127,127,127)
         normalBackgroundColor = { r = 0.15, g = 0.15, b = 0.15, a = 1.0 }, -- Default background color (25,25,25)
 
         -- Healing Absorb Progress Bar Colors
-        healingAbsorbBarColor = { r = 0.86, g = 0.28, b = 0.13, a = 0.8 },    -- Orangish red color for absorb bar
-        healingAbsorbBarBGColor = { r = 0, g = 0, b = 0, a = 0.4 },    -- Dark background for absorb bar
+        healingAbsorbBarColor = { r = 0.86, g = 0.28, b = 0.13, a = 0.8 }, -- Orangish red color for absorb bar
+        healingAbsorbBarBGColor = { r = 0, g = 0, b = 0, a = 0.4 },        -- Dark background for absorb bar
 
         -- NEW: Multiple custom bar support
         customFrameProfiles = {},
@@ -1639,6 +1631,9 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
         BoxxyAuras.ApplyBlizzardAuraVisibility(currentSettings.hideBlizzardAuras)
 
+        -- Initialize healing absorb tracking
+        BoxxyAuras:InitializeHealingAbsorbTracking()
+
         -- Force a full update on login to ensure all auras are displayed correctly
         BoxxyAuras.UpdateAuras(true)
 
@@ -1678,7 +1673,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
 
         -- Handle Aura Application Events to capture source GUID
         if destName and destName == UnitName("player") and
-            (subevent == "SPELL_AURA_APPLIED" or subevent == "SPELL_AURA_REFRESH") then
+            (subevent == "SPELL_AURA_APPLIED" or subevent == "SPELL_AURA_REFRESH" or subevent == "SPELL_AURA_APPLIED_DOSE") then
             if spellId and sourceGUID then
                 -- Store this for quick lookup when processing new auras
                 table.insert(BoxxyAuras.recentAuraEvents, {
@@ -1687,12 +1682,30 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                     sourceName = sourceName,
                     timestamp = GetTime()
                 })
-
-                if BoxxyAuras.DEBUG then
-                    print(string.format("Combat Log: %s applied spellId=%s from sourceGUID=%s (%s)",
-                        subevent, tostring(spellId), tostring(sourceGUID), tostring(sourceName)))
-                end
             end
+
+            -- NEW: Check if this debuff application/refresh caused a healing absorb increase
+            if spellId and spellName then
+                -- Use a small delay to ensure the aura is fully applied before checking absorb amounts
+                C_Timer.After(0.1, function()
+                    if subevent == "SPELL_AURA_REFRESH" then
+                        -- Handle refresh separately to reset progress bars to full
+                        BoxxyAuras:HandleHealingAbsorbRefresh(spellId, spellName)
+                    else
+                        -- Handle new applications normally
+                        BoxxyAuras:CheckForHealingAbsorbIncrease(spellId, spellName)
+                    end
+                end)
+            end
+        end
+
+        -- Handle healing events to re-sync our tracked absorb amount
+        if destName and destName == UnitName("player") and
+            (subevent == "SPELL_HEAL" or subevent == "SPELL_PERIODIC_HEAL") then
+            -- Healing occurred - re-sync our tracked amount
+            C_Timer.After(0.1, function()
+                BoxxyAuras:UpdateTrackedHealingAbsorbAmount()
+            end)
         end
 
         -- Handle Aura Removal Events for healing absorb cleanup
@@ -1704,7 +1717,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                         -- Mark as debuff removed but don't clean up yet - the healing absorb might persist
                         trackingData.debuffRemoved = true
                         trackingData.debuffRemovedTime = GetTime()
-                        
+
                         -- Start a timer to clean up after 30 seconds if no more absorption occurs
                         trackingData.cleanupTimer = C_Timer.NewTimer(30, function()
                             if BoxxyAuras.healingAbsorbTracking[trackingKey] then
@@ -1722,40 +1735,144 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         -- Handle Healing Absorb Events (SPELL_HEAL_ABSORBED) to update absorb progress
         if destName and destName == UnitName("player") and subevent == "SPELL_HEAL_ABSORBED" then
             -- For SPELL_HEAL_ABSORBED events, the parameters are:
-            -- timestamp, subevent, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, 
-            -- destGUID, destName, destFlags, destRaidFlags, spellId, spellName, spellSchool, 
+            -- timestamp, subevent, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags,
+            -- destGUID, destName, destFlags, destRaidFlags, spellId, spellName, spellSchool,
             -- extraGUID, extraName, extraFlags, extraRaidFlags, extraSpellID, extraSpellName, extraSchool, absorbedAmount, totalAmount
-            
+
             -- The absorb spell info is in the main spell parameters, not the "extra" ones
             local absorbSpellId = spellId
-            local extraGUID, extraName, extraFlags, extraRaidFlags, extraSpellID, extraSpellName, extraSchool, absorbedAmount, totalAmount = 
+            local extraGUID, extraName, extraFlags, extraRaidFlags, extraSpellID, extraSpellName, extraSchool, absorbedAmount, totalAmount =
                 select(15, CombatLogGetCurrentEventInfo())
-            
-            if absorbedAmount and absorbedAmount > 0 and BoxxyAuras.healingAbsorbTracking then
-                -- Find the healing absorb effect that absorbed this healing
-                -- We need to match by the absorb spell ID (the main spellId, not extraSpellID)
-                for trackingKey, trackingData in pairs(BoxxyAuras.healingAbsorbTracking) do
-                    if trackingData.spellId == absorbSpellId and trackingData.currentAmount > 0 then
-                        local oldAmount = trackingData.currentAmount
-                        trackingData.currentAmount = math.max(0, trackingData.currentAmount - absorbedAmount)
-                        trackingData.lastUpdate = GetTime()
-                            
-                        -- Cancel cleanup timer if it exists (we got new absorption activity)
-                        if trackingData.cleanupTimer then
-                            trackingData.cleanupTimer:Cancel()
-                            trackingData.cleanupTimer = nil
+
+            if BoxxyAuras.DEBUG then
+                print(string.format(
+                    "Healing Absorb Event: %s, spellId=%s, sourceGUID=%s, destGUID=%s, absorbedAmount=%s (type:%s), totalAmount=%s",
+                    subevent, tostring(absorbSpellId), tostring(sourceGUID), tostring(destGUID),
+                    tostring(absorbedAmount), type(absorbedAmount), tostring(totalAmount)))
+            end
+
+            -- Initialize tracking if this is the first time we see this absorb in action
+            if absorbedAmount and type(absorbedAmount) == "number" and absorbedAmount > 0 then
+                if not BoxxyAuras.healingAbsorbTracking then
+                    BoxxyAuras.healingAbsorbTracking = {}
+                end
+
+                -- Try to find existing tracking or create new tracking
+                local trackingKey = nil
+                local trackingData = nil
+                local auraData = nil
+
+                -- First, try to find existing tracking by spell ID (broader search)
+                for key, data in pairs(BoxxyAuras.healingAbsorbTracking) do
+                    if data.spellId == absorbSpellId and not data.fullyConsumed then
+                        trackingKey = key
+                        trackingData = data
+                        if BoxxyAuras.DEBUG then
+                            print(string.format("Found existing tracking for spellId %d with key %s", absorbSpellId,
+                                tostring(key)))
                         end
-                        
-                        -- Check if the absorb is fully consumed
-                        if trackingData.currentAmount <= 0 then
-                            BoxxyAuras.healingAbsorbTracking[trackingKey] = nil
-                            -- Update visuals to hide the progress bar
-                            BoxxyAuras:UpdateHealingAbsorbVisuals(trackingKey, nil)
-                        else
-                            -- Update the visual progress bar
-                            BoxxyAuras:UpdateHealingAbsorbVisuals(trackingKey, trackingData)
+                        break
+                    end
+                end
+
+                -- If no existing tracking found, search for current aura and create new tracking
+                if not trackingData then
+                    -- Search through all tracked auras to find this spell ID
+                    for frameType, auras in pairs(BoxxyAuras.auraTracking or {}) do
+                        for _, aura in ipairs(auras) do
+                            if aura and aura.spellId == absorbSpellId and aura.auraType == "HARMFUL" then
+                                trackingKey = aura.auraInstanceID or aura.spellId
+                                auraData = aura
+
+                                if BoxxyAuras.DEBUG then
+                                    print(string.format("Found aura for new tracking: %s (instanceID=%s, spellId=%d)",
+                                        aura.name or "Unknown", tostring(aura.auraInstanceID), aura.spellId))
+                                end
+                                break
+                            end
                         end
-                        break -- Found the matching absorb, no need to continue
+                        if auraData then break end
+                    end
+
+                    if auraData then
+                        -- Try to get initial amount from aura data
+                        local initialAmount = 0
+
+                        -- Check aura points array first
+                        if auraData.points and type(auraData.points) == "table" and #auraData.points > 0 then
+                            for i, point in ipairs(auraData.points) do
+                                if point and point > 0 then
+                                    initialAmount = point
+                                    if BoxxyAuras.DEBUG then
+                                        print(string.format("Got initial amount from aura points: %d", initialAmount))
+                                    end
+                                    break
+                                end
+                            end
+                        end
+
+                        -- Fallback: estimate based on absorbed amount
+                        if initialAmount <= 0 then
+                            -- Use a more conservative multiplier and add some buffer
+                            initialAmount = math.max(absorbedAmount * 10, absorbedAmount + 500000)
+                            if BoxxyAuras.DEBUG then
+                                print(string.format("Estimated initial amount: %d (based on absorbed: %d)", initialAmount,
+                                    absorbedAmount))
+                            end
+                        end
+
+                        trackingData = {
+                            initialAmount = initialAmount,
+                            currentAmount = initialAmount, -- Start with full amount, we'll subtract below
+                            spellId = absorbSpellId,
+                            auraInstanceID = auraData.auraInstanceID,
+                            lastUpdate = GetTime(),
+                            fullyConsumed = false
+                        }
+                        BoxxyAuras.healingAbsorbTracking[trackingKey] = trackingData
+
+                        if BoxxyAuras.DEBUG then
+                            print(string.format(
+                                "Created new healing absorb tracking for spellId %d, instanceID %s (initial: %d, source: %s)",
+                                absorbSpellId, tostring(auraData.auraInstanceID), initialAmount,
+                                (auraData.points and #auraData.points > 0) and "aura_points" or "estimate"))
+                        end
+                    end
+                end
+
+                -- Now process the absorb if we have tracking data
+                if trackingData then
+                    local oldAmount = trackingData.currentAmount
+                    trackingData.currentAmount = math.max(0, trackingData.currentAmount - absorbedAmount)
+                    trackingData.lastUpdate = GetTime()
+
+                    -- Cancel cleanup timer if it exists (we got new absorption activity)
+                    if trackingData.cleanupTimer then
+                        trackingData.cleanupTimer:Cancel()
+                        trackingData.cleanupTimer = nil
+                    end
+
+                    if BoxxyAuras.DEBUG then
+                        print(string.format("Updated absorb tracking: %d -> %d (absorbed: %d)",
+                            oldAmount, trackingData.currentAmount, absorbedAmount))
+                    end
+
+                    -- Check if the absorb is fully consumed
+                    if trackingData.currentAmount <= 0 then
+                        -- Don't immediately remove tracking, just mark as consumed
+                        trackingData.fullyConsumed = true
+                        -- Update visuals to hide the progress bar
+                        BoxxyAuras:UpdateHealingAbsorbVisuals(trackingKey, nil)
+
+                        -- Set a timer to clean up after a delay
+                        trackingData.cleanupTimer = C_Timer.NewTimer(5, function()
+                            if BoxxyAuras.healingAbsorbTracking and BoxxyAuras.healingAbsorbTracking[trackingKey] then
+                                BoxxyAuras.healingAbsorbTracking[trackingKey] = nil
+                            end
+                        end)
+                    else
+                        -- Update the visual progress bar
+                        BoxxyAuras:UpdateHealingAbsorbVisuals(trackingKey, trackingData)
                     end
                 end
             end
@@ -1789,8 +1906,17 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                     if trackedAuras and #trackedAuras > 0 then
                         for _, trackedAura in ipairs(trackedAuras) do
                             -- Only check harmful auras (debuffs) for shake animation
+                            -- Skip expired auras - we only want to shake active auras
+                            local isExpiredAura = false
+                            if trackedAura.forceExpired then
+                                isExpiredAura = true
+                            elseif trackedAura.expirationTime and trackedAura.expirationTime > 0 then
+                                isExpiredAura = trackedAura.expirationTime <= GetTime()
+                            end
+
                             if trackedAura and trackedAura.spellId == spellId and
-                                (trackedAura.auraType == "HARMFUL" or trackedAura.originalAuraType == "HARMFUL") then
+                                (trackedAura.auraType == "HARMFUL" or trackedAura.originalAuraType == "HARMFUL") and
+                                not isExpiredAura then -- Only shake active (non-expired) auras
                                 -- Enhanced debug logging
                                 if BoxxyAuras.DEBUG and (subevent == "SPELL_PERIODIC_DAMAGE" or subevent == "SPELL_PERIODIC_MISSED") then
                                     print(string.format(
@@ -2351,9 +2477,6 @@ hoverCheckFrame:SetScript("OnUpdate", function(self, elapsed)
                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "backdrop", 0, 0, 0, 0)
                 BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "border", 0, 0, 0, 0)
 
-                if BoxxyAuras.DEBUG then
-                    print(string.format("BORDER DEBUG: Setting frame %s border to transparent (locked)", frameType))
-                end
                 if isVisuallyHovered and showHoverBorder then
                     BoxxyAuras.UIUtils.ColorBGSlicedFrame(frame, "hoverBorder", hoverColor)
                 else
@@ -2848,35 +2971,87 @@ end
 -- =============================================================== --
 function BoxxyAuras:UpdateHealingAbsorbVisuals(trackingKey, trackingData)
     if not trackingKey then
+        if BoxxyAuras.DEBUG then
+            print("BoxxyAuras: UpdateHealingAbsorbVisuals called without trackingKey")
+        end
         return
     end
 
+    if BoxxyAuras.DEBUG then
+        print(string.format("BoxxyAuras: Updating healing absorb visuals for '%s'", trackingKey))
+    end
+
     -- Find all icons that match this absorb and update their progress bars
+    local foundMatch = false
     for frameType, iconArray in pairs(self.iconArrays or {}) do
         if iconArray then
             for _, icon in ipairs(iconArray) do
-                if icon and icon.frame and icon.auraInstanceID then
+                if icon and icon.frame and (icon.auraInstanceID or icon.spellId) then
                     -- Check if this icon matches the tracking key
                     local iconTrackingKey = icon.auraInstanceID or icon.spellId
-                    if iconTrackingKey == trackingKey then
-                        if icon.frame.absorbProgressBar then
-                            if trackingData and trackingData.initialAmount > 0 then
-                                -- Update progress bar
+                    local spellIdMatch = false
+
+                    -- First try exact tracking key match
+                    local isMatch = (tostring(iconTrackingKey) == tostring(trackingKey))
+
+                    -- If no exact match, try spell ID match for healing absorbs
+                    if not isMatch and trackingData and trackingData.spellId and icon.spellId then
+                        isMatch = (icon.spellId == trackingData.spellId and icon.auraType == "HARMFUL")
+                        spellIdMatch = true
+                    end
+
+                    if BoxxyAuras.DEBUG then
+                        print(string.format(
+                            "  Checking icon: %s (instanceID=%s, spellId=%s) against trackingKey=%s (match=%s, spellIdMatch=%s)",
+                            icon.name or "Unknown", tostring(icon.auraInstanceID), tostring(icon.spellId),
+                            tostring(trackingKey), tostring(isMatch), tostring(spellIdMatch)))
+                    end
+
+                    if isMatch then
+                        foundMatch = true
+
+                        -- CRITICAL: Skip all updates for expired auras in UpdateHealingAbsorbVisuals
+                        -- The AuraIcon:Display method is the sole authority for expired aura progress bars
+                        local isIconExpired = false
+                        if icon.isExpired then
+                            isIconExpired = true
+                        elseif icon.expirationTime and icon.expirationTime > 0 then
+                            isIconExpired = icon.expirationTime <= GetTime()
+                        end
+
+                        if isIconExpired then
+                            if BoxxyAuras.DEBUG then
+                                print(string.format(
+                                    "BoxxyAuras: Skipping visual update for expired aura '%s' (instanceID=%s) - AuraIcon:Display handles expired auras",
+                                    icon.name or "Unknown", tostring(icon.auraInstanceID)))
+                            end
+                            -- Do NOT touch expired auras here - let AuraIcon:Display handle them
+                        elseif icon.frame.absorbProgressBar then
+                            -- This is an active (non-expired) aura, update its progress bar
+                            if trackingData and trackingData.initialAmount and trackingData.initialAmount > 0 and not trackingData.fullyConsumed then
+                                -- Update progress bar for active auras only
                                 local percentage = math.max(0, trackingData.currentAmount / trackingData.initialAmount)
                                 icon.frame.absorbProgressBar:SetValue(percentage)
                                 icon.frame.absorbProgressBar:Show()
-                                
+
                                 if BoxxyAuras.DEBUG then
-                                    print(string.format("BoxxyAuras: Updated absorb bar for '%s' to %.1f%%", 
-                                        icon.name or "Unknown", percentage * 100))
+                                    print(string.format("BoxxyAuras: Updated absorb bar for '%s' to %.1f%% (%d/%d)",
+                                        icon.name or "Unknown", percentage * 100, trackingData.currentAmount,
+                                        trackingData.initialAmount))
                                 end
                             else
                                 -- Hide progress bar (tracking data is nil or absorb is consumed)
                                 icon.frame.absorbProgressBar:Hide()
                                 if BoxxyAuras.DEBUG then
-                                    print(string.format("BoxxyAuras: Hiding absorb bar for '%s' (absorb consumed or tracking removed)", 
+                                    print(string.format(
+                                        "BoxxyAuras: Hiding absorb bar for '%s' (absorb consumed or tracking removed)",
                                         icon.name or "Unknown"))
                                 end
+                            end
+                        else
+                            if BoxxyAuras.DEBUG then
+                                print(string.format("BoxxyAuras: Icon '%s' has no absorbProgressBar!",
+                                    icon.name or "Unknown"))
                             end
                         end
                     end
@@ -2884,9 +3059,523 @@ function BoxxyAuras:UpdateHealingAbsorbVisuals(trackingKey, trackingData)
             end
         end
     end
+
+    if not foundMatch and BoxxyAuras.DEBUG then
+        print(string.format("BoxxyAuras: No matching icon found for trackingKey '%s'", trackingKey))
+        if trackingData and trackingData.spellId then
+            print(string.format("  Also searched for spellId %d", trackingData.spellId))
+        end
+    end
 end
 
--- Debug function to trace expired aura handling
+-- =============================================================== --
+-- Event-Driven Healing Absorb Detection System
+-- =============================================================== --
+
+-- Initialize the healing absorb tracking
+function BoxxyAuras:InitializeHealingAbsorbTracking()
+    self.healingAbsorbTracker.trackedAmount = UnitGetTotalHealAbsorbs("player") or 0
+    if BoxxyAuras.DEBUG then
+        print(string.format("BoxxyAuras: Initialized healing absorb tracking at %d",
+            self.healingAbsorbTracker.trackedAmount))
+    end
+end
+
+-- Update tracked amount (called after healing events to re-sync)
+function BoxxyAuras:UpdateTrackedHealingAbsorbAmount()
+    local currentAmount = UnitGetTotalHealAbsorbs("player") or 0
+    local previousAmount = self.healingAbsorbTracker.trackedAmount
+
+    if currentAmount ~= previousAmount then
+        local amountChange = currentAmount - previousAmount
+
+        if BoxxyAuras.DEBUG then
+            print(string.format("BoxxyAuras: Healing absorb amount changed: %d -> %d (change: %+d)",
+                previousAmount, currentAmount, amountChange))
+        end
+
+        -- Update our tracked amount
+        self.healingAbsorbTracker.trackedAmount = currentAmount
+
+        -- If healing absorbs changed, sync our tracking data and update visuals
+        if amountChange ~= 0 then
+            if BoxxyAuras.DEBUG then
+                print(string.format("BoxxyAuras: Calling sync due to absorb change: %+d", amountChange))
+            end
+
+            self:SyncTrackingWithActualAbsorbs()
+
+            -- Update all healing absorb visuals to reflect the new amounts
+            if BoxxyAuras.DEBUG then
+                print("BoxxyAuras: Updating visuals for all tracking data after sync")
+            end
+
+            for trackingKey, trackingData in pairs(self.healingAbsorbTracking or {}) do
+                if trackingData then
+                    self:UpdateHealingAbsorbVisuals(trackingKey, trackingData)
+                    if BoxxyAuras.DEBUG then
+                        print(string.format("BoxxyAuras: Updated visuals for key %s (current: %d, initial: %d)",
+                            tostring(trackingKey), trackingData.currentAmount or 0, trackingData.initialAmount or 0))
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Update progress bars when healing reduces absorb amounts
+function BoxxyAuras:UpdateHealingAbsorbProgressBars(healingAmount)
+    if not self.healingAbsorbTracking then
+        return
+    end
+
+    if BoxxyAuras.DEBUG then
+        print(string.format("BoxxyAuras: Updating progress bars after %d healing", healingAmount))
+    end
+
+    -- First pass: count active (non-expired) absorbs and their total amount
+    local activeAbsorbs = {}
+    local totalActiveAmount = 0
+
+    for trackingKey, trackingData in pairs(self.healingAbsorbTracking) do
+        if trackingData.currentAmount and trackingData.currentAmount > 0 then
+            -- Check if this aura is still active (not expired AND not held due to hover)
+            local isAuraActive = self:IsHealingAbsorbAuraActive(trackingData.spellId, trackingData.auraInstanceID)
+            local isAuraHeld = self:IsHealingAbsorbAuraHeld(trackingData.spellId, trackingData.auraInstanceID)
+
+            -- Only include auras that are truly active (not expired and not just held on hover)
+            if isAuraActive and not isAuraHeld then
+                activeAbsorbs[trackingKey] = trackingData
+                totalActiveAmount = totalActiveAmount + trackingData.currentAmount
+
+                if BoxxyAuras.DEBUG then
+                    print(string.format("BoxxyAuras: Active absorb found - key: %s, amount: %d",
+                        tostring(trackingKey), trackingData.currentAmount))
+                end
+            else
+                if BoxxyAuras.DEBUG then
+                    local reason = not isAuraActive and "expired" or "held on hover"
+                    print(string.format("BoxxyAuras: Skipping %s absorb - SpellID: %d, InstanceID: %s",
+                        reason, trackingData.spellId or 0, tostring(trackingData.auraInstanceID)))
+                end
+            end
+        end
+    end
+
+    if BoxxyAuras.DEBUG then
+        print(string.format("BoxxyAuras: Found %d active absorbs with total amount %d",
+            self:TableCount(activeAbsorbs), totalActiveAmount))
+    end
+
+    -- If no active absorbs found, skip distribution but still update visuals to clear expired bars
+    if self:TableCount(activeAbsorbs) == 0 then
+        if BoxxyAuras.DEBUG then
+            print("BoxxyAuras: No active absorbs found, updating visuals to clear any remaining bars")
+        end
+
+        -- Update visuals for any tracking data to ensure expired auras show 0 progress
+        for trackingKey, trackingData in pairs(self.healingAbsorbTracking) do
+            -- For expired/held auras, pass nil as trackingData to hide/reset the progress bar
+            self:UpdateHealingAbsorbVisuals(trackingKey, nil)
+        end
+        return
+    end
+
+    -- Second pass: distribute healing proportionally among active absorbs only
+    for trackingKey, trackingData in pairs(activeAbsorbs) do
+        if healingAmount <= 0 then
+            break
+        end
+
+        -- Calculate proportional reduction based on this absorb's share of total active absorbs
+        local proportionalReduction
+        if totalActiveAmount > 0 then
+            local proportion = trackingData.currentAmount / totalActiveAmount
+            proportionalReduction = math.min(healingAmount * proportion, trackingData.currentAmount)
+        else
+            proportionalReduction = 0
+        end
+
+        -- Apply the reduction
+        trackingData.currentAmount = trackingData.currentAmount - proportionalReduction
+        trackingData.lastUpdate = GetTime()
+
+        if trackingData.currentAmount <= 0 then
+            trackingData.fullyConsumed = true
+        end
+
+        -- Update the visual progress bar
+        self:UpdateHealingAbsorbVisuals(trackingKey, trackingData)
+
+        if BoxxyAuras.DEBUG then
+            print(string.format("BoxxyAuras: Updated tracking for key %s: %d/%d remaining (reduced by %.1f)",
+                tostring(trackingKey), trackingData.currentAmount, trackingData.initialAmount, proportionalReduction))
+        end
+
+        healingAmount = healingAmount - proportionalReduction
+    end
+end -- Check if a healing absorb aura is still active (not expired)
+
+function BoxxyAuras:IsHealingAbsorbAuraActive(spellId, auraInstanceID)
+    if not spellId then
+        return false
+    end
+
+    -- Search through all current aura tracking to see if this aura is still active
+    for frameType, auras in pairs(self.auraTracking or {}) do
+        for _, aura in ipairs(auras) do
+            if aura and aura.spellId == spellId then
+                -- If we have an instance ID, match it exactly
+                if auraInstanceID and aura.auraInstanceID then
+                    if aura.auraInstanceID == auraInstanceID then
+                        -- Check if this aura is not marked as expired
+                        local currentTime = GetTime()
+
+                        -- Check for forced expiration flag
+                        if aura.forceExpired then
+                            return false
+                        end
+
+                        -- Check for time-based expiration
+                        local isExpired = (aura.expirationTime and aura.expirationTime > 0 and
+                            aura.expirationTime <= currentTime)
+                        return not isExpired
+                    end
+                else
+                    -- No instance ID to match, just check if any aura with this spell ID is active
+                    local currentTime = GetTime()
+
+                    -- Check for forced expiration flag
+                    if not aura.forceExpired then
+                        -- Check for time-based expiration
+                        local isExpired = (aura.expirationTime and aura.expirationTime > 0 and
+                            aura.expirationTime <= currentTime)
+                        if not isExpired then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return false
+end
+
+-- Check if a healing absorb aura is being held on hover (expired but still displayed)
+function BoxxyAuras:IsHealingAbsorbAuraHeld(spellId, auraInstanceID)
+    if not spellId then
+        return false
+    end
+
+    -- Search through all current aura tracking to see if this aura is held due to hover
+    for frameType, auras in pairs(self.auraTracking or {}) do
+        for _, aura in ipairs(auras) do
+            if aura and aura.spellId == spellId then
+                -- If we have an instance ID, match it exactly
+                if auraInstanceID and aura.auraInstanceID then
+                    if aura.auraInstanceID == auraInstanceID then
+                        -- Return true if this aura is marked as forceExpired (held on hover)
+                        return aura.forceExpired or false
+                    end
+                else
+                    -- No instance ID to match, check if any aura with this spell ID is held
+                    if aura.forceExpired then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+
+    return false
+end -- Check if a debuff application caused healing absorb increase
+
+function BoxxyAuras:CheckForHealingAbsorbIncrease(spellId, spellName)
+    local currentAmount = UnitGetTotalHealAbsorbs("player") or 0
+    local trackedAmount = self.healingAbsorbTracker.trackedAmount
+
+    if currentAmount > trackedAmount then
+        local increase = currentAmount - trackedAmount
+
+        -- This spell caused a healing absorb increase - mark it as confirmed
+        self.healingAbsorbTracker.confirmedAbsorbs[spellId] = {
+            spellName = spellName,
+            confirmedAt = GetTime(),
+            sampleIncrease = increase
+        }
+
+        -- Update our tracked amount
+        self.healingAbsorbTracker.trackedAmount = currentAmount
+
+        if BoxxyAuras.DEBUG then
+            print(string.format("BoxxyAuras: Confirmed healing absorb - %s (%d) increased absorbs by %d (total: %d)",
+                spellName or "Unknown", spellId, increase, currentAmount))
+        end
+
+        return true
+    end
+
+    return false
+end
+
+-- Handle healing absorb aura refresh - reset progress bars to full
+function BoxxyAuras:HandleHealingAbsorbRefresh(spellId, spellName)
+    if BoxxyAuras.DEBUG then
+        print(string.format("BoxxyAuras: Handling healing absorb refresh for %s (%d)", spellName or "Unknown", spellId))
+    end
+
+    -- First, check if this actually increased the total absorb amount
+    local currentAmount = UnitGetTotalHealAbsorbs("player") or 0
+    local trackedAmount = self.healingAbsorbTracker.trackedAmount
+    local actualIncrease = currentAmount - trackedAmount
+
+    if actualIncrease > 0 then
+        -- The refresh increased absorbs, treat as a new application
+        self.healingAbsorbTracker.trackedAmount = currentAmount
+
+        if BoxxyAuras.DEBUG then
+            print(string.format("BoxxyAuras: Refresh increased absorbs by %d (total: %d)", actualIncrease, currentAmount))
+        end
+    end
+
+    -- Find existing tracking data for this spell and refresh it
+    local refreshedTracking = false
+    local oldTrackingKeys = {}
+
+    -- First, collect all tracking keys for this spell ID
+    for trackingKey, trackingData in pairs(self.healingAbsorbTracking or {}) do
+        if trackingData.spellId == spellId then
+            table.insert(oldTrackingKeys, trackingKey)
+        end
+    end
+
+    if BoxxyAuras.DEBUG then
+        print(string.format("BoxxyAuras: Found %d existing tracking entries for spell %d", #oldTrackingKeys, spellId))
+    end
+
+    for _, trackingKey in ipairs(oldTrackingKeys) do
+        local trackingData = self.healingAbsorbTracking[trackingKey]
+        if trackingData then
+            -- Check if this tracking key corresponds to the current active aura
+            local isCurrentAura = self:IsHealingAbsorbAuraActive(trackingData.spellId, trackingData.auraInstanceID)
+
+            if isCurrentAura then
+                -- This is the current active aura, refresh it
+                local newAbsorbAmount = self:GetCurrentAbsorbAmountForSpell(spellId)
+
+                if newAbsorbAmount and newAbsorbAmount > 0 then
+                    -- Reset tracking data to full amount
+                    trackingData.initialAmount = newAbsorbAmount
+                    trackingData.currentAmount = newAbsorbAmount
+                    trackingData.lastUpdate = GetTime()
+                    trackingData.fullyConsumed = false
+
+                    -- Update the visual progress bar to show full (100%)
+                    self:UpdateHealingAbsorbVisuals(trackingKey, trackingData)
+
+                    refreshedTracking = true
+
+                    if BoxxyAuras.DEBUG then
+                        print(string.format("BoxxyAuras: Refreshed active tracking for key %s with new amount %d",
+                            tostring(trackingKey), newAbsorbAmount))
+                    end
+                else
+                    -- Fallback: Use the increase amount or estimate
+                    local refreshAmount = actualIncrease > 0 and actualIncrease or (trackingData.initialAmount or 100000)
+                    trackingData.initialAmount = refreshAmount
+                    trackingData.currentAmount = refreshAmount
+                    trackingData.lastUpdate = GetTime()
+                    trackingData.fullyConsumed = false
+
+                    self:UpdateHealingAbsorbVisuals(trackingKey, trackingData)
+                    refreshedTracking = true
+
+                    if BoxxyAuras.DEBUG then
+                        print(string.format("BoxxyAuras: Refreshed active tracking for key %s with fallback amount %d",
+                            tostring(trackingKey), refreshAmount))
+                    end
+                end
+            else
+                -- This is an old/inactive aura, remove its tracking
+                if BoxxyAuras.DEBUG then
+                    print(string.format("BoxxyAuras: Removing old tracking for key %s (inactive aura)",
+                        tostring(trackingKey)))
+                end
+                self:UpdateHealingAbsorbVisuals(trackingKey, nil) -- Hide progress bar
+                self.healingAbsorbTracking[trackingKey] = nil
+            end
+        end
+    end
+    if not refreshedTracking then
+        -- No existing tracking found, treat as new application
+        if BoxxyAuras.DEBUG then
+            print(string.format("BoxxyAuras: No existing tracking found for refresh, treating as new application"))
+        end
+        self:CheckForHealingAbsorbIncrease(spellId, spellName)
+    end
+end
+
+-- Get the current absorb amount for a specific spell ID from aura data
+function BoxxyAuras:GetCurrentAbsorbAmountForSpell(spellId)
+    -- Search through current aura tracking to find this spell
+    for frameType, auras in pairs(self.auraTracking or {}) do
+        for _, aura in ipairs(auras) do
+            if aura and aura.spellId == spellId and aura.auraType == "HARMFUL" then
+                -- Try to get absorb amount from aura points
+                if aura.points and type(aura.points) == "table" and #aura.points > 0 then
+                    for i, point in ipairs(aura.points) do
+                        if point and point > 0 then
+                            return point
+                        end
+                    end
+                end
+
+                -- Fallback: Try other methods to determine absorb amount
+                -- Could expand this with tooltip scanning if needed
+                break
+            end
+        end
+    end
+
+    return nil
+end
+
+-- Sync our tracking data with actual absorb amounts to prevent drift
+function BoxxyAuras:SyncTrackingWithActualAbsorbs()
+    local actualTotalAbsorbs = UnitGetTotalHealAbsorbs("player") or 0
+
+    -- Calculate what our tracking data thinks the total should be
+    local trackedTotal = 0
+    local activeTrackingData = {}
+    local inactiveTrackingKeys = {}
+
+    for trackingKey, trackingData in pairs(self.healingAbsorbTracking or {}) do
+        if trackingData.currentAmount and trackingData.currentAmount > 0 and not trackingData.fullyConsumed then
+            -- Only count tracking data for auras that are still active
+            local isActive = self:IsHealingAbsorbAuraActive(trackingData.spellId, trackingData.auraInstanceID)
+            local isHeld = self:IsHealingAbsorbAuraHeld(trackingData.spellId, trackingData.auraInstanceID)
+
+            if BoxxyAuras.DEBUG then
+                print(string.format("BoxxyAuras: Checking tracking key %s - current: %d, active: %s, held: %s",
+                    tostring(trackingKey), trackingData.currentAmount, tostring(isActive), tostring(isHeld)))
+            end
+
+            if isActive and not isHeld then
+                trackedTotal = trackedTotal + trackingData.currentAmount
+                table.insert(activeTrackingData, { key = trackingKey, data = trackingData })
+
+                if BoxxyAuras.DEBUG then
+                    print(string.format("BoxxyAuras: Added to active tracking - key: %s, amount: %d",
+                        tostring(trackingKey), trackingData.currentAmount))
+                end
+            else
+                -- Mark for cleanup if not active and not held
+                if not isActive and not isHeld then
+                    table.insert(inactiveTrackingKeys, trackingKey)
+                    if BoxxyAuras.DEBUG then
+                        print(string.format("BoxxyAuras: Marked inactive tracking key %s for cleanup",
+                            tostring(trackingKey)))
+                    end
+                end
+            end
+        else
+            -- Mark fully consumed or zero-amount tracking for cleanup
+            table.insert(inactiveTrackingKeys, trackingKey)
+            if BoxxyAuras.DEBUG then
+                print(string.format("BoxxyAuras: Marked consumed/zero tracking key %s for cleanup", tostring(trackingKey)))
+            end
+        end
+    end
+
+    -- Clean up inactive tracking data
+    for _, keyToRemove in ipairs(inactiveTrackingKeys) do
+        if self.healingAbsorbTracking[keyToRemove] then
+            if BoxxyAuras.DEBUG then
+                print(string.format("BoxxyAuras: Removing inactive tracking key %s", tostring(keyToRemove)))
+            end
+            -- Update visuals to hide the progress bar before removing
+            self:UpdateHealingAbsorbVisuals(keyToRemove, nil)
+            self.healingAbsorbTracking[keyToRemove] = nil
+        end
+    end
+    if BoxxyAuras.DEBUG then
+        print(string.format("BoxxyAuras: Sync check - Actual: %d, Tracked: %d, Difference: %d",
+            actualTotalAbsorbs, trackedTotal, actualTotalAbsorbs - trackedTotal))
+    end
+
+    -- If there's a significant difference, adjust our tracking proportionally
+    if trackedTotal > 0 and (math.abs(actualTotalAbsorbs - trackedTotal) > 100 or actualTotalAbsorbs == 0) then -- Much lower threshold + special case for 0
+        local adjustmentRatio = actualTotalAbsorbs / trackedTotal
+
+        if BoxxyAuras.DEBUG then
+            print(string.format(
+                "BoxxyAuras: Syncing tracking data with adjustment ratio: %.3f (actual: %d, tracked: %d)",
+                adjustmentRatio, actualTotalAbsorbs, trackedTotal))
+        end
+
+        for _, entry in ipairs(activeTrackingData) do
+            local oldAmount = entry.data.currentAmount
+            entry.data.currentAmount = math.floor(entry.data.currentAmount * adjustmentRatio)
+            entry.data.lastUpdate = GetTime()
+
+            -- Mark as consumed if amount reaches 0
+            if entry.data.currentAmount <= 0 then
+                entry.data.fullyConsumed = true
+            end
+
+            if BoxxyAuras.DEBUG then
+                print(string.format("BoxxyAuras: Adjusted tracking key %s: %d -> %d (consumed: %s)",
+                    tostring(entry.key), oldAmount, entry.data.currentAmount, tostring(entry.data.fullyConsumed or false)))
+            end
+        end
+    elseif trackedTotal == 0 and actualTotalAbsorbs == 0 then
+        -- Both are 0, no sync needed but update visuals for any expired/held auras
+        if BoxxyAuras.DEBUG then
+            print("BoxxyAuras: Both actual and tracked absorbs are 0, updating visuals for expired auras")
+        end
+
+        for trackingKey, trackingData in pairs(self.healingAbsorbTracking or {}) do
+            -- For any tracking data (including expired/held auras), ensure visuals show 0
+            self:UpdateHealingAbsorbVisuals(trackingKey, nil)
+        end
+    elseif trackedTotal > 0 and actualTotalAbsorbs == 0 then
+        -- All absorbs consumed, mark tracking as consumed
+        if BoxxyAuras.DEBUG then
+            print("BoxxyAuras: All absorbs consumed, marking tracking as consumed")
+        end
+
+        for _, entry in ipairs(activeTrackingData) do
+            entry.data.currentAmount = 0
+            entry.data.fullyConsumed = true
+            entry.data.lastUpdate = GetTime()
+        end
+
+        -- Also handle any other tracking data (expired/held auras)
+        for trackingKey, trackingData in pairs(self.healingAbsorbTracking or {}) do
+            self:UpdateHealingAbsorbVisuals(trackingKey, nil)
+        end
+    end
+end
+
+-- Check if an aura is a confirmed healing absorb
+function BoxxyAuras:IsConfirmedHealingAbsorb(spellId)
+    if not spellId then return false end
+
+    local confirmed = self.healingAbsorbTracker.confirmedAbsorbs[spellId]
+    if confirmed then
+        -- Keep confirmed absorbs for 10 minutes
+        if GetTime() - confirmed.confirmedAt < 600 then
+            return true
+        else
+            -- Clean up old confirmations
+            self.healingAbsorbTracker.confirmedAbsorbs[spellId] = nil
+        end
+    end
+
+    return false
+end -- Debug function to trace expired aura handling
+
 function BoxxyAuras:DebugExpiredAuras(frameType)
     if not self.DEBUG then
         return

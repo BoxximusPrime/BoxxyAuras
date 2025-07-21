@@ -829,11 +829,6 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, overrideNumIconsW
     local iconsToDisplay = BoxxyAuras.iconArrays[frameType] or {}
     local numAuras = #iconsToDisplay
 
-    if BoxxyAuras.DEBUG then
-        print(string.format("UpdateAurasInFrame (%s): Laying out %d auras, %d wide. Grow: %s, Wrap: %s",
-            frameType, numAuras, numIconsWide, growDirection, wrapDirection))
-    end
-
     -- Calculate total dimensions and positioning values
     local framePadding = BoxxyAuras.Config.FramePadding or 6
     local internalPadding = BoxxyAuras.Config.Padding or 6
@@ -861,11 +856,6 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, overrideNumIconsW
 
     -- Only resize if needed to avoid redundant operations
     if math.abs(currentWidth - requiredWidth) > 0.5 or math.abs(currentHeight - requiredHeight) > 0.5 then
-        if BoxxyAuras.DEBUG then
-            print(string.format("UpdateAurasInFrame (%s): Resizing frame from %.1fx%.1f to %.1fx%.1f",
-                frameType, currentWidth, currentHeight, requiredWidth, requiredHeight))
-        end
-
         -- Store the current position before resizing
         local left, top, bottom
         if wrapDirection == "UP" then
@@ -985,14 +975,8 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, overrideNumIconsW
             local xPos = rowStartX + (col * slotW * xMult)
             local yPos = startY + (row * slotH * yMult)
 
-            if icon.frame:IsShown() then            -- Only reposition visible icons
+            if icon.frame:IsShown() then -- Only reposition visible icons
                 icon.frame:ClearAllPoints()
-                if BoxxyAuras.DEBUG and i <= 2 then -- Limit debug spam
-                    print(string.format(
-                        "  -> Placing icon %d (%s) at [%d, %d] -> (%.1f, %.1f) anchored to %s of parent (alignment: %s, offset: %.1f, actualIndex: %d)",
-                        i, tostring(icon.name), col, row, xPos, yPos, anchorPoint, alignment, alignmentOffset,
-                        actualIndex))
-                end
                 PixelUtilCompat.SetPoint(icon.frame, anchorPoint, frame, anchorPoint, xPos, yPos)
             end
         end
@@ -1163,30 +1147,31 @@ function BoxxyAuras.FrameHandler.ApplySettings(frameType, resetPosition_IGNORED)
     if alignment == "RIGHT" then
         local currentWidth = frame:GetWidth()
         local widthDelta = frameWidth - currentWidth
-        
+
         -- Only do special handling if the width is actually changing
         if math.abs(widthDelta) > 0.1 then
             -- Get current position
             local point, relativeTo, relativePoint, xOfs, yOfs = frame:GetPoint()
-            
+
             if point and relativeTo and relativePoint then
                 -- Calculate current right edge position
                 local currentLeft = frame:GetLeft()
                 local currentRightEdge = currentLeft + currentWidth
-                
+
                 -- Set the new width
                 frame:SetWidth(frameWidth)
-                
+
                 -- Calculate the new X offset to maintain the right edge position
                 -- We adjust the existing offset by the width change
                 local newXOfs = xOfs - widthDelta
-                
+
                 -- Clear points and reposition using the original anchor point
                 frame:ClearAllPoints()
                 frame:SetPoint(point, relativeTo, relativePoint, newXOfs, yOfs)
-                
+
                 if BoxxyAuras.DEBUG then
-                    print(string.format("Right-aligned frame %s: width %.1f -> %.1f, adjusted X offset by %.1f (%.1f -> %.1f)", 
+                    print(string.format(
+                        "Right-aligned frame %s: width %.1f -> %.1f, adjusted X offset by %.1f (%.1f -> %.1f)",
                         frameType, currentWidth, frameWidth, -widthDelta, xOfs, newXOfs))
                 end
             else
