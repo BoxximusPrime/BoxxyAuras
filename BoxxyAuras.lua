@@ -2,7 +2,7 @@ local addonNameString, privateTable = ... -- Use different names for the local v
 _G.BoxxyAuras = _G.BoxxyAuras or {}       -- Explicitly create/assign the GLOBAL table
 local BoxxyAuras = _G.BoxxyAuras          -- Create a convenient local alias to the global table
 
-BoxxyAuras.Version = "1.5.3"
+BoxxyAuras.Version = "1.5.4"
 
 BoxxyAuras.AllAuras = {}              -- Global cache for aura info
 BoxxyAuras.recentAuraEvents = {}      -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
@@ -19,6 +19,7 @@ BoxxyAuras.HoveredFrame = nil
 BoxxyAuras.DEBUG = false
 BoxxyAuras.lastCacheCleanup = 0    -- Track when we last cleaned the cache
 BoxxyAuras.weaponEnchantCache = {} -- Cache weapon enchant information by slot
+BoxxyAuras.auraFirstSeenTimes = {} -- Persistent tracking of when auras were first seen (NEVER gets reset)
 
 -- Previous Lock State Tracker
 BoxxyAuras.WasLocked = nil
@@ -780,74 +781,122 @@ BoxxyAuras.UpdateSingleFrameAuras = function(frameType)
         end
     end
 
-    -- Create a lookup of existing aura instance IDs for efficient matching
-    local existingAuraLookup = {}
+    -- Build lookups for matching auras
+    local existingAuraByInstanceId = {}
+    local existingExpiredBySpellId = {}
     for i, auraData in ipairs(trackedAuras) do
         if auraData and auraData.auraInstanceID then
-            existingAuraLookup[auraData.auraInstanceID] = { data = auraData, visualIndex = i }
+            existingAuraByInstanceId[auraData.auraInstanceID] = i
+            -- Track expired auras by spell ID for replacement
+            if auraData.forceExpired and auraData.spellId then
+                if not existingExpiredBySpellId[auraData.spellId] then
+                    existingExpiredBySpellId[auraData.spellId] = i
+                end
+            end
         end
     end
 
+    -- Build lookup for new auras
+    local newAuraByInstanceId = {}
+    local newAuraBySpellId = {}
+    for _, auraData in ipairs(newAuraList) do
+        if auraData.auraInstanceID then
+            newAuraByInstanceId[auraData.auraInstanceID] = auraData
+        end
+        if auraData.spellId and not auraData.forceExpired then
+            newAuraBySpellId[auraData.spellId] = auraData
+        end
+    end
+
+    -- Start building the new arrays by copying existing ones
     local newTrackedAuras = {}
     local newIconArray = {}
-    local usedIcons = {} -- Keep track of icons from the old array that are being kept
+    local processedNewAuras = {} -- Track which new auras we've already processed
+    local nextPosition = 0       -- Track the next available position in the compact array
 
-    -- Filter out forceExpired auras if we shouldn't hold them anymore
-    local filteredAuraList = {}
-    for _, auraData in ipairs(newAuraList) do
-        -- Only include forceExpired auras if we should still hold them
-        if auraData.forceExpired and not shouldHoldExpiredAuras then
-            if BoxxyAuras.DEBUG then
-                print(string.format("Single frame: Filtering out forceExpired aura '%s' from frame %s (hover ended)",
-                    auraData.name or "Unknown", frameType))
+    -- STEP 1: Update existing auras in place (preserving their positions)
+    for i, existingAura in ipairs(trackedAuras) do
+        local matchingNewAura = nil
+        local matchedByInstanceId = false
+
+        -- Try to match by instance ID first
+        if existingAura.auraInstanceID then
+            matchingNewAura = newAuraByInstanceId[existingAura.auraInstanceID]
+            if matchingNewAura and not processedNewAuras[matchingNewAura.auraInstanceID] then
+                matchedByInstanceId = true
+                -- Mark as processed immediately to prevent duplicates
+                processedNewAuras[matchingNewAura.auraInstanceID] = true
+            elseif matchingNewAura then
+                -- This instance ID was already processed (e.g., matched by spell ID for an expired aura)
+                matchingNewAura = nil
             end
-            -- Skip this aura
+        end
+
+        -- If expired and no instance match, try to match by spell ID (for expired aura replacements)
+        -- Only match by spell ID for EXPIRED auras, not active ones
+        if not matchingNewAura and existingAura.forceExpired and existingAura.spellId then
+            matchingNewAura = newAuraBySpellId[existingAura.spellId]
+            if matchingNewAura and not processedNewAuras[matchingNewAura.auraInstanceID] then
+                -- Mark this aura as processed immediately to prevent duplicate matching
+                processedNewAuras[matchingNewAura.auraInstanceID] = true
+                if BoxxyAuras.DEBUG then
+                    print(string.format(
+                        "Single frame: Replacing expired '%s' (spellId=%d) with fresh cast (instanceId=%d)",
+                        existingAura.name or "Unknown", existingAura.spellId or 0, matchingNewAura.auraInstanceID or 0))
+                end
+            elseif matchingNewAura then
+                -- This spell ID match was already used
+                matchingNewAura = nil
+            end
+        end
+
+        if matchingNewAura then
+            -- Add to the next position in the compact array
+            nextPosition = nextPosition + 1
+            newTrackedAuras[nextPosition] = matchingNewAura
+            newIconArray[nextPosition] = iconArray[i] -- Keep the same icon
+
+            -- Update the icon display
+            -- Only treat as new if we matched by spell ID (expired aura replacement)
+            local isNewAura = not matchedByInstanceId
+            iconArray[i]:Display(matchingNewAura, nextPosition, matchingNewAura.auraType, isNewAura)
+            iconArray[i].frame:Show()
+        elseif existingAura.forceExpired and shouldHoldExpiredAuras then
+            -- Keep the expired aura in place (we're hovering)
+            nextPosition = nextPosition + 1
+            newTrackedAuras[nextPosition] = existingAura
+            newIconArray[nextPosition] = iconArray[i]
+            iconArray[i]:Display(existingAura, nextPosition, existingAura.auraType, false)
+            iconArray[i].frame:Show()
         else
-            table.insert(filteredAuraList, auraData)
+            -- This aura no longer exists and shouldn't be held - return icon to pool
+            BoxxyAuras.ReturnIconToPool(iconPool, iconArray[i])
         end
     end
 
-    -- Iterate through the FILTERED list of auras
-    for i, newAuraData in ipairs(filteredAuraList) do
-        local newInstanceID = newAuraData.auraInstanceID
-        local existing = existingAuraLookup[newInstanceID]
-        local icon
-        local isNewAura = false
+    -- STEP 2: Append any truly new auras to the end
+    for _, newAura in ipairs(newAuraList) do
+        if not processedNewAuras[newAura.auraInstanceID] and not newAura.forceExpired then
+            -- This is a brand new aura - append it
+            local newPosition = #newTrackedAuras + 1
+            local icon = BoxxyAuras.GetOrCreateIcon(iconPool, newPosition, frame, "BoxxyAuras" .. frameType .. "Icon")
 
-        if existing then
-            -- Aura already exists, reuse its icon
-            icon = iconArray[existing.visualIndex]
-            usedIcons[existing.visualIndex] = true
-        else
-            -- This is a completely new aura, get an icon from the pool
-            icon = BoxxyAuras.GetOrCreateIcon(iconPool, i, frame, "BoxxyAuras" .. frameType .. "Icon")
-            isNewAura = true
+            newTrackedAuras[newPosition] = newAura
+            newIconArray[newPosition] = icon
 
-            -- Trigger tooltip scrape for the new aura (skip weapon enchants)
-            if newAuraData.auraInstanceID and not newAuraData.isWeaponEnchant and BoxxyAuras.AttemptTooltipScrape then
-                local filter = newAuraData.auraType or (frameType == "Debuff" and "HARMFUL" or "HELPFUL")
-                BoxxyAuras.AttemptTooltipScrape(newAuraData.spellId, newAuraData.auraInstanceID, filter)
-            end
-        end
-
-        if icon then
-            if BoxxyAuras.DEBUG and newAuraData.forceExpired then
-                print(string.format("Updating icon for expired aura '%s' with forceExpired = %s",
-                    newAuraData.name or "Unknown", tostring(newAuraData.forceExpired)))
-            end
-            icon:Display(newAuraData, i, newAuraData.auraType, isNewAura)
+            icon:Display(newAura, newPosition, newAura.auraType, true)
             icon.frame:Show()
-            newIconArray[i] = icon
-        end
 
-        -- The new list of tracked auras is the filtered list
-        newTrackedAuras[i] = newAuraData
-    end
+            -- Trigger tooltip scrape for new auras
+            if newAura.auraInstanceID and not newAura.isWeaponEnchant and BoxxyAuras.AttemptTooltipScrape then
+                local filter = newAura.auraType or (frameType == "Debuff" and "HARMFUL" or "HELPFUL")
+                BoxxyAuras.AttemptTooltipScrape(newAura.spellId, newAura.auraInstanceID, filter)
+            end
 
-    -- Return any unused icons to the pool
-    for i, icon in ipairs(iconArray) do
-        if not usedIcons[i] then
-            BoxxyAuras.ReturnIconToPool(iconPool, icon)
+            if BoxxyAuras.DEBUG then
+                print(string.format("Single frame: Appended new aura '%s' at position %d",
+                    newAura.name or "Unknown", newPosition))
+            end
         end
     end
 
@@ -1132,78 +1181,128 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
                 end
             end
 
-            -- Create a lookup of existing aura instance IDs for efficient matching
-            local existingAuraLookup = {}
+            -- Build lookups for matching auras
+            local existingAuraByInstanceId = {}
+            local existingExpiredBySpellId = {}
             for i, auraData in ipairs(trackedAuras) do
                 if auraData and auraData.auraInstanceID then
-                    existingAuraLookup[auraData.auraInstanceID] = { data = auraData, visualIndex = i }
+                    existingAuraByInstanceId[auraData.auraInstanceID] = i
+                    -- Track expired auras by spell ID for replacement
+                    if auraData.forceExpired and auraData.spellId then
+                        if not existingExpiredBySpellId[auraData.spellId] then
+                            existingExpiredBySpellId[auraData.spellId] = i
+                        end
+                    end
                 end
             end
 
+            -- Build lookup for new auras (exclude expired auras we're holding)
+            local newAuraByInstanceId = {}
+            local newAuraBySpellId = {}
+            for _, auraData in ipairs(newAuraList) do
+                if auraData.auraInstanceID and not auraData.forceExpired then
+                    newAuraByInstanceId[auraData.auraInstanceID] = auraData
+                end
+                if auraData.spellId and not auraData.forceExpired then
+                    newAuraBySpellId[auraData.spellId] = auraData
+                end
+            end
+
+            -- Start building the new arrays by copying existing ones
             local newTrackedAuras = {}
             local newIconArray = {}
-            local usedIcons = {} -- Keep track of icons from the old array that are being kept
+            local processedNewAuras = {} -- Track which new auras we've already processed
+            local nextPosition = 0       -- Track the next available position in the compact array
 
-            -- Filter out forceExpired auras if we shouldn't hold them anymore
-            local filteredAuraList = {}
-            for _, auraData in ipairs(newAuraList) do
-                -- Only include forceExpired auras if we should still hold them
-                if auraData.forceExpired and not shouldHoldExpiredAuras then
-                    if BoxxyAuras.DEBUG then
-                        print(string.format("Filtering out forceExpired aura '%s' from frame %s (hover ended)",
-                            auraData.name or "Unknown", frameType))
+            -- STEP 1: Update existing auras in place (preserving their positions)
+            for i, existingAura in ipairs(trackedAuras) do
+                local matchingNewAura = nil
+                local matchedByInstanceId = false
+
+                -- Try to match by instance ID first
+                if existingAura.auraInstanceID then
+                    matchingNewAura = newAuraByInstanceId[existingAura.auraInstanceID]
+                    if matchingNewAura and not processedNewAuras[matchingNewAura.auraInstanceID] then
+                        matchedByInstanceId = true
+                        -- Mark as processed immediately to prevent duplicates
+                        processedNewAuras[matchingNewAura.auraInstanceID] = true
+                    elseif matchingNewAura then
+                        -- This instance ID was already processed (e.g., matched by spell ID for an expired aura)
+                        matchingNewAura = nil
                     end
-                    -- Skip this aura
+                end
+
+                -- If expired and no instance match, try to match by spell ID (for expired aura replacements)
+                -- Only match by spell ID for EXPIRED auras, not active ones
+                if not matchingNewAura and existingAura.forceExpired and existingAura.spellId then
+                    matchingNewAura = newAuraBySpellId[existingAura.spellId]
+                    if matchingNewAura and not processedNewAuras[matchingNewAura.auraInstanceID] then
+                        -- Mark this aura as processed immediately to prevent duplicate matching
+                        processedNewAuras[matchingNewAura.auraInstanceID] = true
+                        if BoxxyAuras.DEBUG then
+                            print(string.format(
+                                "UpdateAuras: Replacing expired '%s' (spellId=%d) with fresh cast (instanceId=%d)",
+                                existingAura.name or "Unknown", existingAura.spellId or 0,
+                                matchingNewAura.auraInstanceID or 0))
+                        end
+                    elseif matchingNewAura then
+                        -- This spell ID match was already used
+                        matchingNewAura = nil
+                    end
+                end
+
+                if matchingNewAura then
+                    -- Add to the next position in the compact array
+                    nextPosition = nextPosition + 1
+                    newTrackedAuras[nextPosition] = matchingNewAura
+                    newIconArray[nextPosition] = iconArray[i] -- Keep the same icon
+
+                    -- Update the icon display
+                    -- Only treat as new if we matched by spell ID (expired aura replacement)
+                    local isNewAura = not matchedByInstanceId
+                    iconArray[i]:Display(matchingNewAura, nextPosition, matchingNewAura.auraType, isNewAura)
+                    iconArray[i].frame:Show()
+                elseif existingAura.forceExpired and shouldHoldExpiredAuras then
+                    -- Keep the expired aura in place (we're hovering)
+                    nextPosition = nextPosition + 1
+                    newTrackedAuras[nextPosition] = existingAura
+                    newIconArray[nextPosition] = iconArray[i]
+                    iconArray[i]:Display(existingAura, nextPosition, existingAura.auraType, false)
+                    iconArray[i].frame:Show()
                 else
-                    table.insert(filteredAuraList, auraData)
+                    -- This aura no longer exists and shouldn't be held - return icon to pool
+                    BoxxyAuras.ReturnIconToPool(iconPool, iconArray[i])
                 end
             end
 
-            -- 1. Iterate through the FILTERED list of auras
-            for i, newAuraData in ipairs(filteredAuraList) do
-                local newInstanceID = newAuraData.auraInstanceID
-                local existing = existingAuraLookup[newInstanceID]
-                local icon
-                local isNewAura = false
+            -- STEP 2: Append any truly new auras to the end
+            for _, newAura in ipairs(newAuraList) do
+                if not processedNewAuras[newAura.auraInstanceID] and not newAura.forceExpired then
+                    -- This is a brand new aura - append it
+                    local newPosition = #newTrackedAuras + 1
+                    local icon = BoxxyAuras.GetOrCreateIcon(iconPool, newPosition, frame,
+                        "BoxxyAuras" .. frameType .. "Icon")
 
-                if existing then
-                    -- Aura already exists, reuse its icon
-                    icon = iconArray[existing.visualIndex]
-                    usedIcons[existing.visualIndex] = true
-                else
-                    -- This is a completely new aura, get an icon from the pool
-                    icon = BoxxyAuras.GetOrCreateIcon(iconPool, i, frame, "BoxxyAuras" .. frameType .. "Icon")
-                    isNewAura = true
+                    newTrackedAuras[newPosition] = newAura
+                    newIconArray[newPosition] = icon
 
-                    -- Trigger tooltip scrape for the new aura (skip weapon enchants)
-                    if newAuraData.auraInstanceID and not newAuraData.isWeaponEnchant and BoxxyAuras.AttemptTooltipScrape then
-                        local filter = newAuraData.auraType or (frameType == "Debuff" and "HARMFUL" or "HELPFUL")
-                        BoxxyAuras.AttemptTooltipScrape(newAuraData.spellId, newAuraData.auraInstanceID, filter)
-                    end
-                end
-
-                if icon then
-                    if BoxxyAuras.DEBUG and newAuraData.forceExpired then
-                        print(string.format("Updating icon for expired aura '%s' with forceExpired = %s",
-                            newAuraData.name or "Unknown", tostring(newAuraData.forceExpired)))
-                    end
-                    icon:Display(newAuraData, i, newAuraData.auraType, isNewAura)
+                    icon:Display(newAura, newPosition, newAura.auraType, true)
                     icon.frame:Show()
-                    newIconArray[i] = icon
-                end
 
-                -- The new list of tracked auras is the filtered list
-                newTrackedAuras[i] = newAuraData
+                    -- Trigger tooltip scrape for new auras
+                    if newAura.auraInstanceID and not newAura.isWeaponEnchant and BoxxyAuras.AttemptTooltipScrape then
+                        local filter = newAura.auraType or (frameType == "Debuff" and "HARMFUL" or "HELPFUL")
+                        BoxxyAuras.AttemptTooltipScrape(newAura.spellId, newAura.auraInstanceID, filter)
+                    end
+
+                    if BoxxyAuras.DEBUG then
+                        print(string.format("UpdateAuras: Appended new aura '%s' at position %d",
+                            newAura.name or "Unknown", newPosition))
+                    end
+                end
             end
 
-            -- 2. Return any unused icons to the pool
-            for i, icon in ipairs(iconArray) do
-                if not usedIcons[i] then
-                    BoxxyAuras.ReturnIconToPool(iconPool, icon)
-                end
-            end
-
-            -- 3. Replace the old tracking lists with the new ones
+            -- Replace the old tracking lists with the new ones
             BoxxyAuras.auraTracking[frameType] = newTrackedAuras
             BoxxyAuras.iconArrays[frameType] = newIconArray
         else
@@ -1251,7 +1350,7 @@ function BoxxyAuras.ReturnIconToPool(pool, icon)
 end
 
 -- Add weapon enchants to the aura list
-function BoxxyAuras:AddWeaponEnchantsToAuraList(allAuras, existingTrackTimes)
+function BoxxyAuras:AddWeaponEnchantsToAuraList(allAuras)
     -- GetWeaponEnchantInfo returns info for all weapon slots
     local hasMainHandEnchant, mainHandExpiration, mainHandCharges, mainHandEnchantID,
     hasOffHandEnchant, offHandExpiration, offHandCharges, offHandEnchantID,
@@ -1260,7 +1359,7 @@ function BoxxyAuras:AddWeaponEnchantsToAuraList(allAuras, existingTrackTimes)
     -- Main hand weapon enchant
     if hasMainHandEnchant and mainHandExpiration and mainHandExpiration > 0 then
         local enchantData = self:CreateWeaponEnchantAuraData("mainhand", mainHandExpiration, mainHandCharges,
-            mainHandEnchantID, existingTrackTimes)
+            mainHandEnchantID)
         if enchantData then
             table.insert(allAuras, enchantData)
             if self.DEBUG then
@@ -1273,7 +1372,7 @@ function BoxxyAuras:AddWeaponEnchantsToAuraList(allAuras, existingTrackTimes)
     -- Off hand weapon enchant
     if hasOffHandEnchant and offHandExpiration and offHandExpiration > 0 then
         local enchantData = self:CreateWeaponEnchantAuraData("offhand", offHandExpiration, offHandCharges,
-            offHandEnchantID, existingTrackTimes)
+            offHandEnchantID)
         if enchantData then
             table.insert(allAuras, enchantData)
             if self.DEBUG then
@@ -1285,8 +1384,7 @@ function BoxxyAuras:AddWeaponEnchantsToAuraList(allAuras, existingTrackTimes)
 
     -- Ranged weapon enchant (for older expansions)
     if hasRangedEnchant and rangedExpiration and rangedExpiration > 0 then
-        local enchantData = self:CreateWeaponEnchantAuraData("ranged", rangedExpiration, rangedCharges, rangedEnchantID,
-            existingTrackTimes)
+        local enchantData = self:CreateWeaponEnchantAuraData("ranged", rangedExpiration, rangedCharges, rangedEnchantID)
         if enchantData then
             table.insert(allAuras, enchantData)
             if self.DEBUG then
@@ -1303,12 +1401,18 @@ function BoxxyAuras:AddWeaponEnchantsToAuraList(allAuras, existingTrackTimes)
 end
 
 -- Create aura data structure for weapon enchants
-function BoxxyAuras:CreateWeaponEnchantAuraData(slot, expiration, charges, enchantID, existingTrackTimes)
+function BoxxyAuras:CreateWeaponEnchantAuraData(slot, expiration, charges, enchantID)
     -- Generate a unique instance ID for weapon enchants
     local instanceId = "weapon_enchant_" .. slot .. "_" .. (enchantID or 0)
 
-    -- Look up existing track time from the provided lookup table
-    local cachedTrackTime = existingTrackTimes and existingTrackTimes[instanceId]
+    -- Use persistent first-seen time to prevent re-sorting
+    if not self.auraFirstSeenTimes then
+        self.auraFirstSeenTimes = {}
+    end
+    if not self.auraFirstSeenTimes[instanceId] then
+        self.auraFirstSeenTimes[instanceId] = GetTime()
+    end
+    local originalTrackTime = self.auraFirstSeenTimes[instanceId]
 
     -- For weapon enchants, we just get the weapon information
     -- Following Blizzard's UI pattern: show weapon icon and weapon tooltip
@@ -1350,10 +1454,6 @@ function BoxxyAuras:CreateWeaponEnchantAuraData(slot, expiration, charges, encha
     else
         return nil -- No valid expiration means no enchant
     end
-
-    -- Use cached originalTrackTime if available, otherwise set to current time for new enchants
-    -- This keeps weapon enchants in a stable position in the sort order
-    local originalTrackTime = cachedTrackTime or GetTime()
 
     return {
         name = displayName, -- Color-coded weapon name
@@ -1714,14 +1814,9 @@ function BoxxyAuras:GetSortedAurasForFrame(frameType)
     local allAuras = {}
     local currentSettings = self:GetCurrentProfileSettings()
 
-    -- Build a lookup of existing originalTrackTime values to preserve sort order
-    local existingTrackTimes = {}
-    if self.auraTracking and self.auraTracking[frameType] then
-        for _, trackedAura in ipairs(self.auraTracking[frameType]) do
-            if trackedAura.auraInstanceID and trackedAura.originalTrackTime then
-                existingTrackTimes[trackedAura.auraInstanceID] = trackedAura.originalTrackTime
-            end
-        end
+    -- Initialize the global auraFirstSeenTimes table if it doesn't exist
+    if not self.auraFirstSeenTimes then
+        self.auraFirstSeenTimes = {}
     end
 
     -- Determine which auras to fetch based on demo mode
@@ -1760,8 +1855,11 @@ function BoxxyAuras:GetSortedAurasForFrame(frameType)
                         if auraData then
                             auraData.slot = slot
                             auraData.auraType = filter
-                            -- Preserve originalTrackTime from existing tracked auras, or set to current time for new auras
-                            auraData.originalTrackTime = existingTrackTimes[auraData.auraInstanceID] or GetTime()
+                            -- Use persistent first-seen time to prevent re-sorting
+                            if not self.auraFirstSeenTimes[auraData.auraInstanceID] then
+                                self.auraFirstSeenTimes[auraData.auraInstanceID] = GetTime()
+                            end
+                            auraData.originalTrackTime = self.auraFirstSeenTimes[auraData.auraInstanceID]
                             table.insert(allAuras, auraData)
                         end
                     end
@@ -1769,7 +1867,7 @@ function BoxxyAuras:GetSortedAurasForFrame(frameType)
             end
 
             -- Add weapon enchants for custom frames (they can show as helpful effects)
-            self:AddWeaponEnchantsToAuraList(allAuras, existingTrackTimes)
+            self:AddWeaponEnchantsToAuraList(allAuras)
         else
             -- For Buff/Debuff, fetch only the specific type
             local filter = (frameType == "Debuff") and "HARMFUL" or "HELPFUL"
@@ -1781,8 +1879,11 @@ function BoxxyAuras:GetSortedAurasForFrame(frameType)
                     if auraData then
                         auraData.slot = slot
                         auraData.auraType = filter
-                        -- Preserve originalTrackTime from existing tracked auras, or set to current time for new auras
-                        auraData.originalTrackTime = existingTrackTimes[auraData.auraInstanceID] or GetTime()
+                        -- Use persistent first-seen time to prevent re-sorting
+                        if not self.auraFirstSeenTimes[auraData.auraInstanceID] then
+                            self.auraFirstSeenTimes[auraData.auraInstanceID] = GetTime()
+                        end
+                        auraData.originalTrackTime = self.auraFirstSeenTimes[auraData.auraInstanceID]
                         table.insert(allAuras, auraData)
                     end
                 end
@@ -1790,7 +1891,7 @@ function BoxxyAuras:GetSortedAurasForFrame(frameType)
 
             -- Add weapon enchants to Buff frames (they are helpful effects)
             if filter == "HELPFUL" then
-                self:AddWeaponEnchantsToAuraList(allAuras, existingTrackTimes)
+                self:AddWeaponEnchantsToAuraList(allAuras)
             end
         end
     end
