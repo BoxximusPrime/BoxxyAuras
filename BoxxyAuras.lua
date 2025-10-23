@@ -2,7 +2,7 @@ local addonNameString, privateTable = ... -- Use different names for the local v
 _G.BoxxyAuras = _G.BoxxyAuras or {}       -- Explicitly create/assign the GLOBAL table
 local BoxxyAuras = _G.BoxxyAuras          -- Create a convenient local alias to the global table
 
-BoxxyAuras.Version = "1.5.2"
+BoxxyAuras.Version = "1.5.3"
 
 BoxxyAuras.AllAuras = {}              -- Global cache for aura info
 BoxxyAuras.recentAuraEvents = {}      -- Queue for recent combat log aura events {spellId, sourceGUID, timestamp}
@@ -17,7 +17,8 @@ BoxxyAuras.iconArrays = {}            -- << ADDED: Table to store live icon obje
 BoxxyAuras.auraTracking = {}          -- << ADDED: Table to track aura data
 BoxxyAuras.HoveredFrame = nil
 BoxxyAuras.DEBUG = false
-BoxxyAuras.lastCacheCleanup = 0 -- Track when we last cleaned the cache
+BoxxyAuras.lastCacheCleanup = 0    -- Track when we last cleaned the cache
+BoxxyAuras.weaponEnchantCache = {} -- Cache weapon enchant information by slot
 
 -- Previous Lock State Tracker
 BoxxyAuras.WasLocked = nil
@@ -221,7 +222,10 @@ local function SortAurasForDisplay(a, b)
     local bTrackTime = b.originalTrackTime or 0
     if aTrackTime == bTrackTime then
         -- Use auraInstanceID as a stable tiebreaker if track times are identical (unlikely but possible)
-        return (a.auraInstanceID or 0) < (b.auraInstanceID or 0)
+        -- Handle mixed string/number types by converting to string for comparison
+        local aInstanceID = tostring(a.auraInstanceID or "0")
+        local bInstanceID = tostring(b.auraInstanceID or "0")
+        return aInstanceID < bInstanceID
     end
     return aTrackTime < bTrackTime
 end
@@ -292,6 +296,7 @@ function BoxxyAuras:GetDefaultProfileSettings()
         hideBlizzardAuras = true,
         showHoverBorder = true,           -- Enable hover border by default
         enableDotTickingAnimation = true, -- Enable dot ticking animation by default
+        showInfiniteDuration = true,      -- Show ∞ symbol for infinite duration auras by default
         auraBarScale = 1.0,
         optionsWindowScale = 1.0,
         textFont = "OpenSans SemiBold",                                    -- Default font for aura text (matches BoxxyAuras_DurationTxt)
@@ -504,6 +509,9 @@ function BoxxyAuras:GetCurrentProfileSettings()
     end
     if profile.showHoverBorder == nil then
         profile.showHoverBorder = true
+    end
+    if profile.showInfiniteDuration == nil then
+        profile.showInfiniteDuration = true
     end
 
     if profile.buffFrameSettings.buffTextAlign == nil then
@@ -733,17 +741,28 @@ BoxxyAuras.UpdateSingleFrameAuras = function(frameType)
     local shouldHoldExpiredAuras = BoxxyAuras.FrameHoverStates[frameType] or BoxxyAuras.FrameHoverTimers[frameKey]
 
     if shouldHoldExpiredAuras then
-        for _, trackedAura in ipairs(trackedAuras) do
+        -- Build a list of expired auras with their original positions
+        local expiredAurasWithPositions = {}
+        for i, trackedAura in ipairs(trackedAuras) do
             if trackedAura and not newAuraLookup[trackedAura.auraInstanceID] then
                 -- This aura expired and we are (or were recently) hovering the frame, so hold it.
                 trackedAura.forceExpired = true
-                table.insert(newAuraList, trackedAura)
+                table.insert(expiredAurasWithPositions, { aura = trackedAura, originalIndex = i })
                 newAuraLookup[trackedAura.auraInstanceID] = true -- Add to lookup to prevent re-adding
                 if BoxxyAuras.DEBUG then
-                    print(string.format("Single frame update: Holding expired aura '%s' in frame %s",
-                        trackedAura.name or "Unknown", frameType))
+                    print(string.format("Single frame update: Holding expired aura '%s' in frame %s at position %d",
+                        trackedAura.name or "Unknown", frameType, i))
                 end
             end
+        end
+
+        -- Insert expired auras back at their original positions
+        -- Sort by originalIndex in descending order to insert from back to front (avoids index shifting issues)
+        table.sort(expiredAurasWithPositions, function(a, b) return a.originalIndex > b.originalIndex end)
+        for _, expiredData in ipairs(expiredAurasWithPositions) do
+            -- Insert at the original position, but clamp to list bounds
+            local insertPos = math.min(expiredData.originalIndex, #newAuraList + 1)
+            table.insert(newAuraList, insertPos, expiredData.aura)
         end
     else
         -- Clean up any forceExpired auras when hover state ends
@@ -760,9 +779,6 @@ BoxxyAuras.UpdateSingleFrameAuras = function(frameType)
             end
         end
     end
-
-    -- Re-sort the list if we added expired auras, to maintain order
-    table.sort(newAuraList, SortAurasForDisplay)
 
     -- Create a lookup of existing aura instance IDs for efficient matching
     local existingAuraLookup = {}
@@ -807,8 +823,8 @@ BoxxyAuras.UpdateSingleFrameAuras = function(frameType)
             icon = BoxxyAuras.GetOrCreateIcon(iconPool, i, frame, "BoxxyAuras" .. frameType .. "Icon")
             isNewAura = true
 
-            -- Trigger tooltip scrape for the new aura
-            if newAuraData.auraInstanceID and BoxxyAuras.AttemptTooltipScrape then
+            -- Trigger tooltip scrape for the new aura (skip weapon enchants)
+            if newAuraData.auraInstanceID and not newAuraData.isWeaponEnchant and BoxxyAuras.AttemptTooltipScrape then
                 local filter = newAuraData.auraType or (frameType == "Debuff" and "HARMFUL" or "HELPFUL")
                 BoxxyAuras.AttemptTooltipScrape(newAuraData.spellId, newAuraData.auraInstanceID, filter)
             end
@@ -1074,19 +1090,31 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
                 BoxxyAuras.FrameHoverTimers[frameKey]
 
             if shouldHoldExpiredAuras then
-                for _, trackedAura in ipairs(trackedAuras) do
+                -- Build a list of expired auras with their original positions
+                local expiredAurasWithPositions = {}
+                for i, trackedAura in ipairs(trackedAuras) do
                     if trackedAura and not newAuraLookup[trackedAura.auraInstanceID] then
                         -- This aura expired and we are (or were recently) hovering the frame, so hold it.
                         trackedAura.forceExpired = true
-                        table.insert(newAuraList, trackedAura)
+                        table.insert(expiredAurasWithPositions, { aura = trackedAura, originalIndex = i })
                         newAuraLookup[trackedAura.auraInstanceID] = true -- Add to lookup to prevent re-adding
                         if BoxxyAuras.DEBUG then
-                            print(string.format("Holding expired aura '%s' in frame %s (hovered=%s, timer=%s)",
-                                trackedAura.name or "Unknown", frameType,
+                            print(string.format(
+                                "Holding expired aura '%s' in frame %s at position %d (hovered=%s, timer=%s)",
+                                trackedAura.name or "Unknown", frameType, i,
                                 tostring(BoxxyAuras.FrameHoverStates[frameType]),
                                 tostring(BoxxyAuras.FrameHoverTimers[frameKey] ~= nil)))
                         end
                     end
+                end
+
+                -- Insert expired auras back at their original positions
+                -- Sort by originalIndex in descending order to insert from back to front (avoids index shifting issues)
+                table.sort(expiredAurasWithPositions, function(a, b) return a.originalIndex > b.originalIndex end)
+                for _, expiredData in ipairs(expiredAurasWithPositions) do
+                    -- Insert at the original position, but clamp to list bounds
+                    local insertPos = math.min(expiredData.originalIndex, #newAuraList + 1)
+                    table.insert(newAuraList, insertPos, expiredData.aura)
                 end
             else
                 -- Clean up any forceExpired auras when hover state ends
@@ -1103,9 +1131,6 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
                     end
                 end
             end
-
-            -- Re-sort the list if we added expired auras, to maintain order
-            table.sort(newAuraList, SortAurasForDisplay)
 
             -- Create a lookup of existing aura instance IDs for efficient matching
             local existingAuraLookup = {}
@@ -1150,8 +1175,8 @@ BoxxyAuras.UpdateAuras = function(forceRefresh)
                     icon = BoxxyAuras.GetOrCreateIcon(iconPool, i, frame, "BoxxyAuras" .. frameType .. "Icon")
                     isNewAura = true
 
-                    -- Trigger tooltip scrape for the new aura
-                    if newAuraData.auraInstanceID and BoxxyAuras.AttemptTooltipScrape then
+                    -- Trigger tooltip scrape for the new aura (skip weapon enchants)
+                    if newAuraData.auraInstanceID and not newAuraData.isWeaponEnchant and BoxxyAuras.AttemptTooltipScrape then
                         local filter = newAuraData.auraType or (frameType == "Debuff" and "HARMFUL" or "HELPFUL")
                         BoxxyAuras.AttemptTooltipScrape(newAuraData.spellId, newAuraData.auraInstanceID, filter)
                     end
@@ -1225,9 +1250,479 @@ function BoxxyAuras.ReturnIconToPool(pool, icon)
     end
 end
 
+-- Add weapon enchants to the aura list
+function BoxxyAuras:AddWeaponEnchantsToAuraList(allAuras, existingTrackTimes)
+    -- GetWeaponEnchantInfo returns info for all weapon slots
+    local hasMainHandEnchant, mainHandExpiration, mainHandCharges, mainHandEnchantID,
+    hasOffHandEnchant, offHandExpiration, offHandCharges, offHandEnchantID,
+    hasRangedEnchant, rangedExpiration, rangedCharges, rangedEnchantID = GetWeaponEnchantInfo()
+
+    -- Main hand weapon enchant
+    if hasMainHandEnchant and mainHandExpiration and mainHandExpiration > 0 then
+        local enchantData = self:CreateWeaponEnchantAuraData("mainhand", mainHandExpiration, mainHandCharges,
+            mainHandEnchantID, existingTrackTimes)
+        if enchantData then
+            table.insert(allAuras, enchantData)
+            if self.DEBUG then
+                print(string.format("BoxxyAuras: Added main hand weapon enchant: %s (expires in: %.1fs)",
+                    enchantData.name or "Unknown", mainHandExpiration / 1000))
+            end
+        end
+    end
+
+    -- Off hand weapon enchant
+    if hasOffHandEnchant and offHandExpiration and offHandExpiration > 0 then
+        local enchantData = self:CreateWeaponEnchantAuraData("offhand", offHandExpiration, offHandCharges,
+            offHandEnchantID, existingTrackTimes)
+        if enchantData then
+            table.insert(allAuras, enchantData)
+            if self.DEBUG then
+                print(string.format("BoxxyAuras: Added off hand weapon enchant: %s (expires in: %.1fs)",
+                    enchantData.name or "Unknown", offHandExpiration / 1000))
+            end
+        end
+    end
+
+    -- Ranged weapon enchant (for older expansions)
+    if hasRangedEnchant and rangedExpiration and rangedExpiration > 0 then
+        local enchantData = self:CreateWeaponEnchantAuraData("ranged", rangedExpiration, rangedCharges, rangedEnchantID,
+            existingTrackTimes)
+        if enchantData then
+            table.insert(allAuras, enchantData)
+            if self.DEBUG then
+                print(string.format("BoxxyAuras: Added ranged weapon enchant: %s (expires in: %.1fs)",
+                    enchantData.name or "Unknown", rangedExpiration / 1000))
+            end
+        end
+    end
+
+    if self.DEBUG then
+        print(string.format("Weapon enchant scan: MH=%s, OH=%s, Ranged=%s",
+            tostring(hasMainHandEnchant), tostring(hasOffHandEnchant), tostring(hasRangedEnchant)))
+    end
+end
+
+-- Create aura data structure for weapon enchants
+function BoxxyAuras:CreateWeaponEnchantAuraData(slot, expiration, charges, enchantID, existingTrackTimes)
+    -- Generate a unique instance ID for weapon enchants
+    local instanceId = "weapon_enchant_" .. slot .. "_" .. (enchantID or 0)
+
+    -- Look up existing track time from the provided lookup table
+    local cachedTrackTime = existingTrackTimes and existingTrackTimes[instanceId]
+
+    -- For weapon enchants, we just get the weapon information
+    -- Following Blizzard's UI pattern: show weapon icon and weapon tooltip
+    local weaponName, weaponIcon, weaponQuality, slotID = self:GetWeaponEnchantDetails(slot, enchantID)
+
+    -- Build color-coded display name using weapon name and quality
+    local displayName = weaponName
+    if weaponName and weaponQuality then
+        local qualityColor = ITEM_QUALITY_COLORS[weaponQuality]
+        if qualityColor then
+            displayName = string.format("|c%s%s|r", qualityColor.hex, weaponName)
+        end
+    elseif not weaponName then
+        -- Fallback name if we can't get weapon info
+        if slot == "mainhand" then
+            displayName = "Main Hand Weapon"
+        elseif slot == "offhand" then
+            displayName = "Off Hand Weapon"
+        else
+            displayName = "Weapon"
+        end
+
+        if self.DEBUG then
+            print(string.format("Using fallback name for %s weapon enchant (enchantID: %d)", slot, enchantID or 0))
+        end
+    end
+
+    if not weaponIcon then
+        -- Use a generic weapon icon as fallback
+        weaponIcon = 135913 -- Generic enchant glow icon
+    end
+
+    -- Calculate expiration time (expiration is in milliseconds from GetWeaponEnchantInfo)
+    local expirationTime = 0
+    local duration = 0
+    if expiration and expiration > 0 then
+        expirationTime = GetTime() + (expiration / 1000)
+        duration = expiration / 1000
+    else
+        return nil -- No valid expiration means no enchant
+    end
+
+    -- Use cached originalTrackTime if available, otherwise set to current time for new enchants
+    -- This keeps weapon enchants in a stable position in the sort order
+    local originalTrackTime = cachedTrackTime or GetTime()
+
+    return {
+        name = displayName, -- Color-coded weapon name
+        icon = weaponIcon,  -- Weapon icon
+        duration = duration,
+        expirationTime = expirationTime,
+        applications = charges and charges > 0 and charges or nil,
+        spellId = nil,                        -- Set to nil - we'll use inventory tooltip instead
+        enchantID = enchantID,                -- Store the original enchant ID
+        auraInstanceID = instanceId,
+        slot = 0,                             -- Weapon enchants don't use normal aura slots
+        auraType = "HELPFUL",                 -- Weapon enchants are helpful effects
+        dispelName = nil,                     -- Weapon enchants typically can't be dispelled
+        isWeaponEnchant = true,               -- Flag to identify as weapon enchant
+        weaponSlot = slot,                    -- Track which weapon slot (mainhand/offhand)
+        slotID = slotID,                      -- Inventory slot ID (16 or 17) for tooltip
+        weaponName = weaponName,              -- Store weapon name separately
+        weaponQuality = weaponQuality,        -- Store weapon quality for coloring
+        originalTrackTime = originalTrackTime -- Add for sorting consistency
+    }
+end
+
+-- Get weapon enchant details - simplified to just return weapon info (matching Blizzard UI)
+function BoxxyAuras:GetWeaponEnchantDetails(slot, enchantID)
+    -- First, check if we have cached weapon info for this slot and enchant ID
+    local cacheKey = slot .. "_" .. (enchantID or 0)
+    if self.weaponEnchantCache[cacheKey] then
+        if self.DEBUG then
+            print(string.format("Using cached weapon info for %s enchant", slot))
+        end
+        return self.weaponEnchantCache[cacheKey].weaponName,
+            self.weaponEnchantCache[cacheKey].weaponIcon,
+            self.weaponEnchantCache[cacheKey].weaponQuality,
+            self.weaponEnchantCache[cacheKey].slotID
+    end
+
+    -- Get weapon information from inventory slot
+    local slotID = (slot == "mainhand") and 16 or 17 -- Main hand = 16, Off hand = 17
+
+    local weaponName = nil
+    local weaponIcon = nil
+    local weaponQuality = nil
+
+    -- Get weapon icon
+    weaponIcon = GetInventoryItemTexture("player", slotID)
+
+    -- Get weapon name and quality from item link
+    local itemLink = GetInventoryItemLink("player", slotID)
+    if itemLink then
+        weaponName = GetItemInfo(itemLink)
+        local _, _, itemQuality = GetItemInfo(itemLink)
+        weaponQuality = itemQuality
+    end
+
+    if self.DEBUG then
+        print(string.format("Weapon enchant on %s: weapon='%s', quality=%s, icon=%s",
+            slot, tostring(weaponName), tostring(weaponQuality), tostring(weaponIcon)))
+    end
+
+    -- Cache the weapon info including originalTrackTime for stable sorting
+    if weaponName and weaponIcon then
+        -- Preserve existing originalTrackTime if it exists
+        local existingTrackTime = self.weaponEnchantCache[cacheKey] and
+            self.weaponEnchantCache[cacheKey].originalTrackTime
+        self.weaponEnchantCache[cacheKey] = {
+            weaponName = weaponName,
+            weaponIcon = weaponIcon,
+            weaponQuality = weaponQuality,
+            slotID = slotID,
+            enchantID = enchantID,
+            slot = slot,
+            originalTrackTime = existingTrackTime or GetTime()
+        }
+    end
+
+    return weaponName, weaponIcon, weaponQuality, slotID
+end
+
+-- Helper function to get the full enchant spell name from a shortened version
+function BoxxyAuras:GetFullEnchantName(shortName)
+    if not shortName then return nil end
+
+    local lowerName = string.lower(shortName)
+
+    -- Map common shortened enchant names to their full spell names
+    local enchantNameMap = {
+        windfury = "Windfury Weapon",
+        flametongue = "Flametongue Weapon",
+        frostbrand = "Frostbrand Weapon",
+        earthliving = "Earthliving Weapon",
+        rockbiter = "Rockbiter Weapon",
+    }
+
+    -- Check if we have a mapping for this enchant
+    for short, full in pairs(enchantNameMap) do
+        if string.find(lowerName, short) then
+            return full
+        end
+    end
+
+    -- If no mapping found, return the original name (may already have "Weapon" suffix)
+    return shortName
+end
+
+-- Helper function to get the actual spell ID for an enchant (for proper tooltips)
+function BoxxyAuras:GetEnchantSpellId(enchantName)
+    if not enchantName then return nil end
+
+    local lowerName = string.lower(enchantName)
+
+    -- Map enchant names to their spell IDs (the actual spell that applies the buff)
+    -- Multiple IDs are tried in order - different expansions use different spell IDs
+    local enchantSpellMap = {
+        ["windfury weapon"] = { 33757, 8232, 10486 },     -- Windfury Weapon (various ranks/expansions)
+        ["flametongue weapon"] = { 318038, 8024, 10526 }, -- Flametongue Weapon (Shadowlands+, Classic, TBC)
+        ["frostbrand weapon"] = { 196834, 8033, 8038 },   -- Frostbrand Weapon (Legion+, Classic, TBC)
+        ["earthliving weapon"] = { 51730 },               -- Earthliving Weapon (WotLK+)
+        ["rockbiter weapon"] = { 193796, 8017, 8018 },    -- Rockbiter Weapon (Legion+, Classic, TBC)
+    }
+
+    -- Helper function to check if a spell ID exists and return it
+    local function validateSpellId(spellId)
+        if not spellId then return nil end
+        -- Use C_Spell.GetSpellName for modern WoW API
+        local spellName = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellId) or
+            GetSpellInfo and GetSpellInfo(spellId)
+        return spellName and spellId or nil
+    end
+
+    -- Try exact match first
+    local spellIds = enchantSpellMap[lowerName]
+    if spellIds then
+        -- If it's a table, try each spell ID in order
+        if type(spellIds) == "table" then
+            for _, spellId in ipairs(spellIds) do
+                local validId = validateSpellId(spellId)
+                if validId then
+                    if self.DEBUG then
+                        print(string.format("Found valid spell ID %d for '%s'", validId, enchantName))
+                    end
+                    return validId
+                end
+            end
+        else
+            return validateSpellId(spellIds)
+        end
+    end
+
+    -- Try partial match
+    for enchant, spellIds in pairs(enchantSpellMap) do
+        if string.find(lowerName, enchant) then
+            if type(spellIds) == "table" then
+                for _, spellId in ipairs(spellIds) do
+                    local validId = validateSpellId(spellId)
+                    if validId then
+                        if self.DEBUG then
+                            print(string.format("Found valid spell ID %d for '%s' (partial match)", validId, enchantName))
+                        end
+                        return validId
+                    end
+                end
+            else
+                return validateSpellId(spellIds)
+            end
+        end
+    end
+
+    if self.DEBUG then
+        print(string.format("No valid spell ID found for '%s'", enchantName))
+    end
+
+    return nil
+end
+
+-- Check if text represents a temporary weapon enchant
+function BoxxyAuras:IsTemporaryEnchantText(text)
+    if not text then return false end
+
+    local lowerText = string.lower(text)
+
+    -- First, exclude common weapon stat lines and item properties
+    local excludePatterns = {
+        "%+%d+ critical strike",
+        "%+%d+ haste",
+        "%+%d+ mastery",
+        "%+%d+ versatility",
+        "%+%d+ stamina",
+        "%+%d+ strength",
+        "%+%d+ agility",
+        "%+%d+ intellect",
+        "durability",
+        "binds when",
+        "item level",
+        "requires level",
+        "unique%-equipped",
+        "sell price",
+        "speed",
+        "damage per second",
+        "damage",
+        "armor",
+    }
+
+    for _, pattern in ipairs(excludePatterns) do
+        if string.find(lowerText, pattern) then
+            return false
+        end
+    end
+
+    -- Look for common temporary enchant keywords
+    -- These are broad patterns that should catch most temporary weapon buffs
+    local enchantKeywords = {
+        "weapon",      -- Catches "Windfury Weapon", "Flametongue Weapon", etc.
+        "oil",         -- Weapon oils
+        "stone",       -- Sharpening/grinding stones
+        "poison",      -- Rogue poisons
+        "imbue",       -- General imbue effects
+        "venom",       -- Poison variants
+        "sharpened",   -- Sharpening effects
+        "weighted",    -- Weightstone effects
+        "windfury",    -- Shaman enchants
+        "flametongue", -- Shaman enchants
+        "frostbrand",  -- Shaman enchants
+        "earthliving", -- Shaman enchants
+        "rockbiter",   -- Shaman enchants
+    }
+
+    for _, keyword in ipairs(enchantKeywords) do
+        if string.find(lowerText, keyword) then
+            -- Found a potential enchant keyword
+            -- Make sure it's not part of the weapon name itself by checking
+            -- if it's in a line that looks like an enchant effect
+            return true
+        end
+    end
+
+    -- Also check for pattern like "Something (X min)" or "Something (X sec)"
+    -- which is very common for temporary enchants
+    if string.find(lowerText, "%(%d+ min%)") or string.find(lowerText, "%(%d+ sec%)") then
+        return true
+    end
+
+    return false
+end
+
+-- Try to get enchant information directly from enchant ID
+-- This is now a minimal fallback - we prefer tooltip scanning
+function BoxxyAuras:GetEnchantInfoFromID(enchantID)
+    if not enchantID then return nil, nil end
+
+    -- Only keep a minimal set of static fallbacks for common enchants
+    -- These are used only if tooltip scanning fails
+    local knownEnchantNames = {
+        [5401] = { name = "Windfury Weapon", icon = 136018 },
+        [283] = { name = "Windfury Weapon", icon = 136018 },
+        [5] = { name = "Flametongue Weapon", icon = 135814 },
+        [5400] = { name = "Flametongue Weapon", icon = 135814 }, -- Another Flametongue ID
+        [2] = { name = "Frostbrand Weapon", icon = 135847 },
+        [1] = { name = "Rockbiter Weapon", icon = 136086 },
+        [3021] = { name = "Earthliving Weapon", icon = 136026 },
+    }
+
+    local knownEnchant = knownEnchantNames[enchantID]
+    if knownEnchant then
+        if self.DEBUG then
+            print(string.format("Using static fallback for enchantID %d: '%s'", enchantID, knownEnchant.name))
+        end
+        return knownEnchant.name, knownEnchant.icon
+    end
+
+    if self.DEBUG then
+        print(string.format("No static fallback for enchantID: %d", enchantID))
+    end
+
+    return nil, nil
+end -- Try to get an appropriate icon for the enchant based on its name
+
+function BoxxyAuras:GetEnchantIconFromName(enchantName)
+    if not enchantName then return nil end
+
+    local name = string.lower(enchantName)
+
+    -- Common shaman weapon imbues
+    if string.find(name, "windfury") then
+        return 136018 -- Windfury weapon icon
+    elseif string.find(name, "flametongue") then
+        return 135814 -- Flametongue weapon icon
+    elseif string.find(name, "frostbrand") then
+        return 135847 -- Frostbrand weapon icon
+    elseif string.find(name, "earthliving") then
+        return 136026 -- Earthliving weapon icon
+    elseif string.find(name, "rockbiter") then
+        return 136086 -- Rockbiter weapon icon
+        -- Common temporary weapon oils/enchants
+    elseif string.find(name, "oil") then
+        return 134939 -- Generic oil icon
+    elseif string.find(name, "poison") or string.find(name, "venom") then
+        return 132273 -- Poison icon
+    elseif string.find(name, "stone") or string.find(name, "sharp") or string.find(name, "weight") then
+        return 135225 -- Sharpening/grinding stone icon
+    end
+
+    -- Default enchant icon for unrecognized enchants
+    return 135913
+end
+
+-- Scan and cache weapon enchant information for all equipped weapons
+function BoxxyAuras:ScanAndCacheWeaponEnchants()
+    -- Get current weapon enchant info
+    local hasMainHandEnchant, mainHandExpiration, mainHandCharges, mainHandEnchantID,
+    hasOffHandEnchant, offHandExpiration, offHandCharges, offHandEnchantID = GetWeaponEnchantInfo()
+
+    if self.DEBUG then
+        print("BoxxyAuras: Scanning weapon enchants...")
+        print(string.format("  Main Hand: hasEnchant=%s, ID=%s", tostring(hasMainHandEnchant),
+            tostring(mainHandEnchantID)))
+        print(string.format("  Off Hand: hasEnchant=%s, ID=%s", tostring(hasOffHandEnchant), tostring(offHandEnchantID)))
+    end
+
+    -- Clear cache entries for slots that no longer have enchants
+    if not hasMainHandEnchant then
+        for key in pairs(self.weaponEnchantCache) do
+            if string.find(key, "^mainhand_") then
+                self.weaponEnchantCache[key] = nil
+                if self.DEBUG then
+                    print("  Cleared mainhand cache entry: " .. key)
+                end
+            end
+        end
+    end
+
+    if not hasOffHandEnchant then
+        for key in pairs(self.weaponEnchantCache) do
+            if string.find(key, "^offhand_") then
+                self.weaponEnchantCache[key] = nil
+                if self.DEBUG then
+                    print("  Cleared offhand cache entry: " .. key)
+                end
+            end
+        end
+    end
+
+    -- Scan and cache main hand enchant if present
+    if hasMainHandEnchant and mainHandEnchantID then
+        self:GetWeaponEnchantDetails("mainhand", mainHandEnchantID)
+    end
+
+    -- Scan and cache off hand enchant if present
+    if hasOffHandEnchant and offHandEnchantID then
+        self:GetWeaponEnchantDetails("offhand", offHandEnchantID)
+    end
+
+    if self.DEBUG then
+        print("BoxxyAuras: Weapon enchant scan complete")
+    end
+end
+
 function BoxxyAuras:GetSortedAurasForFrame(frameType)
     local allAuras = {}
     local currentSettings = self:GetCurrentProfileSettings()
+
+    -- Build a lookup of existing originalTrackTime values to preserve sort order
+    local existingTrackTimes = {}
+    if self.auraTracking and self.auraTracking[frameType] then
+        for _, trackedAura in ipairs(self.auraTracking[frameType]) do
+            if trackedAura.auraInstanceID and trackedAura.originalTrackTime then
+                existingTrackTimes[trackedAura.auraInstanceID] = trackedAura.originalTrackTime
+            end
+        end
+    end
 
     -- Determine which auras to fetch based on demo mode
     if self.Options and self.Options.demoModeActive and self.demoAuras then
@@ -1265,11 +1760,16 @@ function BoxxyAuras:GetSortedAurasForFrame(frameType)
                         if auraData then
                             auraData.slot = slot
                             auraData.auraType = filter
+                            -- Preserve originalTrackTime from existing tracked auras, or set to current time for new auras
+                            auraData.originalTrackTime = existingTrackTimes[auraData.auraInstanceID] or GetTime()
                             table.insert(allAuras, auraData)
                         end
                     end
                 end
             end
+
+            -- Add weapon enchants for custom frames (they can show as helpful effects)
+            self:AddWeaponEnchantsToAuraList(allAuras, existingTrackTimes)
         else
             -- For Buff/Debuff, fetch only the specific type
             local filter = (frameType == "Debuff") and "HARMFUL" or "HELPFUL"
@@ -1281,9 +1781,16 @@ function BoxxyAuras:GetSortedAurasForFrame(frameType)
                     if auraData then
                         auraData.slot = slot
                         auraData.auraType = filter
+                        -- Preserve originalTrackTime from existing tracked auras, or set to current time for new auras
+                        auraData.originalTrackTime = existingTrackTimes[auraData.auraInstanceID] or GetTime()
                         table.insert(allAuras, auraData)
                     end
                 end
+            end
+
+            -- Add weapon enchants to Buff frames (they are helpful effects)
+            if filter == "HELPFUL" then
+                self:AddWeaponEnchantsToAuraList(allAuras, existingTrackTimes)
             end
         end
     end
@@ -1467,8 +1974,9 @@ eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 eventFrame:RegisterEvent("UNIT_AURA")
-eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED") -- Combat end event
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")   -- Combat end event
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:RegisterEvent("WEAPON_ENCHANT_CHANGED") -- Weapon enchant events
 
 -- Key event handling frame for arrow key nudging
 local keyEventFrame = CreateFrame("Frame")
@@ -1634,6 +2142,9 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         -- Initialize healing absorb tracking
         BoxxyAuras:InitializeHealingAbsorbTracking()
 
+        -- Scan and cache weapon enchants on login
+        BoxxyAuras:ScanAndCacheWeaponEnchants()
+
         -- Force a full update on login to ensure all auras are displayed correctly
         BoxxyAuras.UpdateAuras(true)
 
@@ -1720,7 +2231,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
 
                         -- Start a timer to clean up after 30 seconds if no more absorption occurs
                         trackingData.cleanupTimer = C_Timer.NewTimer(30, function()
-                            if BoxxyAuras.healingAbsorbTracking[trackingKey] then
+                            if BoxxyAuras.healingAbsorbTracking and BoxxyAuras.healingAbsorbTracking[trackingKey] then
                                 BoxxyAuras.healingAbsorbTracking[trackingKey] = nil
                                 -- Update visuals to hide the progress bar
                                 BoxxyAuras:UpdateHealingAbsorbVisuals(trackingKey, nil)
@@ -1829,6 +2340,9 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                             lastUpdate = GetTime(),
                             fullyConsumed = false
                         }
+                        if not BoxxyAuras.healingAbsorbTracking then
+                            BoxxyAuras.healingAbsorbTracking = {}
+                        end
                         BoxxyAuras.healingAbsorbTracking[trackingKey] = trackingData
 
                         if BoxxyAuras.DEBUG then
@@ -2036,6 +2550,17 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         if currentSettings and not currentSettings.lockFrames then
             BoxxyAuras.EnableKeyboardHandling()
         end
+    elseif event == "WEAPON_ENCHANT_CHANGED" then
+        -- Weapon enchant changed, scan and cache enchant information
+        if BoxxyAuras.DEBUG then
+            print("BoxxyAuras: WEAPON_ENCHANT_CHANGED event received")
+        end
+
+        -- Scan and cache weapon enchant names from tooltips
+        BoxxyAuras:ScanAndCacheWeaponEnchants()
+
+        -- Trigger aura update to include/remove weapon enchants
+        BoxxyAuras.UpdateAuras()
     end
 end)
 

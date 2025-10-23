@@ -935,21 +935,14 @@ function BoxxyAuras.FrameHandler.UpdateAurasInFrame(frameType, overrideNumIconsW
     -- Loop through auras and place them
     for i, icon in ipairs(iconsToDisplay) do
         if icon and icon.frame then
-            local actualIndex = i
+            local col = (i - 1) % numIconsWide
+            local row = math.floor((i - 1) / numIconsWide)
 
-            -- For RIGHT alignment, reverse the order within each row so newer auras appear on the left
+            -- For RIGHT alignment, reverse the column position so new auras (appended to end) appear on left
             if alignment == "RIGHT" then
-                local row = math.floor((i - 1) / numIconsWide)
-                local col = (i - 1) % numIconsWide
                 local iconsInThisRow = math.min(numIconsWide, numAuras - (row * numIconsWide))
-
-                -- Reverse the column position within this row
-                local reversedCol = (iconsInThisRow - 1) - col
-                actualIndex = (row * numIconsWide) + reversedCol + 1
+                col = (iconsInThisRow - 1) - col
             end
-
-            local col = (actualIndex - 1) % numIconsWide
-            local row = math.floor((actualIndex - 1) / numIconsWide)
 
             -- Calculate how many icons are in this row
             local iconsInThisRow = math.min(numIconsWide, numAuras - (row * numIconsWide))

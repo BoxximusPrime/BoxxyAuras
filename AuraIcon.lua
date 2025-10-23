@@ -505,8 +505,16 @@ function AuraIcon.New(parentFrame, index, baseName)
                     LibWindow.SavePosition(instance.parentDisplayFrame)
                 end
             end
-        elseif button == "RightButton" and instance.auraType == "HELPFUL" and not InCombatLockdown() then
-            if instance.auraInstanceID then
+        elseif button == "RightButton" and not InCombatLockdown() then
+            -- Handle weapon enchant cancellation
+            if instance.isWeaponEnchant and instance.slotID then
+                -- For weapon enchants, use CancelUnitBuff with the inventory slot
+                CancelUnitBuff("player", instance.slotID)
+                if BoxxyAuras.DEBUG then
+                    print(string.format("Cancelled weapon enchant at slot %d", instance.slotID))
+                end
+                -- Handle regular aura cancellation
+            elseif instance.auraType == "HELPFUL" and instance.auraInstanceID then
                 local buffIndex
                 for i = 1, 40 do
                     local auraData = C_UnitAuras.GetAuraDataByIndex and
@@ -603,11 +611,18 @@ function AuraIcon:Display(auraData, index, auraType, isNewAura)
     self.slot = auraData.slot
     self.auraKey = auraData.spellId
     self.dispelName = auraData.dispelName
+    self.isWeaponEnchant = auraData.isWeaponEnchant -- Track if this is a weapon enchant
+    self.slotID = auraData.slotID                   -- Inventory slot ID for weapon enchant tooltips
 
     -- Section 2: Get frame settings and apply visuals
     local settings = GetFrameSettings(self.parentDisplayFrame)
 
     self:Resize(settings.iconSize, settings.textSize)
+
+    -- Ensure font sizes are correct (in case Resize was skipped due to same size)
+    -- This is critical for when icons are reused from the pool
+    ApplyFontSizes(self.frame.durationText, self.frame.countText, settings.textSize)
+
     self.textureWidget:SetTexture(auraData.icon)
 
     -- Handle stack count display
@@ -814,6 +829,120 @@ SlashCmdList["BOXXYAURASABSORB"] = function(msg)
     end
 end
 
+-- Debug command for testing weapon enchant detection
+SLASH_BOXXYAURASWEAPON1 = "/baweapon"
+SlashCmdList["BOXXYAURASWEAPON"] = function(msg)
+    if not BoxxyAuras.DEBUG then
+        print("BoxxyAuras: Enable DEBUG mode first (/badebug)")
+        return
+    end
+
+    -- Handle clear cache command
+    if msg == "clear" then
+        print("BoxxyAuras: Clearing weapon enchant cache...")
+        local cleared = 0
+        for instanceId, _ in pairs(BoxxyAuras.AllAuras or {}) do
+            if string.find(instanceId, "weapon_enchant_") then
+                BoxxyAuras.AllAuras[instanceId] = nil
+                cleared = cleared + 1
+            end
+        end
+        print(string.format("Cleared %d weapon enchant cache entries", cleared))
+        return
+    end
+
+    print("BoxxyAuras: Weapon Enchant Debug Info")
+    print("=====================================")
+
+    -- Check GetWeaponEnchantInfo
+    local hasMainHandEnchant, mainHandExpiration, mainHandCharges, mainHandEnchantID,
+    hasOffHandEnchant, offHandExpiration, offHandCharges, offHandEnchantID,
+    hasRangedEnchant, rangedExpiration, rangedCharges, rangedEnchantID = GetWeaponEnchantInfo()
+
+    print(string.format("GetWeaponEnchantInfo results:"))
+    print(string.format("  Main Hand - hasEnchant: %s, ID: %s, expires: %s ms, charges: %s",
+        tostring(hasMainHandEnchant), tostring(mainHandEnchantID), tostring(mainHandExpiration),
+        tostring(mainHandCharges)))
+    print(string.format("  Off Hand - hasEnchant: %s, ID: %s, expires: %s ms, charges: %s",
+        tostring(hasOffHandEnchant), tostring(offHandEnchantID), tostring(offHandExpiration), tostring(offHandCharges)))
+    print(string.format("  Ranged - hasEnchant: %s, ID: %s, expires: %s ms, charges: %s",
+        tostring(hasRangedEnchant), tostring(rangedEnchantID), tostring(rangedExpiration), tostring(rangedCharges)))
+
+    -- Also scan the weapon tooltip manually to see what's there
+    print("\\nWeapon tooltip scan:")
+    local slotID = 16 -- Main hand slot
+    local tooltip = CreateFrame("GameTooltip", "BoxxyAurasDebugWeaponTooltip", nil, "GameTooltipTemplate")
+    tooltip:SetOwner(UIParent, "ANCHOR_NONE")
+    tooltip:SetInventoryItem("player", slotID)
+
+    for i = 1, tooltip:NumLines() do
+        local line = _G["BoxxyAurasDebugWeaponTooltipTextLeft" .. i]
+        if line then
+            local text = line:GetText()
+            local r, g, b = line:GetTextColor()
+            if text then
+                local isTemp = BoxxyAuras:IsTemporaryEnchantText(text)
+                print(string.format("  Line %d: '%s' (r=%.2f, g=%.2f, b=%.2f) [TempEnchant: %s]", i, text, r or 0, g or 0,
+                    b or 0, tostring(isTemp)))
+            end
+        end
+    end
+    tooltip:Hide()
+
+    if hasMainHandEnchant and mainHandExpiration and mainHandExpiration > 0 then
+        -- Try to get enchant details
+        local name, icon = BoxxyAuras:GetWeaponEnchantDetails("mainhand", mainHandEnchantID)
+        print(string.format("Enchant details:"))
+        print(string.format("  name: %s", tostring(name)))
+        print(string.format("  icon: %s", tostring(icon)))
+
+        -- Also test the static mapping directly
+        print("\\nTesting direct enchant ID mapping:")
+        local staticName, staticIcon = BoxxyAuras:GetEnchantInfoFromID(mainHandEnchantID)
+        print(string.format("  Direct mapping result: name='%s', icon=%s", tostring(staticName), tostring(staticIcon)))
+
+        -- Try to create aura data
+        local auraData = BoxxyAuras:CreateWeaponEnchantAuraData("mainhand", mainHandExpiration, mainHandCharges,
+            mainHandEnchantID)
+        if auraData then
+            print(string.format("Created aura data:"))
+            print(string.format("  name: %s", auraData.name))
+            print(string.format("  icon: %s", auraData.icon))
+            print(string.format("  duration: %.1fs", auraData.duration))
+            print(string.format("  auraInstanceID: %s", auraData.auraInstanceID))
+        else
+            print("Failed to create aura data")
+        end
+    else
+        print("No valid main hand enchant detected")
+    end
+
+    print("\\n=== Checking AllAuras Cache ===")
+    print("Looking for weapon enchant in cache:")
+    if hasMainHandEnchant and mainHandEnchantID then
+        local weaponInstanceId = "weapon_enchant_mainhand_" .. mainHandEnchantID
+        local cachedData = BoxxyAuras.AllAuras[weaponInstanceId]
+        if cachedData then
+            print(string.format("  Found cached data for %s:", weaponInstanceId))
+            print(string.format("    Cached name: %s", tostring(cachedData.name)))
+            print(string.format("    Scraped via: %s", tostring(cachedData.scrapedVia)))
+            print(string.format("    Is placeholder: %s", tostring(cachedData.isPlaceholder)))
+            if cachedData.lines then
+                print(string.format("    Has %d tooltip lines", #cachedData.lines))
+            end
+        else
+            print(string.format("  No cached data found for %s", weaponInstanceId))
+        end
+    end
+
+    print("\\n=== Testing Manual Update ===")
+    print("Triggering manual aura update...")
+    BoxxyAuras.UpdateAuras()
+    print("Manual update completed.")
+
+    print("=====================================")
+end
+
 -- =============================================================== --
 -- AuraIcon.UpdateDurationDisplay
 -- Per-frame update driving countdown text, tint and manager registration.
@@ -864,6 +993,12 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
         -- Update text if changed or visibility changed
         if currentFormattedText ~= self.lastFormattedDurationText or showText ~= self.frame.durationText:IsShown() then
             if showText then
+                -- If we were previously showing the infinity symbol, restore normal font size
+                if self.lastFormattedDurationText == "∞" then
+                    local settings = GetFrameSettings(self.parentDisplayFrame)
+                    ApplyFontSizes(self.frame.durationText, self.frame.countText, settings.textSize)
+                end
+
                 self.frame.durationText:SetText(currentFormattedText)
                 self.frame.durationText:Show()
             else
@@ -900,10 +1035,60 @@ function AuraIcon.UpdateDurationDisplay(self, currentTime)
             end
         end
     else
-        -- Handle permanent auras (ensure text hidden, tint reset, OnUpdate nil)
-        if self.frame.durationText:IsShown() or self.lastFormattedDurationText then
-            self.frame.durationText:Hide()
-            self.lastFormattedDurationText = nil
+        -- Handle permanent auras (infinite duration)
+        local currentSettings = BoxxyAuras:GetCurrentProfileSettings()
+        local showInfiniteSymbol = currentSettings and currentSettings.showInfiniteDuration
+
+        if showInfiniteSymbol then
+            -- Show ∞ symbol for infinite duration auras with scaled up font
+            local infiniteSymbol = "∞"
+            if self.lastFormattedDurationText ~= infiniteSymbol or not self.frame.durationText:IsShown() then
+                -- Get current text size and scale it up for the infinity symbol
+                local settings = GetFrameSettings(self.parentDisplayFrame)
+                local baseTextSize = settings.textSize
+                local infinityTextSize = baseTextSize * 2 -- Scale up 2x for better visibility
+
+                -- Get font path and apply scaled font
+                local fontPath = nil
+                local textColor = nil
+                if currentSettings then
+                    if currentSettings.textFont then
+                        local Media = LibStub and LibStub("LibSharedMedia-3.0", true)
+                        if Media then
+                            fontPath = Media:Fetch("font", currentSettings.textFont, true)
+                        end
+                    end
+                    if currentSettings.textColor then
+                        textColor = currentSettings.textColor
+                    end
+                end
+
+                local currentFontPath, _, fontFlags = self.frame.durationText:GetFont()
+                local finalFontPath = fontPath or currentFontPath
+                if finalFontPath then
+                    self.frame.durationText:SetFont(finalFontPath, infinityTextSize, fontFlags)
+                end
+
+                if textColor then
+                    self.frame.durationText:SetTextColor(textColor.r, textColor.g, textColor.b, textColor.a)
+                end
+
+                self.frame.durationText:SetText(infiniteSymbol)
+                self.frame.durationText:Show()
+                self.lastFormattedDurationText = infiniteSymbol
+            end
+        else
+            -- Hide duration text for infinite duration auras (restore normal font size first)
+            if self.frame.durationText:IsShown() or self.lastFormattedDurationText then
+                -- If we were showing the infinity symbol, restore normal font size
+                if self.lastFormattedDurationText == "∞" then
+                    local settings = GetFrameSettings(self.parentDisplayFrame)
+                    ApplyFontSizes(self.frame.durationText, self.frame.countText, settings.textSize)
+                end
+
+                self.frame.durationText:Hide()
+                self.lastFormattedDurationText = nil
+            end
         end
 
         if self.lastIsExpiredState or self.lastIsParentHoveredState then
@@ -928,7 +1113,8 @@ function AuraIcon.OnEnter(self)
     self.isMouseOver = true
     self.needsTooltipUpdate = true
     self.tooltipUpdateTimer = 0
-    GameTooltip:SetOwner(self.frame, "ANCHOR_RIGHT")
+    -- Position tooltip below the aura icon so it doesn't cover the frame
+    GameTooltip:SetOwner(self.frame, "ANCHOR_BOTTOM")
     GameTooltip:ClearLines()
     AuraIcon.RefreshTooltipContent(self)
     GameTooltip:Show()
@@ -1001,11 +1187,26 @@ function AuraIcon.RefreshTooltipContent(self)
 
     GameTooltip:ClearLines()
 
+    -- Debug logging for tooltip refresh
+    if BoxxyAuras.DEBUG then
+        print(string.format("RefreshTooltipContent: Starting for aura '%s'", tostring(self.name)))
+        print(string.format("  auraInstanceID = '%s'", tostring(self.auraInstanceID)))
+        print(string.format("  spellId = %s", tostring(self.spellId)))
+        print(string.format("  auraType = '%s'", tostring(self.auraType)))
+        print(string.format("  isWeaponEnchant = %s", tostring(self.isWeaponEnchant)))
+    end
+
     if isPermanent or remaining > 0 then
+        if BoxxyAuras.DEBUG then
+            print("RefreshTooltipContent: Aura is active, proceeding with tooltip setup")
+        end
         local tooltipSet = false
 
         -- Handle custom auras
         if self.auraType == "CUSTOM" then
+            if BoxxyAuras.DEBUG then
+                print("RefreshTooltipContent: Handling as CUSTOM aura")
+            end
             local cachedData = self.auraInstanceID and BoxxyAuras.AllAuras[self.auraInstanceID]
             if cachedData and cachedData.lines then
                 -- Use text wrapping to control tooltip width
@@ -1034,8 +1235,13 @@ function AuraIcon.RefreshTooltipContent(self)
             end
         end
 
-        -- Try SetUnitAura for regular auras
-        if not tooltipSet and self.auraType ~= "CUSTOM" then
+        -- Try SetUnitAura for regular auras (but skip for weapon enchants)
+        if not tooltipSet and self.auraType ~= "CUSTOM" and not self.isWeaponEnchant then
+            if BoxxyAuras.DEBUG then
+                print(string.format("RefreshTooltipContent: Trying SetUnitAura path for non-weapon-enchant aura"))
+                print(string.format("  auraInstanceID = '%s', spellId = %s", tostring(self.auraInstanceID),
+                    tostring(self.spellId)))
+            end
             if self.auraInstanceID and self.auraType then
                 local currentIndex
                 local filterToUse = self.originalAuraType or self.auraType
@@ -1047,6 +1253,12 @@ function AuraIcon.RefreshTooltipContent(self)
                     end
                 end
                 if currentIndex then
+                    if BoxxyAuras.DEBUG then
+                        print(string.format("RefreshTooltipContent: Found aura at index %d, calling SetUnitAura",
+                            currentIndex))
+                        print(string.format("  auraInstanceID = '%s', spellId = %s", tostring(self.auraInstanceID),
+                            tostring(self.spellId)))
+                    end
                     GameTooltip:SetUnitAura("player", currentIndex, filterToUse)
 
                     -- Add caster information immediately - no timer delays to avoid flickering
@@ -1067,8 +1279,24 @@ function AuraIcon.RefreshTooltipContent(self)
             end
         end
 
-        -- Fallback to spell ID
-        if not tooltipSet and self.spellId then
+        -- Handle weapon enchants by showing the weapon tooltip (includes enchant info)
+        if not tooltipSet and self.isWeaponEnchant and self.slotID then
+            if BoxxyAuras.DEBUG then
+                print("RefreshTooltipContent: Using SetInventoryItem for weapon enchant")
+                print(string.format("  slotID = %s", tostring(self.slotID)))
+            end
+
+            -- Use SetInventoryItem to show the weapon tooltip with enchant information
+            GameTooltip:SetInventoryItem("player", self.slotID)
+            tooltipSet = true
+        end
+
+        -- Fallback to spell ID for regular auras
+        if not tooltipSet and self.spellId and not self.isWeaponEnchant then
+            if BoxxyAuras.DEBUG then
+                print("RefreshTooltipContent: Using SetSpellByID fallback")
+                print(string.format("  spellId = %s", tostring(self.spellId)))
+            end
             GameTooltip:SetSpellByID(self.spellId)
 
             -- Add caster information if available (check if TipTac already added one)
@@ -1087,8 +1315,59 @@ function AuraIcon.RefreshTooltipContent(self)
         if not tooltipSet then
             if BoxxyAuras.DEBUG then
                 print("RefreshTooltipContent: Using fallback tooltip text")
+                print(string.format("  self.name = '%s'", tostring(self.name)))
+                print(string.format("  self.auraInstanceID = '%s'", tostring(self.auraInstanceID)))
+                print(string.format("  self.spellId = %s", tostring(self.spellId)))
+                if self.isWeaponEnchant then
+                    print("  This is a weapon enchant")
+                end
             end
-            GameTooltip:AddLine(self.name or "Unknown Aura")
+
+            -- Enhanced tooltip for weapon enchants
+            if self.isWeaponEnchant then
+                -- Add the enchant name as the main title
+                GameTooltip:AddLine(self.name or "Weapon Enchant", 1, 1, 1, true)
+
+                -- Add weapon enchant type information
+                local weaponSlot = "Main Hand"
+                if self.auraInstanceID and string.find(self.auraInstanceID, "offhand") then
+                    weaponSlot = "Off Hand"
+                elseif self.auraInstanceID and string.find(self.auraInstanceID, "ranged") then
+                    weaponSlot = "Ranged"
+                end
+                GameTooltip:AddLine("Weapon Enchant (" .. weaponSlot .. ")", 0.5, 0.8, 1.0, true)
+
+                -- Add remaining time if available
+                local currentTime = GetTime()
+                local remaining = (self.expirationTime or 0) - currentTime
+                if remaining > 0 then
+                    local remainingText
+                    if remaining >= 3600 then
+                        remainingText = string.format("%.1f hours remaining", remaining / 3600)
+                    elseif remaining >= 60 then
+                        remainingText = string.format("%.1f minutes remaining", remaining / 60)
+                    else
+                        remainingText = string.format("%.0f seconds remaining", remaining)
+                    end
+                    GameTooltip:AddLine(remainingText, 1, 0.82, 0, true)
+                end
+
+                -- Add a hint about the enchant
+                GameTooltip:AddLine(" ", 1, 1, 1, true) -- Blank line
+                if string.find(string.lower(self.name or ""), "windfury") then
+                    GameTooltip:AddLine("Gives your weapon a chance to strike with the power of wind.", 0.8, 0.8, 0.8,
+                        true)
+                elseif string.find(string.lower(self.name or ""), "flametongue") then
+                    GameTooltip:AddLine("Imbues your weapon with fire, increasing spell power.", 0.8, 0.8, 0.8, true)
+                elseif string.find(string.lower(self.name or ""), "frostbrand") then
+                    GameTooltip:AddLine("Imbues your weapon with frost, slowing enemies.", 0.8, 0.8, 0.8, true)
+                else
+                    GameTooltip:AddLine("Temporary weapon enhancement", 0.8, 0.8, 0.8, true)
+                end
+            else
+                -- Regular fallback for non-weapon-enchant auras
+                GameTooltip:AddLine(self.name or "Unknown Aura")
+            end
         end
     elseif not isPermanent and remaining <= 0 then
         -- Show cached data for expired auras
@@ -1702,6 +1981,8 @@ function AuraIcon:Reset()
     self.slot = nil
     self.auraKey = nil
     self.dispelName = nil
+    self.isWeaponEnchant = nil -- Reset weapon enchant flag
+    self.slotID = nil          -- Reset inventory slot ID
 
     -- Stop any running animations
     if self.newAuraAnimGroup and self.newAuraAnimGroup:IsPlaying() then
@@ -1714,6 +1995,11 @@ function AuraIcon:Reset()
     -- Reset visual elements
     if self.textureWidget then
         self.textureWidget:SetVertexColor(1, 1, 1) -- Reset to normal color
+    end
+
+    -- Reset font sizes to normal (in case they were scaled up for infinity symbol)
+    if self.frame.durationText and self.frame.countText and self.currentTextSize then
+        ApplyFontSizes(self.frame.durationText, self.frame.countText, self.currentTextSize)
     end
 
     -- Clear any existing border styling to ensure clean state for reuse
